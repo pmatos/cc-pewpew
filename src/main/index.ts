@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
+import installExtension, { REACT_DEVELOPER_TOOLS } from 'electron-devtools-installer'
 import { getConfig, resolvePath } from './config'
 import { scanProjects } from './project-scanner'
 
@@ -22,7 +23,15 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  if (process.env.ELECTRON_RENDERER_URL) {
+    try {
+      await installExtension(REACT_DEVELOPER_TOOLS)
+    } catch {
+      // React DevTools install can fail in some environments
+    }
+  }
+
   ipcMain.handle('projects:scan', async () => {
     const config = getConfig()
     const dirs = config.scanDirs.map(resolvePath)
