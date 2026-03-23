@@ -55,6 +55,25 @@ body,
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.refresh-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.refresh-btn:hover {
+  background: var(--border);
+  color: var(--text-primary);
 }
 
 .sidebar-content {
@@ -75,6 +94,80 @@ body,
 .canvas-placeholder {
   color: var(--text-secondary);
   font-size: 16px;
+}
+
+.project-tree {
+  user-select: none;
+}
+
+.project-loading,
+.project-empty {
+  padding: 12px 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.project-node {
+  margin-bottom: 1px;
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  gap: 4px;
+}
+
+.project-row:hover {
+  background: var(--border);
+}
+
+.project-toggle {
+  width: 14px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.project-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.badge-ready {
+  color: #4ade80;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.badge-unsetup {
+  color: var(--text-secondary);
+  font-size: 10px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.worktree-list {
+  padding-left: 26px;
+}
+
+.worktree-item {
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-branch {
+  opacity: 0.6;
 }
 
 .statusbar {

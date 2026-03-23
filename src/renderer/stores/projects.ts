@@ -12,7 +12,12 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
   loading: false,
   scanProjects: async () => {
     set({ loading: true })
-    // Will be wired to window.api.scanProjects() in Phase 3
-    set({ loading: false })
+    try {
+      const projects = await window.api.scanProjects()
+      set({ projects, loading: false })
+    } catch (err) {
+      console.error('scanProjects failed:', err)
+      set({ loading: false })
+    }
   },
 }))

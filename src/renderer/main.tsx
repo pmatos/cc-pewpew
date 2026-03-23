@@ -6,8 +6,3 @@ const root = document.getElementById('root')
 if (root) {
   createRoot(root).render(<App />)
 }
-
-// Temporary: verify scanner works (remove in Phase 4)
-window.api.scanProjects().then((projects) => {
-  console.log('scanProjects result:', projects)
-})

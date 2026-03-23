@@ -1,15 +1,15 @@
-import { resolve } from "path";
-import { defineConfig, externalizeDepsPlugin } from "electron-vite";
-import react from "@vitejs/plugin-react";
+import { resolve } from 'path'
+import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      outDir: "dist-electron/main",
+      outDir: 'dist-electron/main',
       rollupOptions: {
         input: {
-          index: resolve(__dirname, "src/main/index.ts"),
+          index: resolve(__dirname, 'src/main/index.ts'),
         },
       },
     },
@@ -17,29 +17,33 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      outDir: "dist-electron/preload",
+      outDir: 'dist-electron/preload',
+      lib: {
+        entry: resolve(__dirname, 'src/preload/index.ts'),
+      },
       rollupOptions: {
-        input: {
-          index: resolve(__dirname, "src/preload/index.ts"),
+        output: {
+          format: 'cjs',
+          entryFileNames: 'index.js',
         },
       },
     },
   },
   renderer: {
-    root: resolve(__dirname, "src/renderer"),
+    root: resolve(__dirname, 'src/renderer'),
     build: {
-      outDir: resolve(__dirname, "dist"),
+      outDir: resolve(__dirname, 'dist'),
       rollupOptions: {
         input: {
-          index: resolve(__dirname, "src/renderer/index.html"),
+          index: resolve(__dirname, 'src/renderer/index.html'),
         },
       },
     },
     resolve: {
       alias: {
-        "@": resolve(__dirname, "src/renderer"),
+        '@': resolve(__dirname, 'src/renderer'),
       },
     },
     plugins: [react()],
   },
-});
+})

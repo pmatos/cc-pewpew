@@ -72,8 +72,8 @@ function detectSetupState(repoPath: string): 'ready' | 'unsetup' {
   }
 }
 
-export async function scanProjects(scanDirs: string[]): Promise<Project[]> {
-  const projects: Project[] = []
+function discoverRepos(scanDirs: string[]): { name: string; path: string }[] {
+  const repos: { name: string; path: string }[] = []
 
   for (const dir of scanDirs) {
     if (!existsSync(dir)) continue
@@ -87,28 +87,42 @@ export async function scanProjects(scanDirs: string[]): Promise<Project[]> {
 
     for (const entry of entries) {
       const entryPath = join(dir, entry)
-
       try {
         if (!statSync(entryPath).isDirectory()) continue
       } catch {
         continue
       }
-
       if (!existsSync(join(entryPath, '.git'))) continue
-
-      const [branches, worktrees] = await Promise.all([
-        gitBranches(entryPath),
-        gitWorktrees(entryPath),
-      ])
-
-      projects.push({
-        name: entry,
-        path: entryPath,
-        branches,
-        worktrees,
-        setupState: detectSetupState(entryPath),
-      })
+      repos.push({ name: entry, path: entryPath })
     }
+  }
+
+  return repos.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+async function enrichRepo(repo: { name: string; path: string }): Promise<Project> {
+  const [branches, worktrees] = await Promise.all([gitBranches(repo.path), gitWorktrees(repo.path)])
+
+  return {
+    name: repo.name,
+    path: repo.path,
+    branches,
+    worktrees,
+    setupState: detectSetupState(repo.path),
+  }
+}
+
+const CONCURRENCY = 10
+
+export async function scanProjects(scanDirs: string[]): Promise<Project[]> {
+  const repos = discoverRepos(scanDirs)
+  const projects: Project[] = []
+
+  // Process in batches to avoid spawning hundreds of git processes
+  for (let i = 0; i < repos.length; i += CONCURRENCY) {
+    const batch = repos.slice(i, i + CONCURRENCY)
+    const results = await Promise.all(batch.map(enrichRepo))
+    projects.push(...results)
   }
 
   return projects.sort((a, b) => a.name.localeCompare(b.name))
