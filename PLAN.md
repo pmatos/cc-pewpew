@@ -391,56 +391,299 @@ when CC is asking for permission (relevant if not using `--dangerously-skip-perm
 
 ## Implementation Phases
 
-### Phase 0: Project Bootstrap
-- Initialize Electron + TypeScript + React project (electron-forge or electron-vite)
-- Set up build tooling (Vite for renderer, tsc for main)
-- Dark theme CSS foundation
-- Basic window with sidebar + main area layout
+Each phase is designed to be completable in a single Claude Code session. Every
+phase has a clear starting state, deliverables, and a way to verify it worked.
 
-### Phase 1: Project Scanner + Tree
-- Configurable scan directories (default: `~/dev`), stored in `config.json`
-- Scan for git repos, detect setup state (`unsetup` vs `ready`)
-- Display project tree in sidebar with setup state indicators
-- Setup flow: install hooks into `.claude/settings.local.json`, add to `.gitignore`
-- Context menu: "Setup for cc-pewpew" (unsetup repos), "New session..." (ready repos)
-- Support creating new repos (`git init`)
-- List existing git worktrees under each project
+---
 
-### Phase 2: Session Launcher
-- Git worktree creation (`git worktree add`)
-- Spawn Ghostty with correct flags
-- Track child processes (PID, exit detection)
-- Session state management (in-memory + persisted to `sessions.json`)
-- Basic session cards in main area (no thumbnails yet, just status text)
+### Phase 1: Electron scaffold
 
-### Phase 3: Hook System
-- Unix domain socket JSON-RPC server
-- Hook script (`notify.sh`)
-- Hook installer (writes to `.claude/settings.json` or global settings)
-- Event handling: SessionStart, Stop, PostToolUse, SessionEnd, Notification
-- Wire events to session state → UI updates reactively
+**Input:** Empty repo with PLAN.md and LICENSE.
+**Do:**
+- Initialize Electron + TypeScript + React project using electron-vite
+- Configure build tooling (Vite for renderer, tsc for main/preload)
+- Set up the three-process structure: `src/main/index.ts`, `src/preload/index.ts`,
+  `src/renderer/main.tsx` + `App.tsx` + `index.html`
+- Add shared types file: `src/shared/types.ts` with `Project`, `Session`,
+  `SessionStatus`, `HookEvent` type definitions
+- Verify `npm run dev` opens an Electron window
 
-### Phase 4: Window Thumbnails
-- `desktopCapturer` integration for periodic screenshots
-- Match Ghostty windows by title/class
-- Display thumbnails in session cards
-- Fallback handling for Wayland compositors where `desktopCapturer` fails
-- Click-to-focus: raise the Ghostty window
+**Verify:** `npm run dev` launches a window showing "cc-pewpew" in the title bar.
 
-### Phase 5: Canvas Polish
-- Zoom/pan with mouse wheel + drag
-- Cluster-based session grouping: dashed boundary per project, label, accent color
-- Auto-layout for clusters (force-directed or grid-pack), draggable to reposition
-- Smooth animations for state transitions
-- Edge indicators for off-screen sessions/clusters
-- Keyboard shortcuts (Ctrl+N new session, Ctrl+0 reset zoom, etc.)
+---
 
-### Phase 6: Quality of Life
-- Worktree cleanup dialog on session end (Delete / Keep / Keep+open)
-- Session logs viewer (parse CC transcript from `transcript_path`)
-- System tray icon with notification badge when sessions need input
-- Desktop notifications for "needs input" events
-- Remember window position/size, canvas zoom/pan across restarts
+### Phase 2: App shell layout + dark theme
+
+**Input:** Working Electron scaffold from Phase 1.
+**Do:**
+- Create the three-panel layout: left sidebar (250px), main canvas area, bottom
+  status bar
+- Dark theme CSS (dark background, subtle borders, monospace accents)
+- Sidebar has a header ("Projects") and an empty list area
+- Main area shows centered placeholder text ("No sessions")
+- Status bar shows "0 sessions"
+- Install Zustand, create empty stores: `stores/projects.ts`, `stores/sessions.ts`
+
+**Verify:** App launches with the three-panel dark layout. Resizing the window
+works. No functionality yet, just the visual shell.
+
+---
+
+### Phase 3: Project scanner backend
+
+**Input:** App shell from Phase 2.
+**Do:**
+- Create `src/main/project-scanner.ts`: scans a list of directories for git repos
+  (detects `.git`), returns `{ name, path, branches, worktrees, setupState }[]`
+- Create `src/main/config.ts`: reads/writes `~/.cc-pewpew/config.json` (stores
+  `scanDirs: string[]`, default `["~/dev"]`)
+- `setupState` detection: check if `.claude/settings.local.json` exists and
+  contains cc-pewpew hooks → `ready`, otherwise → `unsetup`
+- List existing git worktrees via `git worktree list --porcelain`
+- Wire to IPC: `projects:scan` handler returns project list to renderer
+- Expose via preload: `window.api.scanProjects()`
+
+**Verify:** Add a temporary `console.log` in the renderer that calls
+`window.api.scanProjects()` on mount and logs the result. It should list git
+repos from `~/dev` with correct setup states.
+
+---
+
+### Phase 4: Project tree UI
+
+**Input:** Scanner backend from Phase 3.
+**Do:**
+- Create `ProjectTree.tsx`: tree view that calls `window.api.scanProjects()` and
+  displays projects as expandable nodes
+- Each project shows: name, setup state badge (`[Setup]` button or green dot)
+- Expandable: shows worktrees underneath each project
+- Wire the projects Zustand store to hold scan results
+- Add a refresh button in the sidebar header
+- Style: dark theme, hover highlights, indented tree levels
+
+**Verify:** Sidebar shows actual git repos from `~/dev`. Projects with
+`.claude/settings.local.json` containing hooks show as ready. Others show `[Setup]`.
+
+---
+
+### Phase 5: Project setup flow + context menus
+
+**Input:** Project tree from Phase 4.
+**Do:**
+- Create `src/main/hook-installer.ts`:
+  - Writes/merges cc-pewpew hooks into `.claude/settings.local.json` (preserves
+    existing keys, only touches `hooks`)
+  - Ensures `.claude/settings.local.json` is in `.gitignore` (append if missing,
+    create `.gitignore` if needed)
+- Create `ContextMenu.tsx`: right-click context menus on project nodes
+  - Unsetup projects: "Setup for cc-pewpew"
+  - Ready projects: "New session..." (disabled for now — wired in Phase 7)
+  - All projects: "Open in file manager", "Rescan"
+- Wire setup action: calls `window.api.setupProject(path)` → runs hook installer
+  → rescans → UI updates to show project as `ready`
+- Create new repo support: "Create new project..." in sidebar footer, prompts for
+  name, runs `git init` in scan dir
+
+**Verify:** Right-click an unsetup project → "Setup for cc-pewpew" → project
+turns green/ready. Check that `.claude/settings.local.json` was created with
+hooks and is in `.gitignore`.
+
+---
+
+### Phase 6: Hook server (Unix socket)
+
+**Input:** Working app from Phase 5.
+**Do:**
+- Create `src/main/hook-server.ts`: Unix domain socket server at
+  `~/.cc-pewpew/ipc.sock`
+- Write socket path to `~/.cc-pewpew/socket-path` breadcrumb file
+- Newline-delimited JSON-RPC 2.0 protocol
+- Implement methods: `ping`, `session.start`, `session.stop`, `session.activity`,
+  `session.end`, `session.notification`
+- On incoming events: emit IPC to renderer (`hook:event` channel)
+- Clean up socket on app exit
+- Create `hooks/notify.sh` — the bash script that CC hooks will call
+- Copy `notify.sh` to `~/.cc-pewpew/hooks/` on app startup
+
+**Verify:** Start the app. In a separate terminal, send a test JSON-RPC message:
+`echo '{"jsonrpc":"2.0","method":"ping","id":1}' | socat - UNIX-CONNECT:$(cat ~/.cc-pewpew/socket-path)`
+— should get a response. Send a `session.start` event and verify it appears in
+the renderer console via IPC.
+
+---
+
+### Phase 7: Session launcher (Ghostty + worktrees)
+
+**Input:** Hook server from Phase 6.
+**Do:**
+- Create `src/main/session-manager.ts`:
+  - `createSession(projectPath, name?)`: creates git worktree
+    (`git -C <repo> worktree add .claude/worktrees/<name>`), spawns
+    `ghostty --class=com.ccpewpew.s.<id> --title="<project>/<name>" --gtk-single-instance=false --working-directory=<worktree-path> -e claude --dangerously-skip-permissions`
+  - Tracks child process PID, registers session in state
+  - Detects Ghostty exit via `child.on('exit')`
+- Persist session state to `~/.cc-pewpew/sessions.json`
+- Restore sessions on app restart (mark as `unknown` if Ghostty PID still alive,
+  `dead` if not)
+- Wire "New session..." context menu action → calls `window.api.createSession()`
+- Wire sessions Zustand store
+
+**Verify:** Right-click a ready project → "New session..." → Ghostty window opens
+with Claude Code running inside. Session appears in the store. Closing Ghostty →
+session state updates.
+
+---
+
+### Phase 8: Session cards UI
+
+**Input:** Session launcher from Phase 7.
+**Do:**
+- Create `SessionCard.tsx`: displays a single session as a card in the main area
+  - Header: `<project>/<worktree>` name
+  - Status badge: colored dot + text (Running / Needs input / Completed / Dead)
+  - Last activity timestamp
+  - Placeholder area for thumbnail (gray box for now)
+- Create `SessionCanvas.tsx`: lays out session cards in a simple CSS grid (no
+  zoom/pan yet)
+- Wire to sessions store: cards appear/disappear/update as sessions change
+- Wire hook events to session status: `session.start` → Running,
+  `session.stop` → Needs input, `session.activity` → update lastActivity,
+  `session.end` → Completed
+- Right-click card: "Kill session", "Focus window" (focus is a no-op for now)
+
+**Verify:** Launch a session → card appears as "Running". If CC stops and waits
+for input, card should flip to "Needs input" (visible via the Stop hook). When CC
+session ends, card shows "Completed".
+
+---
+
+### Phase 9: Window thumbnails + focus
+
+**Input:** Session cards from Phase 8.
+**Do:**
+- Create `src/main/window-capture.ts`: polls `desktopCapturer.getSources()` every
+  3 seconds, matches Ghostty windows by title pattern
+- Send thumbnails to renderer via IPC as base64 PNG
+- `SessionCard.tsx`: replace gray placeholder with actual thumbnail image
+- Create `src/main/window-focus.ts`: focuses a Ghostty window
+  - Detect display server (`XDG_SESSION_TYPE`)
+  - X11: `xdotool windowactivate $(xdotool search --class <class>)`
+  - Wayland: try Ghostty D-Bus `present-surface`, fall back to compositor IPC
+- Wire "Focus window" in card context menu and click-on-card action
+
+**Verify:** Running sessions show live Ghostty window thumbnails that update
+every few seconds. Clicking a card raises the corresponding Ghostty window.
+
+---
+
+### Phase 10: Canvas zoom and pan
+
+**Input:** Working cards + thumbnails from Phase 9.
+**Do:**
+- Replace CSS grid in `SessionCanvas.tsx` with a transform-based canvas:
+  - CSS `transform: scale(zoom) translate(panX, panY)` on a container div
+  - Dot-grid background on a `<canvas>` element (scales with zoom)
+- Mouse wheel → zoom (30%–100%), zooms toward cursor position
+- Click-drag on empty canvas → pan
+- Cards are absolutely positioned within the transformed container
+- Ctrl+0 → reset zoom to fit all cards, Ctrl+= / Ctrl+- → zoom in/out
+- Persist zoom/pan state across restarts (in `config.json`)
+
+**Verify:** Mouse wheel zooms in/out smoothly. Dragging pans. Cards stay
+positioned correctly at all zoom levels. Restart app → same zoom/pan.
+
+---
+
+### Phase 11: Cluster layout
+
+**Input:** Zoomable canvas from Phase 10.
+**Do:**
+- Group sessions by project into clusters
+- Each cluster: dashed border, project name label, unique accent color (from a
+  palette of 8-10 colors, assigned by project hash)
+- Auto-layout: clusters arranged in a grid-pack layout (no overlap), sessions
+  arranged in a mini-grid within each cluster
+- New sessions auto-placed in their project's cluster
+- Drag a cluster to reposition it (all cards move together)
+- Persist cluster positions in `config.json`
+
+**Verify:** Sessions from the same project appear grouped in a labeled, colored
+cluster. Adding a new session to a project places it inside the correct cluster.
+Dragging a cluster moves all its cards. Restart → positions preserved.
+
+---
+
+### Phase 12: Status bar + edge indicators
+
+**Input:** Clustered canvas from Phase 11.
+**Do:**
+- `StatusBar.tsx`: live counts — total sessions, running, needs input, completed
+- Quick-jump buttons in status bar for sessions that need input (click → pan to
+  that card)
+- Edge indicators: when a cluster is off-screen, show a colored dot at the
+  viewport edge pointing toward it. Click dot → smooth pan to cluster (350ms
+  ease-out animation).
+- "Needs input" sessions get a pulsing border animation on their card
+
+**Verify:** Status bar shows correct counts that update live. Sessions needing
+input pulse visually. Scroll away from a cluster → edge dot appears. Click dot →
+smooth pan to cluster.
+
+---
+
+### Phase 13: Worktree cleanup + session lifecycle
+
+**Input:** Full canvas from Phase 12.
+**Do:**
+- When Ghostty exits or `session.end` hook fires: show a dialog "Session
+  `<name>` ended. Clean up worktree?" with buttons: **Delete worktree** /
+  **Keep worktree** / **Keep and open in file manager**
+- Delete: runs `git -C <repo> worktree remove <path>`, removes session card
+- Keep: card stays as "Completed", worktree persists
+- Keep+open: same as Keep + `xdg-open <worktree-path>`
+- "Kill session" context menu: sends SIGTERM to Ghostty PID, then triggers the
+  same cleanup dialog
+
+**Verify:** End a CC session → dialog appears → each button works correctly.
+Kill a session → Ghostty closes → dialog appears. Worktree is actually removed
+on "Delete".
+
+---
+
+### Phase 14: Notifications + tray icon
+
+**Input:** Full app from Phase 13.
+**Do:**
+- System tray icon: shows cc-pewpew icon, tooltip with session counts
+- Tray icon badge/indicator when any session needs input
+- Click tray icon → show/hide main window
+- Desktop notifications (via Electron `Notification` API) when a session flips to
+  "needs input" — notification body includes project/worktree name, click
+  notification → focus that session's Ghostty window
+- Tray context menu: "Show cc-pewpew", "Quit", list of sessions needing input
+
+**Verify:** Minimize app → session needs input → desktop notification appears +
+tray icon changes. Click notification → Ghostty window focuses. Tray menu works.
+
+---
+
+### Phase 15: Persistence + polish
+
+**Input:** Full app from Phase 14.
+**Do:**
+- Remember main window position, size, and maximized state across restarts
+- Remember sidebar width (resizable via drag handle)
+- Smooth animations: card status transitions (fade between status colors),
+  cluster appear/disappear
+- Keyboard shortcuts: Ctrl+N → "New session..." dialog, Ctrl+R → rescan
+  projects, Escape → deselect, Ctrl+Q → quit
+- Handle edge cases: Ghostty not installed (show error), no git repos found
+  (show helpful empty state), socket already exists on startup (clean stale
+  socket)
+
+**Verify:** Close and reopen app → window size/position/sidebar/zoom all
+restored. Keyboard shortcuts work. Uninstall Ghostty temporarily → app shows
+clear error instead of crashing.
 
 ---
 
