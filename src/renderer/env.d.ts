@@ -1,5 +1,11 @@
 /// <reference types="vite/client" />
 
-interface Window {
-  api: Record<string, unknown>
+import type { Project } from '../shared/types'
+
+declare global {
+  interface Window {
+    api: {
+      scanProjects: () => Promise<Project[]>
+    }
+  }
 }

@@ -1,0 +1,42 @@
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
+
+export interface AppConfig {
+  scanDirs: string[]
+}
+
+const CONFIG_DIR = join(homedir(), '.cc-pewpew')
+const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
+
+const DEFAULT_CONFIG: AppConfig = {
+  scanDirs: ['~/dev'],
+}
+
+export function resolvePath(p: string): string {
+  if (p.startsWith('~/')) {
+    return join(homedir(), p.slice(2))
+  }
+  return p
+}
+
+export function getConfig(): AppConfig {
+  mkdirSync(CONFIG_DIR, { recursive: true })
+
+  if (!existsSync(CONFIG_PATH)) {
+    writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2))
+    return DEFAULT_CONFIG
+  }
+
+  try {
+    const raw = readFileSync(CONFIG_PATH, 'utf-8')
+    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) }
+  } catch {
+    return DEFAULT_CONFIG
+  }
+}
+
+export function saveConfig(config: AppConfig): void {
+  mkdirSync(CONFIG_DIR, { recursive: true })
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2))
+}

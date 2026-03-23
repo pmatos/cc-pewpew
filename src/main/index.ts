@@ -1,5 +1,7 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
+import { getConfig, resolvePath } from './config'
+import { scanProjects } from './project-scanner'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -21,6 +23,12 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle('projects:scan', async () => {
+    const config = getConfig()
+    const dirs = config.scanDirs.map(resolvePath)
+    return scanProjects(dirs)
+  })
+
   createWindow()
 
   app.on('activate', () => {

@@ -1,0 +1,115 @@
+import { readdirSync, existsSync, readFileSync, statSync } from 'fs'
+import { join, basename } from 'path'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import type { Project, Worktree } from '../shared/types'
+
+const execFileAsync = promisify(execFile)
+
+async function gitBranches(repoPath: string): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', repoPath, 'branch', '--list'], {
+      timeout: 5000,
+    })
+    return stdout
+      .split('\n')
+      .map((line) => line.replace(/^\*?\s+/, '').trim())
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+async function gitWorktrees(repoPath: string): Promise<Worktree[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', repoPath, 'worktree', 'list', '--porcelain'],
+      { timeout: 5000 }
+    )
+
+    const worktrees: Worktree[] = []
+    const blocks = stdout.split('\n\n').filter(Boolean)
+
+    for (const block of blocks) {
+      const lines = block.split('\n')
+      let path = ''
+      let branch = ''
+
+      for (const line of lines) {
+        if (line.startsWith('worktree ')) {
+          path = line.slice('worktree '.length)
+        } else if (line.startsWith('branch ')) {
+          branch = line.slice('branch refs/heads/'.length)
+        }
+      }
+
+      if (path) {
+        worktrees.push({
+          name: basename(path),
+          path,
+          branch: branch || 'HEAD',
+        })
+      }
+    }
+
+    return worktrees
+  } catch {
+    return []
+  }
+}
+
+function detectSetupState(repoPath: string): 'ready' | 'unsetup' {
+  const settingsPath = join(repoPath, '.claude', 'settings.local.json')
+  if (!existsSync(settingsPath)) return 'unsetup'
+
+  try {
+    const raw = readFileSync(settingsPath, 'utf-8')
+    const content = JSON.stringify(JSON.parse(raw))
+    return content.includes('cc-pewpew') ? 'ready' : 'unsetup'
+  } catch {
+    return 'unsetup'
+  }
+}
+
+export async function scanProjects(scanDirs: string[]): Promise<Project[]> {
+  const projects: Project[] = []
+
+  for (const dir of scanDirs) {
+    if (!existsSync(dir)) continue
+
+    let entries: string[]
+    try {
+      entries = readdirSync(dir)
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      const entryPath = join(dir, entry)
+
+      try {
+        if (!statSync(entryPath).isDirectory()) continue
+      } catch {
+        continue
+      }
+
+      if (!existsSync(join(entryPath, '.git'))) continue
+
+      const [branches, worktrees] = await Promise.all([
+        gitBranches(entryPath),
+        gitWorktrees(entryPath),
+      ])
+
+      projects.push({
+        name: entry,
+        path: entryPath,
+        branches,
+        worktrees,
+        setupState: detectSetupState(entryPath),
+      })
+    }
+  }
+
+  return projects.sort((a, b) => a.name.localeCompare(b.name))
+}
