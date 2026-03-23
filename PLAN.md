@@ -408,7 +408,24 @@ phase has a clear starting state, deliverables, and a way to verify it worked.
   `SessionStatus`, `HookEvent` type definitions
 - Verify `npm run dev` opens an Electron window
 
-**Verify:** `npm run dev` launches a window showing "cc-pewpew" in the title bar.
+**Verify:**
+```bash
+# 1. Build and launch
+npm run dev
+# Expected: Electron window opens with "cc-pewpew" in the title bar
+
+# 2. Check project structure exists
+ls src/main/index.ts src/preload/index.ts src/renderer/main.tsx src/renderer/App.tsx src/shared/types.ts
+# Expected: all five files listed, no errors
+
+# 3. Check types compile
+npx tsc --noEmit
+# Expected: no type errors
+
+# 4. Check shared types have the expected exports
+grep -E 'export (type|interface)' src/shared/types.ts
+# Expected: Project, Session, SessionStatus, HookEvent
+```
 
 ---
 
@@ -424,8 +441,23 @@ phase has a clear starting state, deliverables, and a way to verify it worked.
 - Status bar shows "0 sessions"
 - Install Zustand, create empty stores: `stores/projects.ts`, `stores/sessions.ts`
 
-**Verify:** App launches with the three-panel dark layout. Resizing the window
-works. No functionality yet, just the visual shell.
+**Verify:**
+```bash
+# 1. Launch the app
+npm run dev
+```
+- [ ] Window opens with dark background (not white/default)
+- [ ] Left sidebar visible (~250px wide) with "Projects" header
+- [ ] Main area shows centered "No sessions" placeholder text
+- [ ] Bottom status bar visible with "0 sessions" text
+- [ ] Resize the window — layout adapts, no overflow/scrollbar issues
+- [ ] Sidebar and status bar stay fixed, main area fills remaining space
+
+```bash
+# 2. Verify Zustand stores exist and export correctly
+grep -r 'create(' src/renderer/stores/
+# Expected: projects.ts and sessions.ts each have a zustand create() call
+```
 
 ---
 
@@ -443,9 +475,27 @@ works. No functionality yet, just the visual shell.
 - Wire to IPC: `projects:scan` handler returns project list to renderer
 - Expose via preload: `window.api.scanProjects()`
 
-**Verify:** Add a temporary `console.log` in the renderer that calls
-`window.api.scanProjects()` on mount and logs the result. It should list git
-repos from `~/dev` with correct setup states.
+**Verify:**
+```bash
+# 1. Launch the app
+npm run dev
+```
+- [ ] Open DevTools (Ctrl+Shift+I) → Console tab
+- [ ] Console shows the output of `window.api.scanProjects()` on startup
+- [ ] Output is an array of objects with `name`, `path`, `setupState` fields
+- [ ] Known git repos from `~/dev` appear in the list
+- [ ] Repos with `.claude/settings.local.json` containing `cc-pewpew` hooks show
+      `setupState: "ready"`, others show `"unsetup"`
+
+```bash
+# 2. Verify config was created
+cat ~/.cc-pewpew/config.json
+# Expected: {"scanDirs":["~/dev"]} or similar
+
+# 3. Test scanner directly from DevTools console
+await window.api.scanProjects()
+# Expected: array of project objects
+```
 
 ---
 
@@ -461,8 +511,26 @@ repos from `~/dev` with correct setup states.
 - Add a refresh button in the sidebar header
 - Style: dark theme, hover highlights, indented tree levels
 
-**Verify:** Sidebar shows actual git repos from `~/dev`. Projects with
-`.claude/settings.local.json` containing hooks show as ready. Others show `[Setup]`.
+**Verify:**
+```bash
+# 1. Launch the app
+npm run dev
+```
+- [ ] Sidebar lists git repos from `~/dev` by name (alphabetical)
+- [ ] Each project name is clickable/expandable
+- [ ] Projects without cc-pewpew hooks show a `[Setup]` button or badge
+- [ ] Projects with hooks show a green dot or "ready" indicator
+- [ ] Click a project with worktrees → expands to show worktree names underneath
+- [ ] Click the refresh button in the sidebar header → list re-fetches
+- [ ] Hover over a project → visual highlight (background change)
+
+```bash
+# 2. Quick check: create a test repo and verify it appears
+mkdir -p ~/dev/test-pewpew-verify && cd ~/dev/test-pewpew-verify && git init
+# Click refresh in sidebar → "test-pewpew-verify" should appear as unsetup
+# Cleanup:
+rm -rf ~/dev/test-pewpew-verify
+```
 
 ---
 
@@ -484,9 +552,40 @@ repos from `~/dev` with correct setup states.
 - Create new repo support: "Create new project..." in sidebar footer, prompts for
   name, runs `git init` in scan dir
 
-**Verify:** Right-click an unsetup project → "Setup for cc-pewpew" → project
-turns green/ready. Check that `.claude/settings.local.json` was created with
-hooks and is in `.gitignore`.
+**Verify:**
+```bash
+# 1. Prepare a test repo
+mkdir -p ~/dev/test-pewpew-setup && cd ~/dev/test-pewpew-setup && git init
+
+# 2. Launch the app
+npm run dev
+```
+- [ ] Right-click "test-pewpew-setup" → context menu appears
+- [ ] Menu shows "Setup for cc-pewpew" (since it's unsetup)
+- [ ] Click "Setup for cc-pewpew" → project indicator changes to ready/green
+
+```bash
+# 3. Verify hook installation
+cat ~/dev/test-pewpew-setup/.claude/settings.local.json
+# Expected: JSON with "hooks" key containing SessionStart, Stop, PostToolUse,
+#           SessionEnd, Notification entries pointing to ~/.cc-pewpew/hooks/notify.sh
+
+# 4. Verify .gitignore updated
+grep 'settings.local.json' ~/dev/test-pewpew-setup/.gitignore
+# Expected: line containing ".claude/settings.local.json"
+
+# 5. Verify idempotence — right-click again, "Setup" should not appear
+#    (project is already ready, menu should show "New session..." instead)
+```
+- [ ] Right-click a ready project → menu shows "New session..." (disabled/grayed),
+      "Open in file manager", "Rescan"
+- [ ] "Open in file manager" → opens the repo directory in the system file manager
+- [ ] "Create new project..." in sidebar footer → prompts for name → creates repo
+
+```bash
+# 6. Cleanup
+rm -rf ~/dev/test-pewpew-setup
+```
 
 ---
 
@@ -505,10 +604,45 @@ hooks and is in `.gitignore`.
 - Create `hooks/notify.sh` — the bash script that CC hooks will call
 - Copy `notify.sh` to `~/.cc-pewpew/hooks/` on app startup
 
-**Verify:** Start the app. In a separate terminal, send a test JSON-RPC message:
-`echo '{"jsonrpc":"2.0","method":"ping","id":1}' | socat - UNIX-CONNECT:$(cat ~/.cc-pewpew/socket-path)`
-— should get a response. Send a `session.start` event and verify it appears in
-the renderer console via IPC.
+**Verify:**
+```bash
+# 1. Launch the app
+npm run dev
+
+# 2. In a SEPARATE terminal, check socket exists
+ls -la ~/.cc-pewpew/ipc.sock
+# Expected: socket file exists (srwxr-xr-x or similar)
+
+cat ~/.cc-pewpew/socket-path
+# Expected: absolute path to ipc.sock
+
+# 3. Send a ping
+echo '{"jsonrpc":"2.0","method":"ping","id":1}' | socat - UNIX-CONNECT:$(cat ~/.cc-pewpew/socket-path)
+# Expected: {"jsonrpc":"2.0","result":"pong","id":1}
+
+# 4. Send a fake session.start event
+echo '{"jsonrpc":"2.0","method":"session.start","params":{"session_id":"test-123","cwd":"/tmp","hook_event_name":"SessionStart"},"id":2}' | socat - UNIX-CONNECT:$(cat ~/.cc-pewpew/socket-path)
+# Expected: success response
+```
+- [ ] In the Electron DevTools console, a `hook:event` message appears with
+      the `session.start` data containing `session_id: "test-123"`
+
+```bash
+# 5. Verify notify.sh was installed
+ls -la ~/.cc-pewpew/hooks/notify.sh
+# Expected: executable script exists
+file ~/.cc-pewpew/hooks/notify.sh
+# Expected: "Bourne-Again shell script" or similar
+
+# 6. Test notify.sh directly (simulates what CC hooks do)
+echo '{"hook_event_name":"Stop","session_id":"test-456","cwd":"/tmp"}' | ~/.cc-pewpew/hooks/notify.sh
+# Expected: no error output, exits 0
+
+# 7. Close the app, verify socket cleanup
+# After app closes:
+ls ~/.cc-pewpew/ipc.sock 2>&1
+# Expected: "No such file or directory"
+```
 
 ---
 
@@ -528,9 +662,43 @@ the renderer console via IPC.
 - Wire "New session..." context menu action → calls `window.api.createSession()`
 - Wire sessions Zustand store
 
-**Verify:** Right-click a ready project → "New session..." → Ghostty window opens
-with Claude Code running inside. Session appears in the store. Closing Ghostty →
-session state updates.
+**Verify:**
+```bash
+# 1. Ensure you have a ready project (setup via Phase 5)
+# 2. Launch the app
+npm run dev
+```
+- [ ] Right-click a ready project → "New session..." → click it
+- [ ] A Ghostty window opens within a few seconds
+- [ ] Ghostty window title shows `<project>/<worktree-name>`
+- [ ] Inside Ghostty, Claude Code is running (you see the CC prompt)
+
+```bash
+# 3. Verify worktree was created
+git -C ~/dev/<project> worktree list
+# Expected: lists the main worktree AND a new .claude/worktrees/<name> entry
+
+# 4. Verify session state persisted
+cat ~/.cc-pewpew/sessions.json
+# Expected: JSON array with one session object containing id, projectPath,
+#           worktreePath, pid (a number), status
+
+# 5. Check Ghostty process is tracked
+ps aux | grep "com.ccpewpew"
+# Expected: ghostty process with the --class flag visible
+```
+- [ ] Close the Ghostty window (type `/exit` in CC or close the window)
+- [ ] In DevTools console, session status should update (no longer "running")
+
+```bash
+# 6. Verify session state updated after close
+cat ~/.cc-pewpew/sessions.json
+# Expected: session status is no longer "running"
+
+# 7. Restart app — verify session recovery
+npm run dev
+# Expected: old session appears in store with correct state (dead if PID gone)
+```
 
 ---
 
@@ -551,9 +719,36 @@ session state updates.
   `session.end` → Completed
 - Right-click card: "Kill session", "Focus window" (focus is a no-op for now)
 
-**Verify:** Launch a session → card appears as "Running". If CC stops and waits
-for input, card should flip to "Needs input" (visible via the Stop hook). When CC
-session ends, card shows "Completed".
+**Verify:**
+```bash
+# 1. Launch the app
+npm run dev
+```
+- [ ] Main area shows "No sessions" initially
+- [ ] Launch a new session (right-click project → "New session...")
+- [ ] A session card appears in the main area within a few seconds
+- [ ] Card shows: `<project>/<worktree>` header, green "Running" badge, gray
+      thumbnail placeholder, timestamp
+
+```bash
+# 2. Simulate a Stop event (CC waiting for input) from a separate terminal
+SESSION_ID=$(cat ~/.cc-pewpew/sessions.json | jq -r '.[0].id')
+echo "{\"jsonrpc\":\"2.0\",\"method\":\"session.stop\",\"params\":{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"Stop\",\"cwd\":\"/tmp\"},\"id\":1}" | socat - UNIX-CONNECT:$(cat ~/.cc-pewpew/socket-path)
+```
+- [ ] Card status changes to yellow "Needs input"
+
+```bash
+# 3. Simulate activity (CC working again)
+echo "{\"jsonrpc\":\"2.0\",\"method\":\"session.activity\",\"params\":{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"cwd\":\"/tmp\"},\"id\":2}" | socat - UNIX-CONNECT:$(cat ~/.cc-pewpew/socket-path)
+```
+- [ ] Card status changes back to green "Running", timestamp updates
+
+```bash
+# 4. Simulate session end
+echo "{\"jsonrpc\":\"2.0\",\"method\":\"session.end\",\"params\":{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"SessionEnd\",\"reason\":\"prompt_input_exit\",\"cwd\":\"/tmp\"},\"id\":3}" | socat - UNIX-CONNECT:$(cat ~/.cc-pewpew/socket-path)
+```
+- [ ] Card status changes to "Completed"
+- [ ] Right-click card → context menu shows "Kill session", "Focus window"
 
 ---
 
@@ -571,8 +766,37 @@ session ends, card shows "Completed".
   - Wayland: try Ghostty D-Bus `present-surface`, fall back to compositor IPC
 - Wire "Focus window" in card context menu and click-on-card action
 
-**Verify:** Running sessions show live Ghostty window thumbnails that update
-every few seconds. Clicking a card raises the corresponding Ghostty window.
+**Verify:**
+```bash
+# 1. Launch app and start a session
+npm run dev
+# Right-click a ready project → "New session..."
+# Wait for Ghostty window to open with CC
+```
+- [ ] Within ~5 seconds, the session card's gray placeholder is replaced with an
+      actual screenshot of the Ghostty window
+- [ ] Type something in the Ghostty window, wait ~5 seconds → thumbnail updates
+      to show the new content
+- [ ] Click the session card → Ghostty window comes to the foreground / gets focus
+- [ ] If Ghostty is on another workspace, clicking the card switches to that
+      workspace (or at least attempts to — compositor-dependent)
+- [ ] Right-click card → "Focus window" → same behavior as clicking
+
+```bash
+# 2. Verify capture is working in DevTools
+# Open DevTools (Ctrl+Shift+I) → Network tab or Console
+# Look for IPC messages containing base64 PNG data or thumbnail updates
+
+# 3. Test with multiple sessions
+# Launch 2-3 sessions → each card should show its own distinct thumbnail
+# Thumbnails should not be mixed up between sessions
+
+# 4. Minimize a Ghostty window
+# Thumbnail should show last captured frame (not go blank)
+
+# 5. Close a Ghostty window
+# Thumbnail should stop updating, card shows last captured frame
+```
 
 ---
 
@@ -589,8 +813,34 @@ every few seconds. Clicking a card raises the corresponding Ghostty window.
 - Ctrl+0 → reset zoom to fit all cards, Ctrl+= / Ctrl+- → zoom in/out
 - Persist zoom/pan state across restarts (in `config.json`)
 
-**Verify:** Mouse wheel zooms in/out smoothly. Dragging pans. Cards stay
-positioned correctly at all zoom levels. Restart app → same zoom/pan.
+**Verify:**
+```bash
+# 1. Launch app with at least 2-3 sessions active
+npm run dev
+```
+- [ ] Main area shows a dot-grid background instead of a solid color
+- [ ] Mouse wheel up on the canvas → cards get larger (zoom in)
+- [ ] Mouse wheel down → cards get smaller (zoom out)
+- [ ] Zoom is centered on the cursor position (not top-left corner)
+- [ ] Zoom stops at ~30% (can't zoom out further) and 100% (can't zoom in further)
+- [ ] Click-drag on empty canvas area → canvas pans (cards move with it)
+- [ ] Click-drag on a card → does NOT pan (card interaction, not canvas)
+- [ ] Ctrl+0 → zoom resets to fit all cards in the viewport
+- [ ] Ctrl+= → zoom in one step, Ctrl+- → zoom out one step
+- [ ] Dot-grid scales with zoom (dots get closer/further apart)
+
+```bash
+# 2. Verify persistence
+# Zoom to ~50%, pan to an off-center position
+# Close the app (Ctrl+Q or close window)
+# Relaunch:
+npm run dev
+# Expected: same zoom level and pan position as before closing
+
+# 3. Check config
+cat ~/.cc-pewpew/config.json | jq '.canvas'
+# Expected: {"zoom": <number>, "panX": <number>, "panY": <number>}
+```
 
 ---
 
@@ -607,9 +857,41 @@ positioned correctly at all zoom levels. Restart app → same zoom/pan.
 - Drag a cluster to reposition it (all cards move together)
 - Persist cluster positions in `config.json`
 
-**Verify:** Sessions from the same project appear grouped in a labeled, colored
-cluster. Adding a new session to a project places it inside the correct cluster.
-Dragging a cluster moves all its cards. Restart → positions preserved.
+**Verify:**
+```bash
+# 1. Launch app with sessions from at least 2 different projects
+npm run dev
+# Create sessions on 2+ different ready projects
+```
+- [ ] Sessions from project A are inside one dashed-border cluster
+- [ ] Sessions from project B are inside a different cluster
+- [ ] Each cluster has a visible label with the project name
+- [ ] Clusters have different accent colors (border/label color differs)
+- [ ] Clusters don't overlap each other
+
+```bash
+# 2. Test adding a session to an existing cluster
+# Right-click project A → "New session..."
+```
+- [ ] New session card appears inside project A's cluster (not floating outside)
+- [ ] Cluster boundary expands to fit the new card
+
+```bash
+# 3. Test drag repositioning
+```
+- [ ] Click-drag a cluster's label/border area → entire cluster moves
+      (all cards inside move together)
+- [ ] Releasing the drag → cluster stays in new position
+- [ ] Other clusters don't move when you drag one
+
+```bash
+# 4. Verify persistence
+# Drag clusters to specific positions, then close and reopen app
+npm run dev
+cat ~/.cc-pewpew/config.json | jq '.clusterPositions'
+# Expected: object mapping project paths to {x, y} positions
+```
+- [ ] Clusters appear in the same positions as before closing
 
 ---
 
@@ -625,9 +907,40 @@ Dragging a cluster moves all its cards. Restart → positions preserved.
   ease-out animation).
 - "Needs input" sessions get a pulsing border animation on their card
 
-**Verify:** Status bar shows correct counts that update live. Sessions needing
-input pulse visually. Scroll away from a cluster → edge dot appears. Click dot →
-smooth pan to cluster.
+**Verify:**
+```bash
+# 1. Launch app with at least 3 sessions in various states
+npm run dev
+```
+- [ ] Status bar at the bottom shows: "N sessions | X running | Y needs input | Z completed"
+- [ ] Counts are correct and match the actual session states
+
+```bash
+# 2. Trigger a "needs input" state via hook
+SESSION_ID=$(cat ~/.cc-pewpew/sessions.json | jq -r '.[0].id')
+echo "{\"jsonrpc\":\"2.0\",\"method\":\"session.stop\",\"params\":{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"Stop\",\"cwd\":\"/tmp\"},\"id\":1}" | socat - UNIX-CONNECT:$(cat ~/.cc-pewpew/socket-path)
+```
+- [ ] "needs input" count in status bar increments
+- [ ] The session card for that session has a pulsing/glowing border animation
+- [ ] A quick-jump button appears in the status bar for that session
+      (shows project/worktree name)
+
+```bash
+# 3. Test edge indicators
+```
+- [ ] Zoom in or pan so that a cluster is completely off-screen
+- [ ] A colored dot appears at the edge of the viewport, pointing toward the
+      off-screen cluster (dot color matches cluster accent color)
+- [ ] Hover the dot → tooltip shows the project name
+- [ ] Click the dot → canvas smoothly pans/animates (~350ms) to center that
+      cluster in the viewport
+
+```bash
+# 4. Test quick-jump
+```
+- [ ] Pan away from the "needs input" session
+- [ ] Click its quick-jump button in the status bar
+- [ ] Canvas smoothly pans to center that session card in the viewport
 
 ---
 
@@ -644,9 +957,63 @@ smooth pan to cluster.
 - "Kill session" context menu: sends SIGTERM to Ghostty PID, then triggers the
   same cleanup dialog
 
-**Verify:** End a CC session → dialog appears → each button works correctly.
-Kill a session → Ghostty closes → dialog appears. Worktree is actually removed
-on "Delete".
+**Verify:**
+```bash
+# 1. Launch app and create a session
+npm run dev
+# Right-click project → "New session..." → Ghostty opens with CC
+# Note the worktree path from sessions.json:
+cat ~/.cc-pewpew/sessions.json | jq -r '.[0].worktreePath'
+WORKTREE_PATH=<paste the path>
+```
+
+```bash
+# 2. Test "Delete worktree" flow
+# In the Ghostty window, type /exit to end the CC session
+```
+- [ ] Dialog appears: "Session `<name>` ended. Clean up worktree?"
+- [ ] Three buttons visible: "Delete worktree", "Keep worktree", "Keep and open in file manager"
+- [ ] Click "Delete worktree"
+
+```bash
+# Verify worktree was removed
+ls "$WORKTREE_PATH" 2>&1
+# Expected: "No such file or directory"
+git -C ~/dev/<project> worktree list
+# Expected: worktree no longer listed
+```
+- [ ] Session card disappears from the canvas
+
+```bash
+# 3. Test "Keep worktree" flow
+# Create another session, end it, click "Keep worktree"
+```
+- [ ] Dialog closes, card stays on canvas as "Completed"
+- [ ] Worktree directory still exists on disk
+
+```bash
+# 4. Test "Keep and open in file manager" flow
+# Create another session, end it, click "Keep and open in file manager"
+```
+- [ ] File manager opens showing the worktree directory
+- [ ] Card stays on canvas as "Completed"
+
+```bash
+# 5. Test "Kill session" via context menu
+# Create a new active session
+# Right-click its card → "Kill session"
+```
+- [ ] Ghostty window closes
+- [ ] Cleanup dialog appears (same three options)
+
+```bash
+# 6. Verify kill sends SIGTERM
+# Before killing, note the PID:
+cat ~/.cc-pewpew/sessions.json | jq -r '.[0].pid'
+# Kill via context menu, then:
+ps -p <pid> 2>&1
+# Expected: "No such process" (process was terminated)
+```
 
 ---
 
@@ -662,8 +1029,40 @@ on "Delete".
   notification → focus that session's Ghostty window
 - Tray context menu: "Show cc-pewpew", "Quit", list of sessions needing input
 
-**Verify:** Minimize app → session needs input → desktop notification appears +
-tray icon changes. Click notification → Ghostty window focuses. Tray menu works.
+**Verify:**
+```bash
+# 1. Launch app with at least one active session
+npm run dev
+```
+- [ ] System tray shows a cc-pewpew icon (check your system tray area)
+- [ ] Hover tray icon → tooltip shows "cc-pewpew — N sessions"
+
+```bash
+# 2. Test tray toggle
+```
+- [ ] Click tray icon → main window hides
+- [ ] Click tray icon again → main window reappears
+
+```bash
+# 3. Test "needs input" notification
+# Minimize or hide the main window (click tray icon)
+# Trigger a Stop event from another terminal:
+SESSION_ID=$(cat ~/.cc-pewpew/sessions.json | jq -r '.[0].id')
+echo "{\"jsonrpc\":\"2.0\",\"method\":\"session.stop\",\"params\":{\"session_id\":\"$SESSION_ID\",\"hook_event_name\":\"Stop\",\"cwd\":\"/tmp\"},\"id\":1}" | socat - UNIX-CONNECT:$(cat ~/.cc-pewpew/socket-path)
+```
+- [ ] Desktop notification appears with title "Session needs input" and body
+      containing the project/worktree name
+- [ ] Tray icon changes appearance (badge, color change, or overlay indicator)
+- [ ] Click the desktop notification → corresponding Ghostty window comes to
+      foreground
+
+```bash
+# 4. Test tray context menu
+# Right-click the tray icon
+```
+- [ ] Menu shows: "Show cc-pewpew", any "needs input" sessions listed by name, "Quit"
+- [ ] Click a session name → that Ghostty window focuses
+- [ ] Click "Quit" → app closes cleanly (socket removed, tray icon disappears)
 
 ---
 
@@ -681,9 +1080,71 @@ tray icon changes. Click notification → Ghostty window focuses. Tray menu work
   (show helpful empty state), socket already exists on startup (clean stale
   socket)
 
-**Verify:** Close and reopen app → window size/position/sidebar/zoom all
-restored. Keyboard shortcuts work. Uninstall Ghostty temporarily → app shows
-clear error instead of crashing.
+**Verify:**
+```bash
+# 1. Test window state persistence
+npm run dev
+```
+- [ ] Move the window to a specific screen position and resize it to a non-default size
+- [ ] Drag the sidebar divider to make it wider/narrower than default
+- [ ] Close the app
+
+```bash
+npm run dev
+```
+- [ ] Window appears at the same position and size as when closed
+- [ ] Sidebar has the same width as when closed
+- [ ] Canvas zoom/pan are also restored (tested in Phase 10, but verify still works)
+
+```bash
+# 2. Test keyboard shortcuts
+npm run dev
+```
+- [ ] Ctrl+N → a "New session..." dialog or picker appears
+- [ ] Escape → dialog closes / selection cleared
+- [ ] Ctrl+R → projects rescan (sidebar flickers or updates)
+- [ ] Ctrl+Q → app quits cleanly
+
+```bash
+# 3. Test Ghostty-not-found error handling
+# Temporarily make ghostty unfindable:
+GHOSTTY_PATH=$(which ghostty)
+sudo mv "$GHOSTTY_PATH" "${GHOSTTY_PATH}.bak"  # or just test with PATH manipulation
+# In the app: try to create a new session
+```
+- [ ] App shows a clear error message (dialog or inline) like "Ghostty not found.
+      Please install Ghostty and ensure it's in your PATH."
+- [ ] App does NOT crash
+
+```bash
+# Restore ghostty:
+sudo mv "${GHOSTTY_PATH}.bak" "$GHOSTTY_PATH"
+```
+
+```bash
+# 4. Test empty state (no git repos)
+# Temporarily change scan dirs to an empty directory:
+# Edit ~/.cc-pewpew/config.json → set scanDirs to ["/tmp/empty-test"]
+mkdir -p /tmp/empty-test
+npm run dev
+```
+- [ ] Sidebar shows a helpful empty state message (e.g., "No git repos found.
+      Add scan directories in settings or create a new project.")
+- [ ] "Create new project..." button is still functional
+
+```bash
+# 5. Test stale socket cleanup
+# Create a fake stale socket:
+touch ~/.cc-pewpew/ipc.sock
+npm run dev
+# Expected: app starts normally (removes stale socket and creates a real one)
+
+# 6. Verify animations
+```
+- [ ] When a session status changes (Running → Needs input), the badge color
+      fades/transitions smoothly (not an instant snap)
+- [ ] When a new cluster appears (first session in a project), it fades in
+- [ ] When a cluster is removed (last session deleted), it fades out
 
 ---
 
