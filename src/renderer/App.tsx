@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import ProjectTree from './components/ProjectTree'
 import SessionCanvas from './components/SessionCanvas'
+import StatusBar from './components/StatusBar'
 import { useProjectsStore } from './stores/projects'
 import { useSessionsStore } from './stores/sessions'
 
 export default function App() {
   const { scanProjects } = useProjectsStore()
-  const { sessions, init: initSessions } = useSessionsStore()
+  const { init: initSessions } = useSessionsStore()
 
   useEffect(() => {
     return initSessions()
@@ -71,13 +72,7 @@ export default function App() {
         <SessionCanvas />
       </main>
 
-      <footer className="statusbar">
-        {sessions.length} session{sessions.length !== 1 ? 's' : ''}
-        {sessions.filter((s) => s.status === 'running').length > 0 &&
-          ` | ${sessions.filter((s) => s.status === 'running').length} running`}
-        {sessions.filter((s) => s.status === 'needs_input').length > 0 &&
-          ` | ${sessions.filter((s) => s.status === 'needs_input').length} needs input`}
-      </footer>
+      <StatusBar />
     </div>
   )
 }

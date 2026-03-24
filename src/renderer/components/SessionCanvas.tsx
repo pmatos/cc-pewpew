@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useSessionsStore } from '../stores/sessions'
+import { useCanvasStore } from '../stores/canvas'
 import SessionCluster from './SessionCluster'
+import EdgeIndicators from './EdgeIndicators'
 
 const MIN_ZOOM = 0.3
 const MAX_ZOOM = 1.0
@@ -48,6 +50,15 @@ export default function SessionCanvas() {
   const [clusterPositions, setClusterPositions] = useState<
     Record<string, { x: number; y: number }>
   >({})
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
+
+  const setPanToCluster = useCanvasStore((s) => s.setPanToCluster)
+  const panXRef = useRef(panX)
+  const panYRef = useRef(panY)
+  const zoomRef = useRef(zoom)
+  panXRef.current = panX
+  panYRef.current = panY
+  zoomRef.current = zoom
 
   // Group sessions by project
   const clusters = useMemo(() => {
@@ -100,6 +111,56 @@ export default function SessionCanvas() {
       window.api.saveClusterPositions(updated)
     }
   }, [clusters, loaded, clusterPositions])
+
+  // Register panToCluster in canvas store
+  useEffect(() => {
+    const panToClusterFn = (projectPath: string) => {
+      const pos = clusterPositions[projectPath]
+      if (!pos) return
+      const viewport = viewportRef.current
+      if (!viewport) return
+      const rect = viewport.getBoundingClientRect()
+
+      const targetPanX = -pos.x * zoomRef.current + rect.width / 2
+      const targetPanY = -pos.y * zoomRef.current + rect.height / 2
+
+      const startPanX = panXRef.current
+      const startPanY = panYRef.current
+      const startTime = performance.now()
+      const duration = 350
+
+      const animate = (now: number) => {
+        const t = Math.min(1, (now - startTime) / duration)
+        const ease = 1 - Math.pow(1 - t, 3)
+        const newPanX = startPanX + (targetPanX - startPanX) * ease
+        const newPanY = startPanY + (targetPanY - startPanY) * ease
+        setPanX(newPanX)
+        setPanY(newPanY)
+        if (t < 1) {
+          requestAnimationFrame(animate)
+        } else {
+          window.api.saveCanvasState({ zoom: zoomRef.current, panX: targetPanX, panY: targetPanY })
+        }
+      }
+      requestAnimationFrame(animate)
+    }
+
+    setPanToCluster(panToClusterFn)
+  }, [clusterPositions, setPanToCluster])
+
+  // Track viewport size
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const updateSize = () => {
+      const rect = viewport.getBoundingClientRect()
+      setViewportSize({ width: rect.width, height: rect.height })
+    }
+    updateSize()
+    const observer = new ResizeObserver(updateSize)
+    observer.observe(viewport)
+    return () => observer.disconnect()
+  }, [])
 
   // Persist canvas with debounce
   const persistCanvas = useCallback((z: number, px: number, py: number) => {
@@ -285,6 +346,19 @@ export default function SessionCanvas() {
           />
         ))}
       </div>
+      <EdgeIndicators
+        clusters={Array.from(clusters.entries()).map(([projectPath, clusterSessions]) => ({
+          projectPath,
+          projectName: clusterSessions[0].projectName,
+          position: clusterPositions[projectPath] || { x: 0, y: 0 },
+          color: hashColor(projectPath),
+        }))}
+        zoom={zoom}
+        panX={panX}
+        panY={panY}
+        viewportWidth={viewportSize.width}
+        viewportHeight={viewportSize.height}
+      />
     </div>
   )
 }

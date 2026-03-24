@@ -52,7 +52,7 @@ export default function SessionCard({ session, thumbnail, style }: Props) {
 
   return (
     <div
-      className="session-card"
+      className={`session-card${session.status === 'needs_input' ? ' needs-input' : ''}`}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
       style={style}
