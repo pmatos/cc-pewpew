@@ -59,7 +59,7 @@ export default function App() {
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [scanProjects])
+  }, [scanProjects, activeSessionId])
 
   const handleCreate = async () => {
     const name = newProjectName.trim()

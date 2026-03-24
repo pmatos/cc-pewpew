@@ -34,7 +34,7 @@ cc-pewpew is a desktop GUI (Electron + TypeScript + React) for launching, monito
 
 ## Implementation
 
-The project follows a phased plan in PLAN.md (v2). Phases R1-R6 refactor from external Ghostty windows to embedded xterm.js terminals with tmux persistence. Read the relevant phase before starting work.
+The project follows PLAN.md (v2). Terminals are embedded via xterm.js + node-pty + tmux (no external windows). Sessions persist across app restarts.
 
 ## Architecture (summary)
 
