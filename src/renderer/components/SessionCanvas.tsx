@@ -2,7 +2,7 @@ import { useSessionsStore } from '../stores/sessions'
 import SessionCard from './SessionCard'
 
 export default function SessionCanvas() {
-  const { sessions } = useSessionsStore()
+  const { sessions, thumbnails } = useSessionsStore()
 
   if (sessions.length === 0) {
     return (
@@ -15,7 +15,7 @@ export default function SessionCanvas() {
   return (
     <div className="session-canvas">
       {sessions.map((session) => (
-        <SessionCard key={session.id} session={session} />
+        <SessionCard key={session.id} session={session} thumbnail={thumbnails[session.id]} />
       ))}
     </div>
   )

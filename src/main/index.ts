@@ -6,6 +6,8 @@ import { getConfig, resolvePath, CONFIG_DIR } from './config'
 import { scanProjects } from './project-scanner'
 import { installHooks } from './hook-installer'
 import { startHookServer, stopHookServer } from './hook-server'
+import { startCapture, stopCapture } from './window-capture'
+import { focusWindow } from './window-focus'
 import {
   initSessionManager,
   createSession,
@@ -92,11 +94,16 @@ app.whenReady().then(async () => {
     killSession(id)
   })
 
+  ipcMain.handle('sessions:focus', async (_event, ghosttyClass: string, pid: number) => {
+    await focusWindow(ghosttyClass, pid)
+  })
+
   restoreSessions()
 
   const mainWindow = createWindow()
   startHookServer(mainWindow)
   initSessionManager(mainWindow)
+  startCapture(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -107,6 +114,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  stopCapture()
   stopHookServer()
 })
 

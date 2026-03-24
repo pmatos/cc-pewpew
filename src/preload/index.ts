@@ -22,4 +22,12 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('sessions:updated', handler)
     return () => ipcRenderer.removeListener('sessions:updated', handler)
   },
+  focusSession: (ghosttyClass: string, pid: number) =>
+    ipcRenderer.invoke('sessions:focus', ghosttyClass, pid),
+  onThumbnailsUpdated: (callback: (thumbnails: Record<string, string>) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: Record<string, string>) =>
+      callback(data)
+    ipcRenderer.on('thumbnails:updated', handler)
+    return () => ipcRenderer.removeListener('thumbnails:updated', handler)
+  },
 })

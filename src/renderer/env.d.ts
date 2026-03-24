@@ -13,7 +13,9 @@ declare global {
       createSession: (projectPath: string, name?: string) => Promise<Session>
       getSessions: () => Promise<Session[]>
       killSession: (id: string) => Promise<void>
+      focusSession: (ghosttyClass: string, pid: number) => Promise<void>
       onSessionsUpdated: (callback: (sessions: Session[]) => void) => () => void
+      onThumbnailsUpdated: (callback: (thumbnails: Record<string, string>) => void) => () => void
     }
   }
 }
