@@ -14,6 +14,7 @@ import {
   resizePty,
   destroyPty,
   getScrollback,
+  captureThumbnails,
 } from './pty-manager'
 import {
   initSessionManager,
@@ -184,17 +185,27 @@ app.whenReady().then(async () => {
   initPtyManager(mainWindow)
   restoreSessions()
 
+  // Periodic text thumbnail capture from tmux
+  const thumbInterval = setInterval(() => {
+    if (mainWindow.isDestroyed()) return
+    const thumbs = captureThumbnails()
+    if (Object.keys(thumbs).length > 0) {
+      mainWindow.webContents.send('thumbnails:text-updated', thumbs)
+    }
+  }, 3000)
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const win = createWindow()
       startHookServer(win)
     }
   })
-})
 
-app.on('before-quit', () => {
-  stopPtyManager()
-  stopHookServer()
+  app.on('before-quit', () => {
+    clearInterval(thumbInterval)
+    stopPtyManager()
+    stopHookServer()
+  })
 })
 
 app.on('window-all-closed', () => {

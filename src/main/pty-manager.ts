@@ -109,14 +109,19 @@ export function destroyPty(sessionId: string): void {
   const entry = ptys.get(sessionId)
   if (!entry) return
 
-  entry.pty.kill()
   ptys.delete(sessionId)
 
-  // Kill the tmux session
+  // Kill tmux session first — this causes the attached pty to exit naturally
   try {
     execFileSync('tmux', ['kill-session', '-t', entry.tmuxSession])
   } catch {
     // Session may already be dead
+  }
+
+  try {
+    entry.pty.kill()
+  } catch {
+    // Pty may already be dead from tmux exit
   }
 }
 
@@ -126,6 +131,22 @@ export function getPtyIds(): string[] {
 
 export function hasPty(sessionId: string): boolean {
   return ptys.has(sessionId)
+}
+
+export function captureThumbnails(): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const [sessionId, entry] of ptys) {
+    try {
+      const text = execFileSync('tmux', ['capture-pane', '-t', entry.tmuxSession, '-p'], {
+        encoding: 'utf-8',
+        timeout: 3000,
+      })
+      result[sessionId] = text
+    } catch {
+      // Session may be dead
+    }
+  }
+  return result
 }
 
 export function getScrollback(sessionId: string): string {

@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('config:save-clusters', positions),
   getSidebarWidth: () => ipcRenderer.invoke('config:get-sidebar-width'),
   saveSidebarWidth: (width: number) => ipcRenderer.invoke('config:save-sidebar-width', width),
+  onTextThumbnails: (callback: (data: Record<string, string>) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: Record<string, string>) =>
+      callback(data)
+    ipcRenderer.on('thumbnails:text-updated', handler)
+    return () => ipcRenderer.removeListener('thumbnails:text-updated', handler)
+  },
   ptyWrite: (sessionId: string, data: string) => ipcRenderer.invoke('pty:write', sessionId, data),
   ptyResize: (sessionId: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty:resize', sessionId, cols, rows),

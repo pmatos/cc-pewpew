@@ -6,7 +6,6 @@ interface SessionsState {
   sessions: Session[]
   thumbnails: Record<string, string>
   fetchSessions: () => Promise<void>
-  setThumbnail: (sessionId: string, dataUrl: string) => void
   init: () => () => void
 }
 
@@ -17,11 +16,6 @@ export const useSessionsStore = create<SessionsState>((set) => ({
     const sessions = await window.api.getSessions()
     set({ sessions })
   },
-  setThumbnail: (sessionId, dataUrl) => {
-    set((state) => ({
-      thumbnails: { ...state.thumbnails, [sessionId]: dataUrl },
-    }))
-  },
   init: () => {
     window.api.getSessions().then((sessions) => set({ sessions }))
 
@@ -30,6 +24,13 @@ export const useSessionsStore = create<SessionsState>((set) => ({
       useProjectsStore.getState().scanProjects()
     })
 
-    return cleanupSessions
+    const cleanupThumbnails = window.api.onTextThumbnails((thumbnails) => {
+      set({ thumbnails })
+    })
+
+    return () => {
+      cleanupSessions()
+      cleanupThumbnails()
+    }
   },
 }))

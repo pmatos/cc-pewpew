@@ -3,7 +3,6 @@ import ProjectTree from './components/ProjectTree'
 import SessionCanvas from './components/SessionCanvas'
 import DetailPane from './components/DetailPane'
 import StatusBar from './components/StatusBar'
-import ThumbnailRenderer from './components/ThumbnailRenderer'
 import { useProjectsStore } from './stores/projects'
 import { useSessionsStore } from './stores/sessions'
 
@@ -175,7 +174,6 @@ export default function App() {
       </main>
 
       <StatusBar />
-      <ThumbnailRenderer />
     </div>
   )
 }

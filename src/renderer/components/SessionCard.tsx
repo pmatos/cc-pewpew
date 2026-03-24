@@ -67,7 +67,7 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession }
       style={style}
     >
       <div className="session-card-thumb">
-        {thumbnail && <img src={thumbnail} alt={sessionName} />}
+        {thumbnail ? <pre className="session-card-text-thumb">{thumbnail}</pre> : null}
       </div>
       <div className="session-card-body">
         <div className="session-card-header">{sessionName}</div>
