@@ -5,3 +5,5 @@ out/
 *.tsbuildinfo
 .env
 CLAUDE.local.md
+
+.claude/settings.local.json
