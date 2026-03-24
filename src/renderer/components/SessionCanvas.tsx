@@ -33,7 +33,11 @@ function hashColor(path: string): string {
 const CLUSTER_WIDTH = 510
 const CLUSTER_GAP = 40
 
-export default function SessionCanvas() {
+interface CanvasProps {
+  onOpenSession?: (id: string, name: string) => void
+}
+
+export default function SessionCanvas({ onOpenSession }: CanvasProps) {
   const { sessions, thumbnails } = useSessionsStore()
   const viewportRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLCanvasElement>(null)
@@ -343,6 +347,7 @@ export default function SessionCanvas() {
             zoom={zoom}
             onDrag={handleClusterDrag}
             onDragEnd={handleClusterDragEnd}
+            onOpenSession={onOpenSession}
           />
         ))}
       </div>

@@ -24,14 +24,19 @@ interface Props {
   session: Session
   thumbnail?: string
   style?: React.CSSProperties
+  onOpenSession?: (id: string, name: string) => void
 }
 
-export default function SessionCard({ session, thumbnail, style }: Props) {
+export default function SessionCard({ session, thumbnail, style, onOpenSession }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const { color, label } = STATUS_CONFIG[session.status]
 
+  const sessionName = `${session.projectName}/${session.worktreeName}`
+
   const handleClick = () => {
-    window.api.focusSession(session.ghosttyClass, session.pid)
+    if (onOpenSession) {
+      onOpenSession(session.id, sessionName)
+    }
   }
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -41,8 +46,8 @@ export default function SessionCard({ session, thumbnail, style }: Props) {
 
   const menuItems: MenuItem[] = [
     {
-      label: 'Focus window',
-      onClick: () => window.api.focusSession(session.ghosttyClass, session.pid),
+      label: 'Open terminal',
+      onClick: () => onOpenSession?.(session.id, sessionName),
     },
     {
       label: 'Kill session',
@@ -58,14 +63,10 @@ export default function SessionCard({ session, thumbnail, style }: Props) {
       style={style}
     >
       <div className="session-card-thumb">
-        {thumbnail && (
-          <img src={thumbnail} alt={`${session.projectName}/${session.worktreeName}`} />
-        )}
+        {thumbnail && <img src={thumbnail} alt={sessionName} />}
       </div>
       <div className="session-card-body">
-        <div className="session-card-header">
-          {session.projectName}/{session.worktreeName}
-        </div>
+        <div className="session-card-header">{sessionName}</div>
         <div className="session-card-status">
           <span className="status-dot" style={{ background: color }} />
           <span>{label}</span>

@@ -18,6 +18,7 @@ interface Props {
   zoom: number
   onDrag: (projectPath: string, pos: { x: number; y: number }) => void
   onDragEnd: () => void
+  onOpenSession?: (id: string, name: string) => void
 }
 
 export default function SessionCluster({
@@ -30,6 +31,7 @@ export default function SessionCluster({
   zoom,
   onDrag,
   onDragEnd,
+  onOpenSession,
 }: Props) {
   const dragging = useRef(false)
   const dragStart = useRef({ x: 0, y: 0, posX: 0, posY: 0 })
@@ -92,6 +94,7 @@ export default function SessionCluster({
               key={session.id}
               session={session}
               thumbnail={thumbnails[session.id]}
+              onOpenSession={onOpenSession}
               style={{
                 position: 'absolute',
                 left: col * (CARD_WIDTH + CARD_GAP),

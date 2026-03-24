@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import ProjectTree from './components/ProjectTree'
 import SessionCanvas from './components/SessionCanvas'
+import DetailPane from './components/DetailPane'
 import StatusBar from './components/StatusBar'
 import { useProjectsStore } from './stores/projects'
 import { useSessionsStore } from './stores/sessions'
@@ -16,6 +17,8 @@ export default function App() {
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [sidebarWidth, setSidebarWidth] = useState(250)
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [activeSessionName, setActiveSessionName] = useState('')
   const resizing = useRef(false)
   const resizeStart = useRef({ x: 0, width: 0 })
 
@@ -34,7 +37,11 @@ export default function App() {
         e.preventDefault()
         scanProjects()
       } else if (e.key === 'Escape') {
-        setShowCreateDialog(false)
+        if (activeSessionId) {
+          setActiveSessionId(null)
+        } else {
+          setShowCreateDialog(false)
+        }
       }
     }
     document.addEventListener('keydown', handler)
@@ -133,7 +140,20 @@ export default function App() {
       <div className="sidebar-resizer" onMouseDown={handleResizeStart} />
 
       <main className="canvas">
-        <SessionCanvas />
+        {activeSessionId ? (
+          <DetailPane
+            sessionId={activeSessionId}
+            sessionName={activeSessionName}
+            onClose={() => setActiveSessionId(null)}
+          />
+        ) : (
+          <SessionCanvas
+            onOpenSession={(id, name) => {
+              setActiveSessionId(id)
+              setActiveSessionName(name)
+            }}
+          />
+        )}
       </main>
 
       <StatusBar />
