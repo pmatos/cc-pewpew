@@ -1,9 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useProjectsStore } from '../stores/projects'
+import ContextMenu, { type MenuItem } from './ContextMenu'
+
+interface MenuState {
+  x: number
+  y: number
+  projectPath: string
+  setupState: 'unsetup' | 'ready'
+}
 
 export default function ProjectTree() {
   const { projects, loading, scanProjects } = useProjectsStore()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [menu, setMenu] = useState<MenuState | null>(null)
 
   useEffect(() => {
     scanProjects()
@@ -19,6 +28,50 @@ export default function ProjectTree() {
       }
       return next
     })
+  }
+
+  const handleContextMenu = (
+    e: React.MouseEvent,
+    projectPath: string,
+    setupState: 'unsetup' | 'ready'
+  ) => {
+    e.preventDefault()
+    setMenu({ x: e.clientX, y: e.clientY, projectPath, setupState })
+  }
+
+  const getMenuItems = (): MenuItem[] => {
+    if (!menu) return []
+    const items: MenuItem[] = []
+
+    if (menu.setupState === 'unsetup') {
+      items.push({
+        label: 'Setup for cc-pewpew',
+        onClick: async () => {
+          await window.api.setupProject(menu.projectPath)
+          scanProjects()
+        },
+      })
+    } else {
+      items.push({
+        label: 'New session...',
+        disabled: true,
+        onClick: () => {},
+      })
+    }
+
+    items.push({ label: '', separator: true, onClick: () => {} })
+
+    items.push({
+      label: 'Open in file manager',
+      onClick: () => window.api.openInFileManager(menu.projectPath),
+    })
+
+    items.push({
+      label: 'Rescan',
+      onClick: () => scanProjects(),
+    })
+
+    return items
   }
 
   if (loading) {
@@ -37,7 +90,11 @@ export default function ProjectTree() {
 
         return (
           <div key={project.path} className="project-node">
-            <div className="project-row" onClick={() => hasWorktrees && toggle(project.path)}>
+            <div
+              className="project-row"
+              onClick={() => hasWorktrees && toggle(project.path)}
+              onContextMenu={(e) => handleContextMenu(e, project.path, project.setupState)}
+            >
               <span className="project-toggle">
                 {hasWorktrees ? (isExpanded ? '▼' : '▶') : ' '}
               </span>
@@ -66,6 +123,10 @@ export default function ProjectTree() {
           </div>
         )
       })}
+
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} items={getMenuItems()} onClose={() => setMenu(null)} />
+      )}
     </div>
   )
 }

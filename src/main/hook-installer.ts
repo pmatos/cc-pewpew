@@ -1,0 +1,48 @@
+import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'fs'
+import { join } from 'path'
+
+const CC_PEWPEW_HOOKS = {
+  SessionStart: [{ hooks: [{ type: 'command', command: '~/.cc-pewpew/hooks/notify.sh' }] }],
+  Stop: [{ hooks: [{ type: 'command', command: '~/.cc-pewpew/hooks/notify.sh' }] }],
+  PostToolUse: [
+    {
+      matcher: 'Read|Write|Edit|Bash',
+      hooks: [{ type: 'command', command: '~/.cc-pewpew/hooks/notify.sh' }],
+    },
+  ],
+  SessionEnd: [{ hooks: [{ type: 'command', command: '~/.cc-pewpew/hooks/notify.sh' }] }],
+  Notification: [{ hooks: [{ type: 'command', command: '~/.cc-pewpew/hooks/notify.sh' }] }],
+}
+
+export async function installHooks(projectPath: string): Promise<void> {
+  const claudeDir = join(projectPath, '.claude')
+  mkdirSync(claudeDir, { recursive: true })
+
+  const settingsPath = join(claudeDir, 'settings.local.json')
+
+  let existing: Record<string, unknown> = {}
+  if (existsSync(settingsPath)) {
+    try {
+      existing = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    } catch {
+      existing = {}
+    }
+  }
+
+  existing.hooks = CC_PEWPEW_HOOKS
+  writeFileSync(settingsPath, JSON.stringify(existing, null, 2))
+
+  ensureGitignore(projectPath, '.claude/settings.local.json')
+}
+
+function ensureGitignore(projectPath: string, entry: string): void {
+  const gitignorePath = join(projectPath, '.gitignore')
+
+  if (existsSync(gitignorePath)) {
+    const content = readFileSync(gitignorePath, 'utf-8')
+    if (content.includes(entry)) return
+    appendFileSync(gitignorePath, `\n${entry}\n`)
+  } else {
+    writeFileSync(gitignorePath, `${entry}\n`)
+  }
+}
