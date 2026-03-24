@@ -53,6 +53,10 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession }
       label: 'Kill session',
       onClick: () => window.api.killSession(session.id),
     },
+    {
+      label: 'Remove from canvas',
+      onClick: () => window.api.removeSession(session.id),
+    },
   ]
 
   return (
