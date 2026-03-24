@@ -6,7 +6,7 @@ export interface AppConfig {
   scanDirs: string[]
 }
 
-const CONFIG_DIR = join(homedir(), '.cc-pewpew')
+export const CONFIG_DIR = join(homedir(), '.cc-pewpew')
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
 
 const DEFAULT_CONFIG: AppConfig = {
