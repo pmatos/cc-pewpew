@@ -14,6 +14,8 @@ import {
   getSessions,
   restoreSessions,
   killSession,
+  removeWorktree,
+  removeSession,
 } from './session-manager'
 
 function installNotifyScript(): void {
@@ -92,6 +94,14 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('sessions:kill', (_event, id: string) => {
     killSession(id)
+  })
+
+  ipcMain.handle('sessions:remove-worktree', async (_event, id: string) => {
+    await removeWorktree(id)
+  })
+
+  ipcMain.handle('sessions:remove', (_event, id: string) => {
+    removeSession(id)
   })
 
   ipcMain.handle('sessions:focus', async (_event, ghosttyClass: string, pid: number) => {

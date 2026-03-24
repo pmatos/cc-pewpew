@@ -13,6 +13,8 @@ declare global {
       createSession: (projectPath: string, name?: string) => Promise<Session>
       getSessions: () => Promise<Session[]>
       killSession: (id: string) => Promise<void>
+      removeWorktree: (id: string) => Promise<void>
+      removeSession: (id: string) => Promise<void>
       focusSession: (ghosttyClass: string, pid: number) => Promise<void>
       onSessionsUpdated: (callback: (sessions: Session[]) => void) => () => void
       getCanvasState: () => Promise<{ zoom: number; panX: number; panY: number }>

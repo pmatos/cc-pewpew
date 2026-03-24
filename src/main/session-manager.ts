@@ -4,7 +4,7 @@ import { promisify } from 'util'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join, basename } from 'path'
 import { randomUUID } from 'crypto'
-import { type BrowserWindow } from 'electron'
+import { type BrowserWindow, dialog, shell } from 'electron'
 import { CONFIG_DIR } from './config'
 import type { Session, SessionStatus } from '../shared/types'
 
@@ -101,9 +101,9 @@ export async function createSession(projectPath: string, name?: string): Promise
   sessions.set(id, { session, child })
 
   child.on('exit', () => {
-    updateSession(id, 'dead')
     const entry = sessions.get(id)
     if (entry) entry.child = null
+    promptCleanup(id)
   })
 
   child.on('error', () => {
@@ -144,8 +144,8 @@ export function handleHookEvent(method: string, params: Record<string, unknown>)
       entry.session.status = 'running'
       break
     case 'session.end':
-      entry.session.status = 'completed'
-      break
+      promptCleanup(entry.session.id)
+      return
     case 'session.notification':
       entry.session.hookEvents.push({
         method,
@@ -180,6 +180,71 @@ export function killSession(id: string): void {
       // Process already dead
     }
   }
+}
+
+export async function removeWorktree(id: string): Promise<void> {
+  const entry = sessions.get(id)
+  if (!entry) return
+
+  try {
+    await execFileAsync('git', [
+      '-C',
+      entry.session.projectPath,
+      'worktree',
+      'remove',
+      entry.session.worktreePath,
+      '--force',
+    ])
+  } catch {
+    // Worktree may already be removed or path invalid
+  }
+}
+
+export function removeSession(id: string): void {
+  sessions.delete(id)
+  persistSessions()
+  notifyRenderer()
+}
+
+const cleanupInProgress = new Set<string>()
+
+async function promptCleanup(id: string): Promise<void> {
+  if (cleanupInProgress.has(id)) return
+  cleanupInProgress.add(id)
+
+  const entry = sessions.get(id)
+  if (!entry) {
+    cleanupInProgress.delete(id)
+    return
+  }
+
+  const session = entry.session
+  const parentWindow = mainWindowRef && !mainWindowRef.isDestroyed() ? mainWindowRef : null
+
+  const options = {
+    type: 'question' as const,
+    title: 'Session ended',
+    message: `Session "${session.projectName}/${session.worktreeName}" ended.\nClean up worktree?`,
+    buttons: ['Delete worktree', 'Keep worktree', 'Keep and open in file manager'],
+    defaultId: 1,
+    cancelId: 1,
+  }
+
+  const { response } = parentWindow
+    ? await dialog.showMessageBox(parentWindow, options)
+    : await dialog.showMessageBox(options)
+
+  if (response === 0) {
+    await removeWorktree(id)
+    removeSession(id)
+  } else if (response === 1) {
+    updateSession(id, 'completed')
+  } else if (response === 2) {
+    updateSession(id, 'completed')
+    shell.openPath(session.worktreePath)
+  }
+
+  cleanupInProgress.delete(id)
 }
 
 export function getSessions(): Session[] {
