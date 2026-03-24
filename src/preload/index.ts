@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   getCanvasState: () => ipcRenderer.invoke('config:get-canvas'),
   saveCanvasState: (state: { zoom: number; panX: number; panY: number }) =>
     ipcRenderer.invoke('config:save-canvas', state),
+  getClusterPositions: () => ipcRenderer.invoke('config:get-clusters'),
+  saveClusterPositions: (positions: Record<string, { x: number; y: number }>) =>
+    ipcRenderer.invoke('config:save-clusters', positions),
   onThumbnailsUpdated: (callback: (thumbnails: Record<string, string>) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: Record<string, string>) =>
       callback(data)

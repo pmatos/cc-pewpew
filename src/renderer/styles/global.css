@@ -120,6 +120,30 @@ body,
   z-index: 1;
 }
 
+.session-cluster {
+  border: 2px dashed;
+  border-radius: 12px;
+  padding: 0 12px 12px 12px;
+}
+
+.cluster-header {
+  padding: 8px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: grab;
+  user-select: none;
+}
+
+.cluster-header:active {
+  cursor: grabbing;
+}
+
+.cluster-cards {
+  position: relative;
+}
+
 .session-card {
   background: var(--bg-sidebar);
   border: 1px solid var(--border);

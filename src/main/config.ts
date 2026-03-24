@@ -11,6 +11,7 @@ export interface CanvasState {
 export interface AppConfig {
   scanDirs: string[]
   canvas: CanvasState
+  clusterPositions: Record<string, { x: number; y: number }>
 }
 
 export const CONFIG_DIR = join(homedir(), '.cc-pewpew')
@@ -19,6 +20,7 @@ const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
 const DEFAULT_CONFIG: AppConfig = {
   scanDirs: ['~/dev'],
   canvas: { zoom: 0.7, panX: 0, panY: 0 },
+  clusterPositions: {},
 }
 
 export function resolvePath(p: string): string {

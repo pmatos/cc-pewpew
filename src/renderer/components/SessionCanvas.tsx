@@ -1,17 +1,35 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useSessionsStore } from '../stores/sessions'
-import SessionCard from './SessionCard'
+import SessionCluster from './SessionCluster'
 
 const MIN_ZOOM = 0.3
 const MAX_ZOOM = 1.0
 const ZOOM_STEP = 0.1
-const CARD_WIDTH = 240
-const CARD_HEIGHT = 230
-const CARD_GAP = 16
-const COLS = 4
 const DOT_SPACING = 30
 const DOT_COLOR = '#2a2a4a'
 const DOT_RADIUS = 1.5
+
+const ACCENT_COLORS = [
+  '#4ade80',
+  '#60a5fa',
+  '#f472b6',
+  '#facc15',
+  '#a78bfa',
+  '#fb923c',
+  '#2dd4bf',
+  '#e879f9',
+]
+
+function hashColor(path: string): string {
+  let hash = 0
+  for (let i = 0; i < path.length; i++) {
+    hash = (hash + path.charCodeAt(i)) * 31
+  }
+  return ACCENT_COLORS[Math.abs(hash) % ACCENT_COLORS.length]
+}
+
+const CLUSTER_WIDTH = 510
+const CLUSTER_GAP = 40
 
 export default function SessionCanvas() {
   const { sessions, thumbnails } = useSessionsStore()
@@ -27,20 +45,64 @@ export default function SessionCanvas() {
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
 
+  const [clusterPositions, setClusterPositions] = useState<
+    Record<string, { x: number; y: number }>
+  >({})
+
+  // Group sessions by project
+  const clusters = useMemo(() => {
+    const map = new Map<string, typeof sessions>()
+    for (const session of sessions) {
+      const existing = map.get(session.projectPath) || []
+      existing.push(session)
+      map.set(session.projectPath, existing)
+    }
+    return map
+  }, [sessions])
+
   // Load persisted state
   useEffect(() => {
-    window.api.getCanvasState().then((state) => {
-      if (state) {
-        setZoom(state.zoom)
-        setPanX(state.panX)
-        setPanY(state.panY)
+    Promise.all([window.api.getCanvasState(), window.api.getClusterPositions()]).then(
+      ([canvasState, positions]) => {
+        if (canvasState) {
+          setZoom(canvasState.zoom)
+          setPanX(canvasState.panX)
+          setPanY(canvasState.panY)
+        }
+        if (positions) {
+          setClusterPositions(positions)
+        }
+        setLoaded(true)
       }
-      setLoaded(true)
-    })
+    )
   }, [])
 
-  // Persist with debounce
-  const persistState = useCallback((z: number, px: number, py: number) => {
+  // Assign default positions to new clusters
+  useEffect(() => {
+    if (!loaded) return
+    let changed = false
+    const updated = { ...clusterPositions }
+    let idx = Object.keys(updated).length
+
+    for (const projectPath of clusters.keys()) {
+      if (!updated[projectPath]) {
+        updated[projectPath] = {
+          x: (idx % 3) * (CLUSTER_WIDTH + CLUSTER_GAP) + CLUSTER_GAP,
+          y: Math.floor(idx / 3) * 400 + CLUSTER_GAP,
+        }
+        idx++
+        changed = true
+      }
+    }
+
+    if (changed) {
+      setClusterPositions(updated)
+      window.api.saveClusterPositions(updated)
+    }
+  }, [clusters, loaded, clusterPositions])
+
+  // Persist canvas with debounce
+  const persistCanvas = useCallback((z: number, px: number, py: number) => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
       window.api.saveCanvasState({ zoom: z, panX: px, panY: py })
@@ -76,7 +138,7 @@ export default function SessionCanvas() {
     }
   }, [zoom, panX, panY, sessions.length])
 
-  // Resize observer for dot grid
+  // Resize observer
   useEffect(() => {
     const viewport = viewportRef.current
     if (!viewport) return
@@ -101,26 +163,26 @@ export default function SessionCanvas() {
         setZoom(0.7)
         setPanX(0)
         setPanY(0)
-        persistState(0.7, 0, 0)
+        persistCanvas(0.7, 0, 0)
       } else if (e.key === '=' || e.key === '+') {
         e.preventDefault()
         setZoom((prev) => {
           const next = Math.min(MAX_ZOOM, prev + ZOOM_STEP)
-          persistState(next, panX, panY)
+          persistCanvas(next, panX, panY)
           return next
         })
       } else if (e.key === '-') {
         e.preventDefault()
         setZoom((prev) => {
           const next = Math.max(MIN_ZOOM, prev - ZOOM_STEP)
-          persistState(next, panX, panY)
+          persistCanvas(next, panX, panY)
           return next
         })
       }
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [panX, panY, persistState])
+  }, [panX, panY, persistCanvas])
 
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -134,25 +196,22 @@ export default function SessionCanvas() {
       setZoom((prevZoom) => {
         const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
         const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prevZoom + delta))
-
         const newPanX = cx - (cx - panX) * (newZoom / prevZoom)
         const newPanY = cy - (cy - panY) * (newZoom / prevZoom)
-
         setPanX(newPanX)
         setPanY(newPanY)
-        persistState(newZoom, newPanX, newPanY)
-
+        persistCanvas(newZoom, newPanX, newPanY)
         return newZoom
       })
     },
-    [panX, panY, persistState]
+    [panX, panY, persistCanvas]
   )
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return
       const target = e.target as HTMLElement
-      if (target.closest('.session-card')) return
+      if (target.closest('.session-cluster')) return
 
       setDragging(true)
       dragStart.current = { x: e.clientX, y: e.clientY, panX, panY }
@@ -165,10 +224,8 @@ export default function SessionCanvas() {
       if (!dragging) return
       const dx = e.clientX - dragStart.current.x
       const dy = e.clientY - dragStart.current.y
-      const newPanX = dragStart.current.panX + dx
-      const newPanY = dragStart.current.panY + dy
-      setPanX(newPanX)
-      setPanY(newPanY)
+      setPanX(dragStart.current.panX + dx)
+      setPanY(dragStart.current.panY + dy)
     },
     [dragging]
   )
@@ -176,9 +233,17 @@ export default function SessionCanvas() {
   const handleMouseUp = useCallback(() => {
     if (dragging) {
       setDragging(false)
-      persistState(zoom, panX, panY)
+      persistCanvas(zoom, panX, panY)
     }
-  }, [dragging, zoom, panX, panY, persistState])
+  }, [dragging, zoom, panX, panY, persistCanvas])
+
+  const handleClusterDrag = useCallback((projectPath: string, pos: { x: number; y: number }) => {
+    setClusterPositions((prev) => ({ ...prev, [projectPath]: pos }))
+  }, [])
+
+  const handleClusterDragEnd = useCallback(() => {
+    window.api.saveClusterPositions(clusterPositions)
+  }, [clusterPositions])
 
   if (!loaded) return null
 
@@ -205,21 +270,20 @@ export default function SessionCanvas() {
     >
       <canvas className="dot-grid" ref={gridRef} />
       <div className="canvas-content" style={{ transform, transformOrigin: '0 0' }}>
-        {sessions.map((session, i) => {
-          const col = i % COLS
-          const row = Math.floor(i / COLS)
-          const left = col * (CARD_WIDTH + CARD_GAP) + CARD_GAP
-          const top = row * (CARD_HEIGHT + CARD_GAP) + CARD_GAP
-
-          return (
-            <SessionCard
-              key={session.id}
-              session={session}
-              thumbnail={thumbnails[session.id]}
-              style={{ position: 'absolute', left, top, width: CARD_WIDTH }}
-            />
-          )
-        })}
+        {Array.from(clusters.entries()).map(([projectPath, clusterSessions]) => (
+          <SessionCluster
+            key={projectPath}
+            projectPath={projectPath}
+            projectName={clusterSessions[0].projectName}
+            sessions={clusterSessions}
+            thumbnails={thumbnails}
+            accentColor={hashColor(projectPath)}
+            position={clusterPositions[projectPath] || { x: 0, y: 0 }}
+            zoom={zoom}
+            onDrag={handleClusterDrag}
+            onDragEnd={handleClusterDragEnd}
+          />
+        ))}
       </div>
     </div>
   )

@@ -108,6 +108,19 @@ app.whenReady().then(async () => {
     saveConfig(config)
   })
 
+  ipcMain.handle('config:get-clusters', () => {
+    return getConfig().clusterPositions
+  })
+
+  ipcMain.handle(
+    'config:save-clusters',
+    (_event, positions: Record<string, { x: number; y: number }>) => {
+      const config = getConfig()
+      config.clusterPositions = positions
+      saveConfig(config)
+    }
+  )
+
   restoreSessions()
 
   const mainWindow = createWindow()
