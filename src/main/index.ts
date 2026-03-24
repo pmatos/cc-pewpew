@@ -10,6 +10,14 @@ import { startCapture, stopCapture } from './window-capture'
 import { focusWindow } from './window-focus'
 import { createTray } from './tray'
 import {
+  initPtyManager,
+  stopPtyManager,
+  writePty,
+  resizePty,
+  createPty,
+  destroyPty,
+} from './pty-manager'
+import {
   initSessionManager,
   createSession,
   getSessions,
@@ -126,6 +134,22 @@ app.whenReady().then(async () => {
     await focusWindow(ghosttyClass, pid)
   })
 
+  ipcMain.handle('pty:write', (_event, sessionId: string, data: string) => {
+    writePty(sessionId, data)
+  })
+
+  ipcMain.handle('pty:resize', (_event, sessionId: string, cols: number, rows: number) => {
+    resizePty(sessionId, cols, rows)
+  })
+
+  ipcMain.handle('pty:test-create', (_event, sessionId: string, cwd: string) => {
+    createPty(sessionId, cwd)
+  })
+
+  ipcMain.handle('pty:destroy', (_event, sessionId: string) => {
+    destroyPty(sessionId)
+  })
+
   ipcMain.handle('config:get-canvas', () => {
     return getConfig().canvas
   })
@@ -166,6 +190,7 @@ app.whenReady().then(async () => {
   initSessionManager(mainWindow)
   startCapture(mainWindow)
   createTray(mainWindow)
+  initPtyManager(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -176,6 +201,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  stopPtyManager()
   stopCapture()
   stopHookServer()
 })

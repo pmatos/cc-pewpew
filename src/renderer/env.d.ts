@@ -24,6 +24,11 @@ declare global {
       getSidebarWidth: () => Promise<number>
       saveSidebarWidth: (width: number) => Promise<void>
       onThumbnailsUpdated: (callback: (thumbnails: Record<string, string>) => void) => () => void
+      ptyWrite: (sessionId: string, data: string) => Promise<void>
+      ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>
+      ptyTestCreate: (sessionId: string, cwd: string) => Promise<void>
+      ptyDestroy: (sessionId: string) => Promise<void>
+      onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => () => void
     }
   }
 }

@@ -40,4 +40,18 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('thumbnails:updated', handler)
     return () => ipcRenderer.removeListener('thumbnails:updated', handler)
   },
+  ptyWrite: (sessionId: string, data: string) => ipcRenderer.invoke('pty:write', sessionId, data),
+  ptyResize: (sessionId: string, cols: number, rows: number) =>
+    ipcRenderer.invoke('pty:resize', sessionId, cols, rows),
+  ptyTestCreate: (sessionId: string, cwd: string) =>
+    ipcRenderer.invoke('pty:test-create', sessionId, cwd),
+  ptyDestroy: (sessionId: string) => ipcRenderer.invoke('pty:destroy', sessionId),
+  onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: { sessionId: string; data: string }
+    ) => callback(data)
+    ipcRenderer.on('pty:data', handler)
+    return () => ipcRenderer.removeListener('pty:data', handler)
+  },
 })

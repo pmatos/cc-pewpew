@@ -1,7 +1,7 @@
 {
   "name": "cc-pewpew",
   "version": "0.1.0",
-  "description": "Desktop GUI for launching and monitoring Claude Code sessions in Ghostty terminals",
+  "description": "Desktop GUI for launching and monitoring Claude Code sessions with embedded terminals",
   "license": "MIT",
   "type": "module",
   "main": "dist-electron/main/index.js",
@@ -12,9 +12,13 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "rebuild-pty": "cd node_modules/node-pty && npx node-gyp rebuild --target=$(node -e \"console.log(require('electron/package.json').version)\") --arch=x64 --dist-url=https://electronjs.org/headers"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "node-pty": "^1.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.0"
@@ -24,6 +28,7 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "@electron/rebuild": "^3.6.0",
     "electron": "^31.0.0",
     "electron-devtools-installer": "^4.0.0",
     "electron-vite": "^2.3.0",
