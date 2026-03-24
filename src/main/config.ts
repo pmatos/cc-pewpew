@@ -8,10 +8,20 @@ export interface CanvasState {
   panY: number
 }
 
+export interface WindowState {
+  x: number
+  y: number
+  width: number
+  height: number
+  maximized: boolean
+}
+
 export interface AppConfig {
   scanDirs: string[]
   canvas: CanvasState
   clusterPositions: Record<string, { x: number; y: number }>
+  windowState?: WindowState
+  sidebarWidth: number
 }
 
 export const CONFIG_DIR = join(homedir(), '.cc-pewpew')
@@ -21,6 +31,7 @@ const DEFAULT_CONFIG: AppConfig = {
   scanDirs: ['~/dev'],
   canvas: { zoom: 0.7, panX: 0, panY: 0 },
   clusterPositions: {},
+  sidebarWidth: 250,
 }
 
 export function resolvePath(p: string): string {

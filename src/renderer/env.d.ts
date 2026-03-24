@@ -21,6 +21,8 @@ declare global {
       saveCanvasState: (state: { zoom: number; panX: number; panY: number }) => Promise<void>
       getClusterPositions: () => Promise<Record<string, { x: number; y: number }>>
       saveClusterPositions: (positions: Record<string, { x: number; y: number }>) => Promise<void>
+      getSidebarWidth: () => Promise<number>
+      saveSidebarWidth: (width: number) => Promise<void>
       onThumbnailsUpdated: (callback: (thumbnails: Record<string, string>) => void) => () => void
     }
   }

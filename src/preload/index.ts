@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   getClusterPositions: () => ipcRenderer.invoke('config:get-clusters'),
   saveClusterPositions: (positions: Record<string, { x: number; y: number }>) =>
     ipcRenderer.invoke('config:save-clusters', positions),
+  getSidebarWidth: () => ipcRenderer.invoke('config:get-sidebar-width'),
+  saveSidebarWidth: (width: number) => ipcRenderer.invoke('config:save-sidebar-width', width),
   onThumbnailsUpdated: (callback: (thumbnails: Record<string, string>) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: Record<string, string>) =>
       callback(data)

@@ -80,7 +80,11 @@ export default function ProjectTree() {
   }
 
   if (projects.length === 0) {
-    return <div className="project-empty">No git repos found</div>
+    return (
+      <div className="project-empty">
+        No git repos found in scan directories. Use &quot;+ New project&quot; below to create one.
+      </div>
+    )
   }
 
   return (

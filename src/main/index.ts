@@ -29,15 +29,32 @@ function installNotifyScript(): void {
 }
 
 function createWindow(): BrowserWindow {
+  const config = getConfig()
+  const ws = config.windowState
+
   const mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: ws?.width ?? 1200,
+    height: ws?.height ?? 800,
+    x: ws?.x,
+    y: ws?.y,
     title: 'cc-pewpew',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
+  })
+
+  if (ws?.maximized) {
+    mainWindow.maximize()
+  }
+
+  mainWindow.on('close', () => {
+    const bounds = mainWindow.getBounds()
+    const maximized = mainWindow.isMaximized()
+    const cfg = getConfig()
+    cfg.windowState = { ...bounds, maximized }
+    saveConfig(cfg)
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -131,6 +148,16 @@ app.whenReady().then(async () => {
       saveConfig(config)
     }
   )
+
+  ipcMain.handle('config:get-sidebar-width', () => {
+    return getConfig().sidebarWidth
+  })
+
+  ipcMain.handle('config:save-sidebar-width', (_event, width: number) => {
+    const config = getConfig()
+    config.sidebarWidth = width
+    saveConfig(config)
+  })
 
   restoreSessions()
 

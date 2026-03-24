@@ -58,6 +58,17 @@ export async function createSession(projectPath: string, name?: string): Promise
   const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
   const ghosttyClass = `com.ccpewpew.s.${id}`
 
+  // Check Ghostty is available
+  try {
+    await execFileAsync('which', ['ghostty'])
+  } catch {
+    dialog.showErrorBox(
+      'Ghostty not found',
+      'Ghostty is not installed or not in your PATH.\nPlease install Ghostty and ensure it is accessible.'
+    )
+    throw new Error('Ghostty not found')
+  }
+
   // Create worktree
   try {
     await execFileAsync('git', [

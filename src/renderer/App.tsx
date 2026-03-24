@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import ProjectTree from './components/ProjectTree'
 import SessionCanvas from './components/SessionCanvas'
 import StatusBar from './components/StatusBar'
@@ -12,8 +12,34 @@ export default function App() {
   useEffect(() => {
     return initSessions()
   }, [initSessions])
+
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
+  const [sidebarWidth, setSidebarWidth] = useState(250)
+  const resizing = useRef(false)
+  const resizeStart = useRef({ x: 0, width: 0 })
+
+  // Load sidebar width
+  useEffect(() => {
+    window.api.getSidebarWidth().then((w) => setSidebarWidth(w))
+  }, [])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'n') {
+        e.preventDefault()
+        setShowCreateDialog(true)
+      } else if (e.ctrlKey && e.key === 'r') {
+        e.preventDefault()
+        scanProjects()
+      } else if (e.key === 'Escape') {
+        setShowCreateDialog(false)
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [scanProjects])
 
   const handleCreate = async () => {
     const name = newProjectName.trim()
@@ -24,12 +50,44 @@ export default function App() {
     scanProjects()
   }
 
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      resizing.current = true
+      resizeStart.current = { x: e.clientX, width: sidebarWidth }
+    },
+    [sidebarWidth]
+  )
+
+  useEffect(() => {
+    const handleMove = (e: MouseEvent) => {
+      if (!resizing.current) return
+      const dx = e.clientX - resizeStart.current.x
+      const newWidth = Math.max(150, Math.min(500, resizeStart.current.width + dx))
+      setSidebarWidth(newWidth)
+    }
+
+    const handleUp = () => {
+      if (resizing.current) {
+        resizing.current = false
+        window.api.saveSidebarWidth(sidebarWidth)
+      }
+    }
+
+    document.addEventListener('mousemove', handleMove)
+    document.addEventListener('mouseup', handleUp)
+    return () => {
+      document.removeEventListener('mousemove', handleMove)
+      document.removeEventListener('mouseup', handleUp)
+    }
+  }, [sidebarWidth])
+
   return (
-    <div className="app-layout">
+    <div className="app-layout" style={{ gridTemplateColumns: `${sidebarWidth}px 4px 1fr` }}>
       <aside className="sidebar">
         <div className="sidebar-header">
           <span>Projects</span>
-          <button className="refresh-btn" onClick={scanProjects} title="Refresh projects">
+          <button className="refresh-btn" onClick={scanProjects} title="Refresh projects (Ctrl+R)">
             ⟳
           </button>
         </div>
@@ -61,12 +119,18 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <button className="new-project-btn" onClick={() => setShowCreateDialog(true)}>
+            <button
+              className="new-project-btn"
+              onClick={() => setShowCreateDialog(true)}
+              title="Ctrl+N"
+            >
               + New project
             </button>
           )}
         </div>
       </aside>
+
+      <div className="sidebar-resizer" onMouseDown={handleResizeStart} />
 
       <main className="canvas">
         <SessionCanvas />
