@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useProjectsStore } from '../stores/projects'
+import { useSessionsStore } from '../stores/sessions'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 
 interface MenuState {
@@ -9,10 +10,17 @@ interface MenuState {
   setupState: 'unsetup' | 'ready'
 }
 
-export default function ProjectTree() {
+interface TreeProps {
+  onOpenSession?: (id: string, name: string) => void
+}
+
+export default function ProjectTree({ onOpenSession }: TreeProps) {
   const { projects, loading, scanProjects } = useProjectsStore()
+  const { sessions } = useSessionsStore()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(null)
+  const [sessionNameInput, setSessionNameInput] = useState('')
 
   useEffect(() => {
     scanProjects()
@@ -54,8 +62,9 @@ export default function ProjectTree() {
     } else {
       items.push({
         label: 'New session...',
-        onClick: async () => {
-          await window.api.createSession(menu.projectPath)
+        onClick: () => {
+          setPendingSessionPath(menu.projectPath)
+          setSessionNameInput('')
         },
       })
     }
@@ -87,8 +96,41 @@ export default function ProjectTree() {
     )
   }
 
+  const handleCreateSession = async () => {
+    if (!pendingSessionPath) return
+    const name = sessionNameInput.trim() || undefined
+    await window.api.createSession(pendingSessionPath, name)
+    setPendingSessionPath(null)
+    setSessionNameInput('')
+  }
+
   return (
     <div className="project-tree">
+      {pendingSessionPath && (
+        <div className="session-name-dialog">
+          <div className="session-name-label">Session name (optional):</div>
+          <input
+            type="text"
+            className="create-input"
+            placeholder="Leave empty for auto-name..."
+            value={sessionNameInput}
+            onChange={(e) => setSessionNameInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleCreateSession()
+              if (e.key === 'Escape') setPendingSessionPath(null)
+            }}
+            autoFocus
+          />
+          <div className="create-actions">
+            <button className="create-btn" onClick={handleCreateSession}>
+              Create
+            </button>
+            <button className="create-btn cancel" onClick={() => setPendingSessionPath(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {projects.map((project) => {
         const isExpanded = expanded.has(project.path)
         const hasWorktrees = project.worktrees.length > 1
@@ -117,12 +159,28 @@ export default function ProjectTree() {
 
             {isExpanded && (
               <div className="worktree-list">
-                {project.worktrees.map((wt) => (
-                  <div key={wt.path} className="worktree-item">
-                    {wt.name}
-                    {wt.branch && <span className="worktree-branch"> ({wt.branch})</span>}
-                  </div>
-                ))}
+                {project.worktrees.map((wt) => {
+                  const matchingSession = sessions.find(
+                    (s) => s.worktreeName === wt.name && s.projectPath === project.path
+                  )
+                  return (
+                    <div
+                      key={wt.path}
+                      className={`worktree-item${matchingSession ? ' clickable' : ''}`}
+                      onClick={() => {
+                        if (matchingSession && onOpenSession) {
+                          onOpenSession(
+                            matchingSession.id,
+                            `${matchingSession.projectName}/${matchingSession.worktreeName}`
+                          )
+                        }
+                      }}
+                    >
+                      {wt.name}
+                      {wt.branch && <span className="worktree-branch"> ({wt.branch})</span>}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>

@@ -315,6 +315,32 @@ body,
   white-space: nowrap;
 }
 
+.session-name-dialog {
+  padding: 8px;
+  margin-bottom: 8px;
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.session-name-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.worktree-item.clickable {
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.worktree-item.clickable:hover {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
 .worktree-branch {
   opacity: 0.6;
 }

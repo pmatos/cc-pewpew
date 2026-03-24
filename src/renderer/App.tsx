@@ -112,7 +112,12 @@ export default function App() {
           </button>
         </div>
         <div className="sidebar-content">
-          <ProjectTree />
+          <ProjectTree
+            onOpenSession={(id, name) => {
+              setActiveSessionId(id)
+              setActiveSessionName(name)
+            }}
+          />
         </div>
         <div className="sidebar-footer">
           {showCreateDialog ? (

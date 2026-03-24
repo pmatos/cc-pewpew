@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('api', {
   ptyResize: (sessionId: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty:resize', sessionId, cols, rows),
   ptyDestroy: (sessionId: string) => ipcRenderer.invoke('pty:destroy', sessionId),
+  ptyGetScrollback: (sessionId: string) => ipcRenderer.invoke('pty:scrollback', sessionId),
   onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,

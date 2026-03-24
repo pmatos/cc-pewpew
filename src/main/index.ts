@@ -7,7 +7,14 @@ import { scanProjects } from './project-scanner'
 import { installHooks } from './hook-installer'
 import { startHookServer, stopHookServer } from './hook-server'
 import { createTray } from './tray'
-import { initPtyManager, stopPtyManager, writePty, resizePty, destroyPty } from './pty-manager'
+import {
+  initPtyManager,
+  stopPtyManager,
+  writePty,
+  resizePty,
+  destroyPty,
+  getScrollback,
+} from './pty-manager'
 import {
   initSessionManager,
   createSession,
@@ -131,6 +138,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('pty:destroy', (_event, sessionId: string) => {
     destroyPty(sessionId)
+  })
+
+  ipcMain.handle('pty:scrollback', (_event, sessionId: string) => {
+    return getScrollback(sessionId)
   })
 
   ipcMain.handle('config:get-canvas', () => {

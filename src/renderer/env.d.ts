@@ -26,6 +26,7 @@ declare global {
       ptyWrite: (sessionId: string, data: string) => Promise<void>
       ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>
       ptyDestroy: (sessionId: string) => Promise<void>
+      ptyGetScrollback: (sessionId: string) => Promise<string>
       onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => () => void
     }
   }

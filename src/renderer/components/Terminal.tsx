@@ -40,6 +40,13 @@ export default function Terminal({ sessionId }: Props) {
       window.api.ptyResize(sessionId, term.cols, term.rows)
     })
 
+    // Replay scrollback so returning to a session shows current content
+    window.api.ptyGetScrollback(sessionId).then((scrollback) => {
+      if (scrollback) {
+        term.write(scrollback)
+      }
+    })
+
     // Forward user input to pty
     const inputDisposable = term.onData((data) => {
       window.api.ptyWrite(sessionId, data)

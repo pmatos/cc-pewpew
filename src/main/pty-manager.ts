@@ -128,6 +128,18 @@ export function hasPty(sessionId: string): boolean {
   return ptys.has(sessionId)
 }
 
+export function getScrollback(sessionId: string): string {
+  const tmuxSession = `cc-pewpew-${sessionId}`
+  try {
+    return execFileSync('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-S', '-5000'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    })
+  } catch {
+    return ''
+  }
+}
+
 export function discoverTmuxSessions(): string[] {
   try {
     const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
