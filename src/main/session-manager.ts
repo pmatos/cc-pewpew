@@ -6,6 +6,8 @@ import { join, basename } from 'path'
 import { randomUUID } from 'crypto'
 import { type BrowserWindow, dialog, shell } from 'electron'
 import { CONFIG_DIR } from './config'
+import { updateTray } from './tray'
+import { notifyNeedsInput } from './notifications'
 import type { Session, SessionStatus } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
@@ -31,13 +33,18 @@ function notifyRenderer(): void {
   }
 }
 
+function onSessionsChanged(): void {
+  persistSessions()
+  notifyRenderer()
+  updateTray(getSessions())
+}
+
 function updateSession(id: string, status: SessionStatus): void {
   const entry = sessions.get(id)
   if (!entry) return
   entry.session.status = status
   entry.session.lastActivity = Date.now()
-  persistSessions()
-  notifyRenderer()
+  onSessionsChanged()
 }
 
 export function initSessionManager(mainWindow: BrowserWindow): void {
@@ -112,8 +119,7 @@ export async function createSession(projectPath: string, name?: string): Promise
     if (entry) entry.child = null
   })
 
-  persistSessions()
-  notifyRenderer()
+  onSessionsChanged()
 
   return session
 }
@@ -139,6 +145,7 @@ export function handleHookEvent(method: string, params: Record<string, unknown>)
       break
     case 'session.stop':
       entry.session.status = 'needs_input'
+      notifyNeedsInput(entry.session)
       break
     case 'session.activity':
       entry.session.status = 'running'
@@ -159,8 +166,7 @@ export function handleHookEvent(method: string, params: Record<string, unknown>)
   }
 
   entry.session.lastActivity = Date.now()
-  persistSessions()
-  notifyRenderer()
+  onSessionsChanged()
 }
 
 export function killSession(id: string): void {
@@ -202,8 +208,7 @@ export async function removeWorktree(id: string): Promise<void> {
 
 export function removeSession(id: string): void {
   sessions.delete(id)
-  persistSessions()
-  notifyRenderer()
+  onSessionsChanged()
 }
 
 const cleanupInProgress = new Set<string>()

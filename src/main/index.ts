@@ -8,6 +8,7 @@ import { installHooks } from './hook-installer'
 import { startHookServer, stopHookServer } from './hook-server'
 import { startCapture, stopCapture } from './window-capture'
 import { focusWindow } from './window-focus'
+import { createTray } from './tray'
 import {
   initSessionManager,
   createSession,
@@ -137,6 +138,7 @@ app.whenReady().then(async () => {
   startHookServer(mainWindow)
   initSessionManager(mainWindow)
   startCapture(mainWindow)
+  createTray(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
