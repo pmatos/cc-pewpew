@@ -127,3 +127,60 @@ export function getPtyIds(): string[] {
 export function hasPty(sessionId: string): boolean {
   return ptys.has(sessionId)
 }
+
+export function discoverTmuxSessions(): string[] {
+  try {
+    const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    })
+    return output
+      .split('\n')
+      .filter((name) => name.startsWith('cc-pewpew-'))
+      .map((name) => name.replace('cc-pewpew-', ''))
+  } catch {
+    return []
+  }
+}
+
+export function reattachPty(sessionId: string): void {
+  const tmuxSession = `cc-pewpew-${sessionId}`
+
+  // Attach to existing tmux session via node-pty
+  const ptyProcess = pty.spawn('tmux', ['attach-session', '-t', tmuxSession], {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 30,
+    env: process.env as Record<string, string>,
+  })
+
+  const entry: PtyEntry = {
+    pty: ptyProcess,
+    tmuxSession,
+    buffer: '',
+  }
+
+  ptyProcess.onData((data) => {
+    entry.buffer += data
+  })
+
+  ptyProcess.onExit(() => {
+    ptys.delete(sessionId)
+  })
+
+  ptys.set(sessionId, entry)
+
+  // Replay scrollback history
+  try {
+    const scrollback = execFileSync(
+      'tmux',
+      ['capture-pane', '-t', tmuxSession, '-p', '-S', '-5000'],
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+    if (scrollback) {
+      entry.buffer += scrollback
+    }
+  } catch {
+    // Scrollback capture may fail — not critical
+  }
+}

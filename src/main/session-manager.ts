@@ -7,7 +7,7 @@ import { type BrowserWindow, dialog, shell } from 'electron'
 import { CONFIG_DIR } from './config'
 import { updateTray } from './tray'
 import { notifyNeedsInput } from './notifications'
-import { createPty, destroyPty } from './pty-manager'
+import { createPty, destroyPty, discoverTmuxSessions, reattachPty } from './pty-manager'
 import type { Session, SessionStatus } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
@@ -214,28 +214,26 @@ export function getSessions(): Session[] {
   return Array.from(sessions.values()).map((e) => e.session)
 }
 
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
 export function restoreSessions(): void {
   if (!existsSync(SESSIONS_PATH)) return
 
   try {
     const data: Session[] = JSON.parse(readFileSync(SESSIONS_PATH, 'utf-8'))
+    const liveTmuxIds = new Set(discoverTmuxSessions())
+
     for (const session of data) {
       if (session.status === 'running' || session.status === 'idle') {
-        session.status = isPidAlive(session.pid) ? 'idle' : 'dead'
+        if (liveTmuxIds.has(session.id)) {
+          session.status = 'idle'
+          reattachPty(session.id)
+        } else {
+          session.status = 'dead'
+        }
       }
       session.lastActivity = Date.now()
       sessions.set(session.id, { session })
     }
-    persistSessions()
+    onSessionsChanged()
   } catch {
     // Corrupted sessions file — start fresh
   }

@@ -166,13 +166,12 @@ app.whenReady().then(async () => {
     saveConfig(config)
   })
 
-  restoreSessions()
-
   const mainWindow = createWindow()
   startHookServer(mainWindow)
   initSessionManager(mainWindow)
   createTray(mainWindow)
   initPtyManager(mainWindow)
+  restoreSessions()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
