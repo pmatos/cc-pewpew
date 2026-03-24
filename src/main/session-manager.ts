@@ -227,7 +227,6 @@ export function restoreSessions(): void {
       if (session.status === 'running' || session.status === 'idle') {
         if (liveTmuxIds.has(session.id)) {
           session.status = 'idle'
-          reattachPty(session.id)
         } else {
           session.status = 'dead'
         }
@@ -235,6 +234,18 @@ export function restoreSessions(): void {
       session.lastActivity = Date.now()
       sessions.set(session.id, { session })
     }
+
+    // Reattach ptys after all sessions are in the map
+    for (const session of data) {
+      if (session.status === 'idle' && liveTmuxIds.has(session.id)) {
+        try {
+          reattachPty(session.id)
+        } catch (err) {
+          console.error(`Failed to reattach pty for ${session.id}:`, err)
+        }
+      }
+    }
+
     onSessionsChanged()
   } catch {
     // Corrupted sessions file — start fresh
