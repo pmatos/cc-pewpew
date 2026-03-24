@@ -5,7 +5,8 @@
 set -euo pipefail
 
 INPUT=$(cat)
-SOCKET=$(cat ~/.cc-pewpew/socket-path 2>/dev/null || echo "")
+CC_PEWPEW_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew"
+SOCKET=$(cat "$CC_PEWPEW_DIR/socket-path" 2>/dev/null || echo "")
 if [ -z "$SOCKET" ] || [ ! -S "$SOCKET" ]; then
   exit 0  # cc-pewpew not running, silently ignore
 fi

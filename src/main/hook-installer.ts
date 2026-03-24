@@ -2,16 +2,42 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } fr
 import { join } from 'path'
 
 const CC_PEWPEW_HOOKS = {
-  SessionStart: [{ hooks: [{ type: 'command', command: '~/.cc-pewpew/hooks/notify.sh' }] }],
-  Stop: [{ hooks: [{ type: 'command', command: '~/.cc-pewpew/hooks/notify.sh' }] }],
+  SessionStart: [
+    {
+      hooks: [
+        { type: 'command', command: '${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew/hooks/notify.sh' },
+      ],
+    },
+  ],
+  Stop: [
+    {
+      hooks: [
+        { type: 'command', command: '${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew/hooks/notify.sh' },
+      ],
+    },
+  ],
   PostToolUse: [
     {
       matcher: 'Read|Write|Edit|Bash',
-      hooks: [{ type: 'command', command: '~/.cc-pewpew/hooks/notify.sh' }],
+      hooks: [
+        { type: 'command', command: '${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew/hooks/notify.sh' },
+      ],
     },
   ],
-  SessionEnd: [{ hooks: [{ type: 'command', command: '~/.cc-pewpew/hooks/notify.sh' }] }],
-  Notification: [{ hooks: [{ type: 'command', command: '~/.cc-pewpew/hooks/notify.sh' }] }],
+  SessionEnd: [
+    {
+      hooks: [
+        { type: 'command', command: '${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew/hooks/notify.sh' },
+      ],
+    },
+  ],
+  Notification: [
+    {
+      hooks: [
+        { type: 'command', command: '${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew/hooks/notify.sh' },
+      ],
+    },
+  ],
 }
 
 export async function installHooks(projectPath: string): Promise<void> {

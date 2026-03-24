@@ -25,7 +25,10 @@ export interface AppConfig {
   uiScale: number
 }
 
-export const CONFIG_DIR = join(homedir(), '.cc-pewpew')
+export const CONFIG_DIR = join(
+  process.env.XDG_CONFIG_HOME || join(homedir(), '.config'),
+  'cc-pewpew'
+)
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
 
 const DEFAULT_CONFIG: AppConfig = {
