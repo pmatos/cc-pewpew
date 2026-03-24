@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   createSession: (projectPath: string, name?: string) =>
     ipcRenderer.invoke('sessions:create', projectPath, name),
   getSessions: () => ipcRenderer.invoke('sessions:list'),
+  killSession: (id: string) => ipcRenderer.invoke('sessions:kill', id),
   onSessionsUpdated: (callback: (sessions: unknown[]) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: unknown[]) => callback(data)
     ipcRenderer.on('sessions:updated', handler)

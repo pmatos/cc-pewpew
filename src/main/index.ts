@@ -6,7 +6,13 @@ import { getConfig, resolvePath, CONFIG_DIR } from './config'
 import { scanProjects } from './project-scanner'
 import { installHooks } from './hook-installer'
 import { startHookServer, stopHookServer } from './hook-server'
-import { initSessionManager, createSession, getSessions, restoreSessions } from './session-manager'
+import {
+  initSessionManager,
+  createSession,
+  getSessions,
+  restoreSessions,
+  killSession,
+} from './session-manager'
 
 function installNotifyScript(): void {
   const hooksDir = join(CONFIG_DIR, 'hooks')
@@ -80,6 +86,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('sessions:list', () => {
     return getSessions()
+  })
+
+  ipcMain.handle('sessions:kill', (_event, id: string) => {
+    killSession(id)
   })
 
   restoreSessions()

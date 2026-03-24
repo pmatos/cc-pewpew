@@ -12,6 +12,7 @@ declare global {
       onHookEvent: (callback: (event: { method: string; params: unknown }) => void) => () => void
       createSession: (projectPath: string, name?: string) => Promise<Session>
       getSessions: () => Promise<Session[]>
+      killSession: (id: string) => Promise<void>
       onSessionsUpdated: (callback: (sessions: Session[]) => void) => () => void
     }
   }

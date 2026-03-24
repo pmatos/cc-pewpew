@@ -3,6 +3,7 @@ import { writeFileSync, unlinkSync, existsSync } from 'fs'
 import { join } from 'path'
 import { type BrowserWindow } from 'electron'
 import { CONFIG_DIR } from './config'
+import { handleHookEvent } from './session-manager'
 
 const SOCKET_PATH = join(CONFIG_DIR, 'ipc.sock')
 const SOCKET_BREADCRUMB = join(CONFIG_DIR, 'socket-path')
@@ -48,6 +49,9 @@ function handleRequest(
   if (req.method === 'ping') {
     return { jsonrpc: '2.0', result: 'pong', id: req.id ?? null }
   }
+
+  // Update session state in session manager
+  handleHookEvent(req.method, (req.params as Record<string, unknown>) ?? {})
 
   if (mainWindowRef && !mainWindowRef.isDestroyed()) {
     mainWindowRef.webContents.send('hook:event', {

@@ -85,15 +85,80 @@ body,
 .canvas {
   grid-column: 2;
   grid-row: 1;
+  overflow: auto;
+}
+
+.canvas-empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  height: 100%;
 }
 
 .canvas-placeholder {
   color: var(--text-secondary);
   font-size: 16px;
+}
+
+.session-canvas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  padding: 16px;
+  align-content: start;
+}
+
+.session-card {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.session-card:hover {
+  border-color: #4ade80;
+}
+
+.session-card-thumb {
+  width: 100%;
+  height: 150px;
+  background: #0e0e1e;
+}
+
+.session-card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-card-header {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-card-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.session-card-time {
+  font-size: 10px;
+  color: var(--text-secondary);
 }
 
 .project-tree {

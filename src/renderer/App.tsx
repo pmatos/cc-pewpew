@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import ProjectTree from './components/ProjectTree'
+import SessionCanvas from './components/SessionCanvas'
 import { useProjectsStore } from './stores/projects'
 import { useSessionsStore } from './stores/sessions'
 
@@ -67,7 +68,7 @@ export default function App() {
       </aside>
 
       <main className="canvas">
-        <span className="canvas-placeholder">No sessions</span>
+        <SessionCanvas />
       </main>
 
       <footer className="statusbar">

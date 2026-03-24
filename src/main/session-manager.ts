@@ -118,6 +118,70 @@ export async function createSession(projectPath: string, name?: string): Promise
   return session
 }
 
+export function handleHookEvent(method: string, params: Record<string, unknown>): void {
+  const sessionId = params.session_id as string | undefined
+  if (!sessionId) return
+
+  // Find session by CC session_id — CC's session_id may differ from our internal id,
+  // so also check if any session's cwd matches or just try matching by our id
+  let entry: SessionEntry | undefined
+  for (const e of sessions.values()) {
+    if (e.session.id === sessionId) {
+      entry = e
+      break
+    }
+  }
+  if (!entry) return
+
+  switch (method) {
+    case 'session.start':
+      entry.session.status = 'running'
+      break
+    case 'session.stop':
+      entry.session.status = 'needs_input'
+      break
+    case 'session.activity':
+      entry.session.status = 'running'
+      break
+    case 'session.end':
+      entry.session.status = 'completed'
+      break
+    case 'session.notification':
+      entry.session.hookEvents.push({
+        method,
+        sessionId,
+        timestamp: Date.now(),
+        data: params,
+      })
+      break
+    default:
+      return
+  }
+
+  entry.session.lastActivity = Date.now()
+  persistSessions()
+  notifyRenderer()
+}
+
+export function killSession(id: string): void {
+  const entry = sessions.get(id)
+  if (!entry) return
+
+  if (entry.child) {
+    try {
+      entry.child.kill('SIGTERM')
+    } catch {
+      // Process already dead
+    }
+  } else if (entry.session.pid) {
+    try {
+      process.kill(entry.session.pid, 'SIGTERM')
+    } catch {
+      // Process already dead
+    }
+  }
+}
+
 export function getSessions(): Session[] {
   return Array.from(sessions.values()).map((e) => e.session)
 }
