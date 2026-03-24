@@ -13,4 +13,12 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('hook:event', handler)
     return () => ipcRenderer.removeListener('hook:event', handler)
   },
+  createSession: (projectPath: string, name?: string) =>
+    ipcRenderer.invoke('sessions:create', projectPath, name),
+  getSessions: () => ipcRenderer.invoke('sessions:list'),
+  onSessionsUpdated: (callback: (sessions: unknown[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: unknown[]) => callback(data)
+    ipcRenderer.on('sessions:updated', handler)
+    return () => ipcRenderer.removeListener('sessions:updated', handler)
+  },
 })

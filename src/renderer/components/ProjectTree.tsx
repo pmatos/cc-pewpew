@@ -54,8 +54,9 @@ export default function ProjectTree() {
     } else {
       items.push({
         label: 'New session...',
-        disabled: true,
-        onClick: () => {},
+        onClick: async () => {
+          await window.api.createSession(menu.projectPath)
+        },
       })
     }
 

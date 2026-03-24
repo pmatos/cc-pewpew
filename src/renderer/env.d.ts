@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { Project } from '../shared/types'
+import type { Project, Session } from '../shared/types'
 
 declare global {
   interface Window {
@@ -10,6 +10,9 @@ declare global {
       createProject: (name: string) => Promise<void>
       openInFileManager: (path: string) => Promise<void>
       onHookEvent: (callback: (event: { method: string; params: unknown }) => void) => () => void
+      createSession: (projectPath: string, name?: string) => Promise<Session>
+      getSessions: () => Promise<Session[]>
+      onSessionsUpdated: (callback: (sessions: Session[]) => void) => () => void
     }
   }
 }

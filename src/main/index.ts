@@ -6,6 +6,7 @@ import { getConfig, resolvePath, CONFIG_DIR } from './config'
 import { scanProjects } from './project-scanner'
 import { installHooks } from './hook-installer'
 import { startHookServer, stopHookServer } from './hook-server'
+import { initSessionManager, createSession, getSessions, restoreSessions } from './session-manager'
 
 function installNotifyScript(): void {
   const hooksDir = join(CONFIG_DIR, 'hooks')
@@ -73,8 +74,19 @@ app.whenReady().then(async () => {
     await shell.openPath(path)
   })
 
+  ipcMain.handle('sessions:create', async (_event, projectPath: string, name?: string) => {
+    return createSession(projectPath, name)
+  })
+
+  ipcMain.handle('sessions:list', () => {
+    return getSessions()
+  })
+
+  restoreSessions()
+
   const mainWindow = createWindow()
   startHookServer(mainWindow)
+  initSessionManager(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
