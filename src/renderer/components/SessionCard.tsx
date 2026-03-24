@@ -23,9 +23,10 @@ const STATUS_CONFIG: Record<SessionStatus, { color: string; label: string }> = {
 interface Props {
   session: Session
   thumbnail?: string
+  style?: React.CSSProperties
 }
 
-export default function SessionCard({ session, thumbnail }: Props) {
+export default function SessionCard({ session, thumbnail, style }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const { color, label } = STATUS_CONFIG[session.status]
 
@@ -50,7 +51,12 @@ export default function SessionCard({ session, thumbnail }: Props) {
   ]
 
   return (
-    <div className="session-card" onClick={handleClick} onContextMenu={handleContextMenu}>
+    <div
+      className="session-card"
+      onClick={handleClick}
+      onContextMenu={handleContextMenu}
+      style={style}
+    >
       <div className="session-card-thumb">
         {thumbnail && (
           <img src={thumbnail} alt={`${session.projectName}/${session.worktreeName}`} />

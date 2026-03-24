@@ -15,6 +15,8 @@ declare global {
       killSession: (id: string) => Promise<void>
       focusSession: (ghosttyClass: string, pid: number) => Promise<void>
       onSessionsUpdated: (callback: (sessions: Session[]) => void) => () => void
+      getCanvasState: () => Promise<{ zoom: number; panX: number; panY: number }>
+      saveCanvasState: (state: { zoom: number; panX: number; panY: number }) => Promise<void>
       onThumbnailsUpdated: (callback: (thumbnails: Record<string, string>) => void) => () => void
     }
   }

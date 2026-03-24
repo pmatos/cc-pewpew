@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import { copyFileSync, mkdirSync, chmodSync } from 'fs'
 import installExtension, { REACT_DEVELOPER_TOOLS } from 'electron-devtools-installer'
-import { getConfig, resolvePath, CONFIG_DIR } from './config'
+import { getConfig, saveConfig, resolvePath, CONFIG_DIR, type CanvasState } from './config'
 import { scanProjects } from './project-scanner'
 import { installHooks } from './hook-installer'
 import { startHookServer, stopHookServer } from './hook-server'
@@ -96,6 +96,16 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('sessions:focus', async (_event, ghosttyClass: string, pid: number) => {
     await focusWindow(ghosttyClass, pid)
+  })
+
+  ipcMain.handle('config:get-canvas', () => {
+    return getConfig().canvas
+  })
+
+  ipcMain.handle('config:save-canvas', (_event, canvas: CanvasState) => {
+    const config = getConfig()
+    config.canvas = canvas
+    saveConfig(config)
   })
 
   restoreSessions()

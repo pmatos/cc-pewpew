@@ -2,8 +2,15 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
+export interface CanvasState {
+  zoom: number
+  panX: number
+  panY: number
+}
+
 export interface AppConfig {
   scanDirs: string[]
+  canvas: CanvasState
 }
 
 export const CONFIG_DIR = join(homedir(), '.cc-pewpew')
@@ -11,6 +18,7 @@ const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
 
 const DEFAULT_CONFIG: AppConfig = {
   scanDirs: ['~/dev'],
+  canvas: { zoom: 0.7, panX: 0, panY: 0 },
 }
 
 export function resolvePath(p: string): string {

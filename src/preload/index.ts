@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   focusSession: (ghosttyClass: string, pid: number) =>
     ipcRenderer.invoke('sessions:focus', ghosttyClass, pid),
+  getCanvasState: () => ipcRenderer.invoke('config:get-canvas'),
+  saveCanvasState: (state: { zoom: number; panX: number; panY: number }) =>
+    ipcRenderer.invoke('config:save-canvas', state),
   onThumbnailsUpdated: (callback: (thumbnails: Record<string, string>) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: Record<string, string>) =>
       callback(data)

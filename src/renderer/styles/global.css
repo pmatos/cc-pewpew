@@ -85,7 +85,8 @@ body,
 .canvas {
   grid-column: 2;
   grid-row: 1;
-  overflow: auto;
+  overflow: hidden;
+  position: relative;
 }
 
 .canvas-empty {
@@ -100,12 +101,23 @@ body,
   font-size: 16px;
 }
 
-.session-canvas {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 16px;
-  padding: 16px;
-  align-content: start;
+.canvas-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.dot-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.canvas-content {
+  position: absolute;
+  z-index: 1;
 }
 
 .session-card {
