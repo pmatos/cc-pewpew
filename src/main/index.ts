@@ -178,6 +178,10 @@ app.whenReady().then(async () => {
     saveConfig(config)
   })
 
+  ipcMain.handle('config:get-ui-scale', () => {
+    return getConfig().uiScale
+  })
+
   const mainWindow = createWindow()
   startHookServer(mainWindow)
   initSessionManager(mainWindow)

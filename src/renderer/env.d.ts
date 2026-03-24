@@ -23,6 +23,7 @@ declare global {
       saveClusterPositions: (positions: Record<string, { x: number; y: number }>) => Promise<void>
       getSidebarWidth: () => Promise<number>
       saveSidebarWidth: (width: number) => Promise<void>
+      getUiScale: () => Promise<number>
       onTextThumbnails: (callback: (data: Record<string, string>) => void) => () => void
       ptyWrite: (sessionId: string, data: string) => Promise<void>
       ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>

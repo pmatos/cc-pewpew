@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('config:save-clusters', positions),
   getSidebarWidth: () => ipcRenderer.invoke('config:get-sidebar-width'),
   saveSidebarWidth: (width: number) => ipcRenderer.invoke('config:save-sidebar-width', width),
+  getUiScale: () => ipcRenderer.invoke('config:get-ui-scale'),
   onTextThumbnails: (callback: (data: Record<string, string>) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: Record<string, string>) =>
       callback(data)
