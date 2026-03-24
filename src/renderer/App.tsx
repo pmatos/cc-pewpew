@@ -14,6 +14,18 @@ export default function App() {
     return initSessions()
   }, [initSessions])
 
+  // Subscribe to open-detail IPC from tray/notifications
+  useEffect(() => {
+    return window.api.onOpenDetail((sessionId) => {
+      const sessions = useSessionsStore.getState().sessions
+      const session = sessions.find((s) => s.id === sessionId)
+      if (session) {
+        setActiveSessionId(sessionId)
+        setActiveSessionName(`${session.projectName}/${session.worktreeName}`)
+      }
+    })
+  }, [])
+
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [sidebarWidth, setSidebarWidth] = useState(250)

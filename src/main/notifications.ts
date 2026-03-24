@@ -1,5 +1,4 @@
-import { Notification } from 'electron'
-import { focusWindow } from './window-focus'
+import { BrowserWindow, Notification } from 'electron'
 import type { Session } from '../shared/types'
 
 export function notifyNeedsInput(session: Session): void {
@@ -11,7 +10,12 @@ export function notifyNeedsInput(session: Session): void {
   })
 
   notification.on('click', () => {
-    focusWindow(session.ghosttyClass, session.pid)
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) {
+      win.show()
+      win.focus()
+      win.webContents.send('sessions:open-detail', session.id)
+    }
   })
 
   notification.show()

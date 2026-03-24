@@ -21,7 +21,7 @@ export interface Session {
   worktreeName: string
   worktreePath: string
   pid: number
-  ghosttyClass: string
+  tmuxSession: string
   status: SessionStatus
   lastActivity: number
   hookEvents: HookEvent[]

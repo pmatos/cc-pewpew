@@ -1,4 +1,3 @@
-import { spawn, type ChildProcess } from 'child_process'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
@@ -8,6 +7,7 @@ import { type BrowserWindow, dialog, shell } from 'electron'
 import { CONFIG_DIR } from './config'
 import { updateTray } from './tray'
 import { notifyNeedsInput } from './notifications'
+import { createPty, destroyPty } from './pty-manager'
 import type { Session, SessionStatus } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
@@ -15,7 +15,6 @@ const SESSIONS_PATH = join(CONFIG_DIR, 'sessions.json')
 
 interface SessionEntry {
   session: Session
-  child: ChildProcess | null
 }
 
 const sessions = new Map<string, SessionEntry>()
@@ -56,18 +55,7 @@ export async function createSession(projectPath: string, name?: string): Promise
   const worktreeName = name || `session-${id}`
   const projectName = basename(projectPath)
   const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
-  const ghosttyClass = `com.ccpewpew.s.${id}`
-
-  // Check Ghostty is available
-  try {
-    await execFileAsync('which', ['ghostty'])
-  } catch {
-    dialog.showErrorBox(
-      'Ghostty not found',
-      'Ghostty is not installed or not in your PATH.\nPlease install Ghostty and ensure it is accessible.'
-    )
-    throw new Error('Ghostty not found')
-  }
+  const tmuxSession = `cc-pewpew-${id}`
 
   // Create worktree
   try {
@@ -85,23 +73,8 @@ export async function createSession(projectPath: string, name?: string): Promise
     await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath])
   }
 
-  // Spawn Ghostty
-  const child = spawn(
-    'ghostty',
-    [
-      `--class=${ghosttyClass}`,
-      `--title=${projectName}/${worktreeName}`,
-      '--gtk-single-instance=false',
-      `--working-directory=${worktreePath}`,
-      '-e',
-      'claude',
-      '--dangerously-skip-permissions',
-    ],
-    {
-      detached: false,
-      stdio: 'ignore',
-    }
-  )
+  // Create embedded terminal via PTY manager (tmux + node-pty)
+  createPty(id, worktreePath)
 
   const session: Session = {
     id,
@@ -109,26 +82,14 @@ export async function createSession(projectPath: string, name?: string): Promise
     projectName,
     worktreeName,
     worktreePath,
-    pid: child.pid ?? 0,
-    ghosttyClass,
+    pid: 0,
+    tmuxSession,
     status: 'running',
     lastActivity: Date.now(),
     hookEvents: [],
   }
 
-  sessions.set(id, { session, child })
-
-  child.on('exit', () => {
-    const entry = sessions.get(id)
-    if (entry) entry.child = null
-    promptCleanup(id)
-  })
-
-  child.on('error', () => {
-    updateSession(id, 'error')
-    const entry = sessions.get(id)
-    if (entry) entry.child = null
-  })
+  sessions.set(id, { session })
 
   onSessionsChanged()
 
@@ -181,22 +142,7 @@ export function handleHookEvent(method: string, params: Record<string, unknown>)
 }
 
 export function killSession(id: string): void {
-  const entry = sessions.get(id)
-  if (!entry) return
-
-  if (entry.child) {
-    try {
-      entry.child.kill('SIGTERM')
-    } catch {
-      // Process already dead
-    }
-  } else if (entry.session.pid) {
-    try {
-      process.kill(entry.session.pid, 'SIGTERM')
-    } catch {
-      // Process already dead
-    }
-  }
+  destroyPty(id)
 }
 
 export async function removeWorktree(id: string): Promise<void> {
@@ -251,6 +197,7 @@ async function promptCleanup(id: string): Promise<void> {
     : await dialog.showMessageBox(options)
 
   if (response === 0) {
+    destroyPty(id)
     await removeWorktree(id)
     removeSession(id)
   } else if (response === 1) {
@@ -286,7 +233,7 @@ export function restoreSessions(): void {
         session.status = isPidAlive(session.pid) ? 'idle' : 'dead'
       }
       session.lastActivity = Date.now()
-      sessions.set(session.id, { session, child: null })
+      sessions.set(session.id, { session })
     }
     persistSessions()
   } catch {

@@ -1,18 +1,23 @@
 import { Tray, Menu, nativeImage, type BrowserWindow, app } from 'electron'
-import { focusWindow } from './window-focus'
 import type { Session } from '../shared/types'
 
 let tray: Tray | null = null
 let mainWindowRef: BrowserWindow | null = null
 
 function createTrayIcon(): Electron.NativeImage {
-  // 16x16 green circle on transparent background as a data URI
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
     <circle cx="8" cy="8" r="6" fill="#4ade80"/>
     <circle cx="8" cy="8" r="3" fill="#1a1a2e"/>
   </svg>`
   const encoded = Buffer.from(svg).toString('base64')
   return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${encoded}`)
+}
+
+function showAndOpenSession(sessionId: string): void {
+  if (!mainWindowRef || mainWindowRef.isDestroyed()) return
+  mainWindowRef.show()
+  mainWindowRef.focus()
+  mainWindowRef.webContents.send('sessions:open-detail', sessionId)
 }
 
 export function createTray(mainWindow: BrowserWindow): void {
@@ -57,7 +62,7 @@ export function updateTray(sessions: Session[]): void {
     for (const session of needsInput) {
       menuItems.push({
         label: `${session.projectName}/${session.worktreeName}`,
-        click: () => focusWindow(session.ghosttyClass, session.pid),
+        click: () => showAndOpenSession(session.id),
       })
     }
     menuItems.push({ type: 'separator' })

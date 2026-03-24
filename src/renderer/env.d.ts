@@ -15,8 +15,8 @@ declare global {
       killSession: (id: string) => Promise<void>
       removeWorktree: (id: string) => Promise<void>
       removeSession: (id: string) => Promise<void>
-      focusSession: (ghosttyClass: string, pid: number) => Promise<void>
       onSessionsUpdated: (callback: (sessions: Session[]) => void) => () => void
+      onOpenDetail: (callback: (sessionId: string) => void) => () => void
       getCanvasState: () => Promise<{ zoom: number; panX: number; panY: number }>
       saveCanvasState: (state: { zoom: number; panX: number; panY: number }) => Promise<void>
       getClusterPositions: () => Promise<Record<string, { x: number; y: number }>>
@@ -26,7 +26,6 @@ declare global {
       onThumbnailsUpdated: (callback: (thumbnails: Record<string, string>) => void) => () => void
       ptyWrite: (sessionId: string, data: string) => Promise<void>
       ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>
-      ptyTestCreate: (sessionId: string, cwd: string) => Promise<void>
       ptyDestroy: (sessionId: string) => Promise<void>
       onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => () => void
     }

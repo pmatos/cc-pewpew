@@ -24,8 +24,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('sessions:updated', handler)
     return () => ipcRenderer.removeListener('sessions:updated', handler)
   },
-  focusSession: (ghosttyClass: string, pid: number) =>
-    ipcRenderer.invoke('sessions:focus', ghosttyClass, pid),
+  onOpenDetail: (callback: (sessionId: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, sessionId: string) => callback(sessionId)
+    ipcRenderer.on('sessions:open-detail', handler)
+    return () => ipcRenderer.removeListener('sessions:open-detail', handler)
+  },
   getCanvasState: () => ipcRenderer.invoke('config:get-canvas'),
   saveCanvasState: (state: { zoom: number; panX: number; panY: number }) =>
     ipcRenderer.invoke('config:save-canvas', state),
@@ -43,8 +46,6 @@ contextBridge.exposeInMainWorld('api', {
   ptyWrite: (sessionId: string, data: string) => ipcRenderer.invoke('pty:write', sessionId, data),
   ptyResize: (sessionId: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty:resize', sessionId, cols, rows),
-  ptyTestCreate: (sessionId: string, cwd: string) =>
-    ipcRenderer.invoke('pty:test-create', sessionId, cwd),
   ptyDestroy: (sessionId: string) => ipcRenderer.invoke('pty:destroy', sessionId),
   onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => {
     const handler = (
