@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Session } from '../../shared/types'
+import { useProjectsStore } from './projects'
 
 interface SessionsState {
   sessions: Session[]
@@ -26,6 +27,7 @@ export const useSessionsStore = create<SessionsState>((set) => ({
 
     const cleanupSessions = window.api.onSessionsUpdated((sessions) => {
       set({ sessions })
+      useProjectsStore.getState().scanProjects()
     })
 
     return cleanupSessions

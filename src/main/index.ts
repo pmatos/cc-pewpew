@@ -117,8 +117,8 @@ app.whenReady().then(async () => {
     await removeWorktree(id)
   })
 
-  ipcMain.handle('sessions:remove', (_event, id: string) => {
-    removeSession(id)
+  ipcMain.handle('sessions:remove', async (_event, id: string) => {
+    await removeSession(id)
   })
 
   ipcMain.handle('pty:write', (_event, sessionId: string, data: string) => {

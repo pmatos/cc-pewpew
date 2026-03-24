@@ -163,7 +163,9 @@ export async function removeWorktree(id: string): Promise<void> {
   }
 }
 
-export function removeSession(id: string): void {
+export async function removeSession(id: string): Promise<void> {
+  destroyPty(id)
+  await removeWorktree(id)
   sessions.delete(id)
   onSessionsChanged()
 }
