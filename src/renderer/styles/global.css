@@ -53,7 +53,7 @@ body,
 .app-layout {
   display: grid;
   grid-template-columns: 250px 4px 1fr;
-  grid-template-rows: 1fr 32px;
+  grid-template-rows: 1fr 36px;
   height: 100%;
   width: 100%;
 }
@@ -264,8 +264,8 @@ body,
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
   transition: background 0.3s ease;
@@ -495,7 +495,7 @@ body,
   background: var(--accent-green);
   border: none;
   color: var(--text-on-accent);
-  padding: 4px;
+  padding: 6px 12px;
   border-radius: 4px;
   cursor: pointer;
   font-family: var(--font-mono);
