@@ -21,6 +21,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(null)
   const [sessionNameInput, setSessionNameInput] = useState('')
+  const [creating, setCreating] = useState(false)
 
   useEffect(() => {
     scanProjects()
@@ -97,11 +98,16 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   }
 
   const handleCreateSession = async () => {
-    if (!pendingSessionPath) return
-    const name = sessionNameInput.trim() || undefined
-    await window.api.createSession(pendingSessionPath, name)
-    setPendingSessionPath(null)
-    setSessionNameInput('')
+    if (!pendingSessionPath || creating) return
+    setCreating(true)
+    try {
+      const name = sessionNameInput.trim() || undefined
+      await window.api.createSession(pendingSessionPath, name)
+      setPendingSessionPath(null)
+      setSessionNameInput('')
+    } finally {
+      setCreating(false)
+    }
   }
 
   return (
@@ -122,8 +128,8 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             autoFocus
           />
           <div className="create-actions">
-            <button className="create-btn" onClick={handleCreateSession}>
-              Create
+            <button className="create-btn" onClick={handleCreateSession} disabled={creating}>
+              {creating ? 'Creating...' : 'Create'}
             </button>
             <button className="create-btn cancel" onClick={() => setPendingSessionPath(null)}>
               Cancel

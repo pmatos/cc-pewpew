@@ -10,7 +10,11 @@ interface Props {
 export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      // Only close on Escape if terminal is NOT focused
+      // (terminal needs Escape for vim, etc.)
+      const target = e.target as HTMLElement
+      const isTerminalFocused = target.closest('.terminal-container')
+      if (e.key === 'Escape' && !isTerminalFocused) {
         e.stopPropagation()
         onClose()
       }
@@ -22,7 +26,12 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
   return (
     <div className="detail-pane">
       <div className="detail-pane-header">
-        <button className="detail-pane-close" onClick={onClose} title="Back to canvas (Escape)">
+        <button
+          className="detail-pane-close"
+          onClick={onClose}
+          aria-label="Back to canvas"
+          title="Back to canvas"
+        >
           ←
         </button>
         <span className="detail-pane-title">{sessionName}</span>

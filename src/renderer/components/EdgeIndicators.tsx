@@ -62,20 +62,22 @@ export default function EdgeIndicators({
   return (
     <div className="edge-indicators">
       {indicators.map((ind) => (
-        <div
+        <button
           key={ind.path}
           className="edge-indicator"
           style={{
             left: ind.x,
             top: ind.y,
-            background: ind.color,
           }}
+          aria-label={`Jump to ${ind.name}`}
           title={ind.name}
           onClick={(e) => {
             e.stopPropagation()
             panToCluster?.(ind.path)
           }}
-        />
+        >
+          <span className="edge-indicator-dot" style={{ background: ind.color }} />
+        </button>
       ))}
     </div>
   )

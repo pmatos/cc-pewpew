@@ -23,36 +23,60 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
         onClose()
       }
     }
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (!ref.current) return
+      const buttons = Array.from(ref.current.querySelectorAll('button:not(:disabled)'))
+      const current = document.activeElement
+      const idx = buttons.indexOf(current as Element)
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        const next = idx < buttons.length - 1 ? idx + 1 : 0
+        ;(buttons[next] as HTMLElement).focus()
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        const prev = idx > 0 ? idx - 1 : buttons.length - 1
+        ;(buttons[prev] as HTMLElement).focus()
+      }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleEscape)
+    document.addEventListener('keydown', handleKeyDown)
+
+    // Focus first item
+    requestAnimationFrame(() => {
+      const first = ref.current?.querySelector('button:not(:disabled)') as HTMLElement
+      first?.focus()
+    })
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleEscape)
+      document.removeEventListener('keydown', handleKeyDown)
     }
   }, [onClose])
 
   return (
-    <div className="context-menu" ref={ref} style={{ left: x, top: y }}>
+    <div className="context-menu" ref={ref} role="menu" style={{ left: x, top: y }}>
       {items.map((item, i) =>
         item.separator ? (
-          <div key={i} className="context-menu-separator" />
+          <div key={i} className="context-menu-separator" role="separator" />
         ) : (
-          <div
+          <button
             key={i}
+            role="menuitem"
             className={`context-menu-item${item.disabled ? ' disabled' : ''}`}
+            disabled={item.disabled}
             onClick={() => {
-              if (!item.disabled) {
-                item.onClick()
-                onClose()
-              }
+              item.onClick()
+              onClose()
             }}
           >
             {item.label}
-          </div>
+          </button>
         )
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Session, SessionStatus } from '../../shared/types'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 
@@ -29,6 +29,12 @@ interface Props {
 
 export default function SessionCard({ session, thumbnail, style, onOpenSession }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [, setTick] = useState(0)
+
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 30000)
+    return () => clearInterval(interval)
+  }, [])
   const { color, label } = STATUS_CONFIG[session.status]
 
   const sessionName = `${session.projectName}/${session.worktreeName}`
