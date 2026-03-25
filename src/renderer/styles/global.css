@@ -38,6 +38,24 @@
   }
 }
 
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
 html,
 body,
 #root {
@@ -378,7 +396,7 @@ body,
 }
 
 .session-name-label {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
