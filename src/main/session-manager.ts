@@ -143,6 +143,7 @@ export function handleHookEvent(method: string, params: Record<string, unknown>)
 
 export function killSession(id: string): void {
   destroyPty(id)
+  updateSession(id, 'dead')
 }
 
 export async function removeWorktree(id: string): Promise<void> {
