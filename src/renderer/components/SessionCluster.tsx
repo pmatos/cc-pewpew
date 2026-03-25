@@ -5,8 +5,6 @@ import SessionCard from './SessionCard'
 const CARD_WIDTH = 240
 const CARD_GAP = 12
 const CLUSTER_COLS = 2
-const CLUSTER_PADDING = 12
-const HEADER_HEIGHT = 32
 
 interface Props {
   projectPath: string
@@ -85,7 +83,13 @@ export default function SessionCluster({
       <div className="cluster-header" style={{ color: accentColor }} onMouseDown={handleMouseDown}>
         {projectName}
       </div>
-      <div className="cluster-cards">
+      <div
+        className="cluster-cards"
+        style={{
+          width: Math.min(sessions.length, CLUSTER_COLS) * (CARD_WIDTH + CARD_GAP) - CARD_GAP,
+          height: Math.ceil(sessions.length / CLUSTER_COLS) * (230 + CARD_GAP) - CARD_GAP,
+        }}
+      >
         {sessions.map((session, i) => {
           const col = i % CLUSTER_COLS
           const row = Math.floor(i / CLUSTER_COLS)
@@ -105,17 +109,6 @@ export default function SessionCluster({
           )
         })}
       </div>
-      <div
-        style={{
-          width: Math.min(sessions.length, CLUSTER_COLS) * (CARD_WIDTH + CARD_GAP) - CARD_GAP,
-          height:
-            Math.ceil(sessions.length / CLUSTER_COLS) * (230 + CARD_GAP) -
-            CARD_GAP +
-            HEADER_HEIGHT +
-            CLUSTER_PADDING,
-          pointerEvents: 'none',
-        }}
-      />
     </div>
   )
 }
