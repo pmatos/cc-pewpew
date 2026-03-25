@@ -57,8 +57,22 @@ export function createPty(sessionId: string, cwd: string): void {
 
   const tmuxSession = `cc-pewpew-${sessionId}`
 
-  // Create a detached tmux session
-  execFileSync('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd, '-x', '120', '-y', '30'])
+  // Create a detached tmux session that directly runs claude
+  // Using tmux's shell command avoids issues with interactive shell init (omz, etc.)
+  execFileSync('tmux', [
+    'new-session',
+    '-d',
+    '-s',
+    tmuxSession,
+    '-c',
+    cwd,
+    '-x',
+    '120',
+    '-y',
+    '30',
+    'claude',
+    '--dangerously-skip-permissions',
+  ])
 
   // Attach to it via node-pty
   const ptyProcess = pty.spawn('tmux', ['attach-session', '-t', tmuxSession], {
@@ -84,11 +98,6 @@ export function createPty(sessionId: string, cwd: string): void {
   })
 
   ptys.set(sessionId, entry)
-
-  // Send claude command after a short delay for tmux to initialize
-  setTimeout(() => {
-    ptyProcess.write('claude --dangerously-skip-permissions\n')
-  }, 500)
 }
 
 export function writePty(sessionId: string, data: string): void {
