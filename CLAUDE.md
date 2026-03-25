@@ -47,4 +47,4 @@ Three-process Electron structure:
 
 Terminal stack: xterm.js (renderer) + node-pty (main) + tmux (persistence).
 
-User data stored in `~/.cc-pewpew/` (config, sessions, IPC socket, hooks).
+User data stored in `~/.config/cc-pewpew/` (config, sessions, IPC socket, hooks).
