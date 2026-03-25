@@ -127,11 +127,30 @@ body,
   grid-row: 1;
   background: var(--border);
   cursor: col-resize;
-  transition: background 0.15s;
+  transition:
+    background 0.15s,
+    width 0.15s;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-resizer::after {
+  content: '···';
+  writing-mode: vertical-lr;
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: transparent;
+  transition: color 0.15s;
 }
 
 .sidebar-resizer:hover {
   background: var(--accent-green);
+}
+
+.sidebar-resizer:hover::after {
+  color: var(--bg-main);
 }
 
 .canvas {
