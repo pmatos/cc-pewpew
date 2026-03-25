@@ -97,14 +97,20 @@ export async function createSession(projectPath: string, name?: string): Promise
 }
 
 export function handleHookEvent(method: string, params: Record<string, unknown>): void {
-  const sessionId = params.session_id as string | undefined
-  if (!sessionId) return
+  // Match hook event to our session. CC's session_id differs from our internal id,
+  // so match by cwd (worktree path) which is unique per session.
+  const cwd = params.cwd as string | undefined
+  const ccSessionId = params.session_id as string | undefined
 
-  // Find session by CC session_id — CC's session_id may differ from our internal id,
-  // so also check if any session's cwd matches or just try matching by our id
   let entry: SessionEntry | undefined
   for (const e of sessions.values()) {
-    if (e.session.id === sessionId) {
+    // Primary match: cwd matches our worktreePath
+    if (cwd && e.session.worktreePath && cwd.startsWith(e.session.worktreePath)) {
+      entry = e
+      break
+    }
+    // Fallback: exact id match (in case we somehow share IDs)
+    if (ccSessionId && e.session.id === ccSessionId) {
       entry = e
       break
     }
@@ -128,7 +134,7 @@ export function handleHookEvent(method: string, params: Record<string, unknown>)
     case 'session.notification':
       entry.session.hookEvents.push({
         method,
-        sessionId,
+        sessionId: ccSessionId || entry.session.id,
         timestamp: Date.now(),
         data: params,
       })
