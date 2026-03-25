@@ -6,7 +6,8 @@ import EdgeIndicators from './EdgeIndicators'
 
 const MIN_ZOOM = 0.3
 const MAX_ZOOM = 1.0
-const ZOOM_STEP = 0.1
+const ZOOM_SENSITIVITY = 0.001
+const KEYBOARD_ZOOM_STEP = 0.1
 const DOT_SPACING = 30
 const DOT_COLOR = '#2a2a4a'
 const DOT_RADIUS = 1.5
@@ -232,14 +233,14 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
       } else if (e.key === '=' || e.key === '+') {
         e.preventDefault()
         setZoom((prev) => {
-          const next = Math.min(MAX_ZOOM, prev + ZOOM_STEP)
+          const next = Math.min(MAX_ZOOM, prev + KEYBOARD_ZOOM_STEP)
           persistCanvas(next, panX, panY)
           return next
         })
       } else if (e.key === '-') {
         e.preventDefault()
         setZoom((prev) => {
-          const next = Math.max(MIN_ZOOM, prev - ZOOM_STEP)
+          const next = Math.max(MIN_ZOOM, prev - KEYBOARD_ZOOM_STEP)
           persistCanvas(next, panX, panY)
           return next
         })
@@ -259,8 +260,8 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
       const cy = e.clientY - rect.top
 
       setZoom((prevZoom) => {
-        const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
-        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prevZoom + delta))
+        const zoomDelta = -e.deltaY * ZOOM_SENSITIVITY * prevZoom
+        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prevZoom + zoomDelta))
         const newPanX = cx - (cx - panX) * (newZoom / prevZoom)
         const newPanY = cy - (cy - panY) * (newZoom / prevZoom)
         setPanX(newPanX)
