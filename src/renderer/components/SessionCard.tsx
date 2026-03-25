@@ -11,13 +11,13 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
-const STATUS_CONFIG: Record<SessionStatus, { color: string; label: string }> = {
-  running: { color: '#4ade80', label: 'Running' },
-  needs_input: { color: '#facc15', label: 'Needs input' },
-  completed: { color: '#60a5fa', label: 'Completed' },
-  idle: { color: '#888', label: 'Idle' },
-  dead: { color: '#f87171', label: 'Dead' },
-  error: { color: '#f87171', label: 'Error' },
+const STATUS_CONFIG: Record<SessionStatus, { className: string; label: string }> = {
+  running: { className: 'status-running', label: 'Running' },
+  needs_input: { className: 'status-needs-input', label: 'Needs input' },
+  completed: { className: 'status-completed', label: 'Completed' },
+  idle: { className: 'status-idle', label: 'Idle' },
+  dead: { className: 'status-dead', label: 'Dead' },
+  error: { className: 'status-dead', label: 'Error' },
 }
 
 interface Props {
@@ -35,7 +35,7 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession }
     const interval = setInterval(() => setTick((t) => t + 1), 30000)
     return () => clearInterval(interval)
   }, [])
-  const { color, label } = STATUS_CONFIG[session.status]
+  const { className: statusClass, label } = STATUS_CONFIG[session.status]
 
   const sessionName = `${session.projectName}/${session.worktreeName}`
 
@@ -78,7 +78,7 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession }
       <div className="session-card-body">
         <div className="session-card-header">{sessionName}</div>
         <div className="session-card-status">
-          <span className="status-dot" style={{ background: color }} />
+          <span className={`status-dot ${statusClass}`} />
           <span>{label}</span>
         </div>
         <div className="session-card-time">{timeAgo(session.lastActivity)}</div>

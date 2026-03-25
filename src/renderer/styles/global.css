@@ -10,14 +10,21 @@
   --bg-main: #1a1a2e;
   --bg-sidebar: #16162a;
   --bg-statusbar: #12122a;
+  --bg-terminal: #0e0e1e;
+  --bg-context-menu: #1e1e3a;
   --text-primary: #e0e0e0;
-  --text-secondary: #888;
+  --text-secondary: #9a9a9a;
+  --text-on-accent: #111;
   --border: #2a2a4a;
+  --accent-green: #4ade80;
+  --accent-yellow: #facc15;
+  --accent-red: #f87171;
+  --accent-blue: #60a5fa;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
 }
 
 *:focus-visible {
-  outline: 2px solid #4ade80;
+  outline: 2px solid var(--accent-green);
   outline-offset: 2px;
 }
 
@@ -106,7 +113,7 @@ body,
 }
 
 .sidebar-resizer:hover {
-  background: #4ade80;
+  background: var(--accent-green);
 }
 
 .canvas {
@@ -193,7 +200,7 @@ body,
 }
 
 .session-card:hover {
-  border-color: #4ade80;
+  border-color: var(--accent-green);
 }
 
 .session-card.needs-input {
@@ -203,11 +210,11 @@ body,
 @keyframes pulse-border {
   0%,
   100% {
-    border-color: #facc15;
+    border-color: var(--accent-yellow);
     box-shadow: 0 0 0 0 rgba(250, 204, 21, 0);
   }
   50% {
-    border-color: #facc15;
+    border-color: var(--accent-yellow);
     box-shadow: 0 0 8px 2px rgba(250, 204, 21, 0.3);
   }
 }
@@ -215,7 +222,7 @@ body,
 .session-card-thumb {
   width: 100%;
   height: 150px;
-  background: #0e0e1e;
+  background: var(--bg-terminal);
   overflow: hidden;
 }
 
@@ -262,6 +269,26 @@ body,
   border-radius: 50%;
   flex-shrink: 0;
   transition: background 0.3s ease;
+}
+
+.status-dot.status-running {
+  background: var(--accent-green);
+}
+
+.status-dot.status-needs-input {
+  background: var(--accent-yellow);
+}
+
+.status-dot.status-completed {
+  background: var(--accent-blue);
+}
+
+.status-dot.status-idle {
+  background: var(--text-secondary);
+}
+
+.status-dot.status-dead {
+  background: var(--accent-red);
 }
 
 .session-card-time {
@@ -314,7 +341,7 @@ body,
 }
 
 .badge-ready {
-  color: #4ade80;
+  color: var(--accent-green);
   font-size: 14px;
   flex-shrink: 0;
 }
@@ -371,7 +398,7 @@ body,
 
 .context-menu {
   position: fixed;
-  background: #1e1e3a;
+  background: var(--bg-context-menu);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 0;
@@ -455,7 +482,7 @@ body,
 }
 
 .create-input:focus {
-  border-color: #4ade80;
+  border-color: var(--accent-green);
 }
 
 .create-actions {
@@ -465,9 +492,9 @@ body,
 
 .create-btn {
   flex: 1;
-  background: #4ade80;
+  background: var(--accent-green);
   border: none;
-  color: #111;
+  color: var(--text-on-accent);
   padding: 4px;
   border-radius: 4px;
   cursor: pointer;
@@ -489,7 +516,7 @@ body,
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #0e0e1e;
+  background: var(--bg-terminal);
 }
 
 .detail-pane-header {
@@ -553,11 +580,11 @@ body,
 }
 
 .status-count.attention {
-  color: #facc15;
+  color: var(--accent-yellow);
 }
 
 .status-count.running {
-  color: #4ade80;
+  color: var(--accent-green);
 }
 
 .statusbar-jumps {
@@ -570,7 +597,7 @@ body,
 .quick-jump-btn {
   background: var(--border);
   border: none;
-  color: #facc15;
+  color: var(--accent-yellow);
   padding: 2px 8px;
   border-radius: 10px;
   font-family: var(--font-mono);
@@ -580,8 +607,8 @@ body,
 }
 
 .quick-jump-btn:hover {
-  background: #facc15;
-  color: #111;
+  background: var(--accent-yellow);
+  color: var(--text-on-accent);
 }
 
 .edge-indicators {
