@@ -70,7 +70,8 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
             role="menuitem"
             className={`context-menu-item${item.disabled ? ' disabled' : ''}`}
             disabled={item.disabled}
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation()
               item.onClick()
               onClose()
             }}

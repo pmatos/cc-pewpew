@@ -40,7 +40,7 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession }
   const sessionName = `${session.projectName}/${session.worktreeName}`
 
   const handleClick = () => {
-    if (onOpenSession) {
+    if (onOpenSession && session.status !== 'dead' && session.status !== 'error') {
       onOpenSession(session.id, sessionName)
     }
   }
