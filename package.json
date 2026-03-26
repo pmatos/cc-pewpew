@@ -6,7 +6,7 @@
   "type": "module",
   "main": "dist-electron/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "electron-vite dev -- --remote-debugging-port=9222",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "type-check": "tsc --noEmit",
