@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { Session, SessionStatus } from '../../shared/types'
+import { useProjectsStore } from '../stores/projects'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 
 function timeAgo(ts: number): string {
@@ -61,7 +62,10 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession }
     },
     {
       label: 'Remove from canvas',
-      onClick: () => window.api.removeSession(session.id),
+      onClick: async () => {
+        await window.api.removeSession(session.id)
+        useProjectsStore.getState().scanProjects()
+      },
     },
   ]
 
