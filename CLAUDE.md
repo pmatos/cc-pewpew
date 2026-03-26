@@ -18,7 +18,8 @@ cc-pewpew is a desktop GUI (Electron + TypeScript + React) for launching, monito
 
 ## Commands
 
-- `npm run dev` — start in development mode (CDP enabled on port 9222)
+- `npm run dev` — start in development mode (hot-reload)
+- `npm run dev:debug` — build + launch with CDP on port 9229 (for MCP testing)
 - `npm run build` — production build
 - `npx tsc --noEmit` — type-check without emitting
 - `npx eslint .` — lint
@@ -28,15 +29,22 @@ cc-pewpew is a desktop GUI (Electron + TypeScript + React) for launching, monito
 
 ## Testing with Chrome DevTools Protocol
 
-`npm run dev` starts with `--remote-debugging-port=9222`. This enables the `chrome-devtools` MCP server to connect and interact with the running app:
+`npm run dev:debug` builds and launches with `--remote-debugging-port=9229`. This enables CDP-based testing:
 
-- `mcp__chrome-devtools__take_screenshot` — capture the current UI state
-- `mcp__chrome-devtools__click` — click elements
-- `mcp__chrome-devtools__fill` — fill form inputs
-- `mcp__chrome-devtools__take_snapshot` — get the accessibility tree
-- `mcp__chrome-devtools__evaluate_script` — run JS in the renderer
+To take a screenshot and view it:
 
-Use this for visual verification, automated testing, and UI debugging during development.
+```bash
+node -e "
+const ws = require('ws');
+const fs = require('fs');
+const pageId = JSON.parse(require('child_process').execSync('curl -s http://127.0.0.1:9229/json/list'))[0].id;
+const socket = new ws('ws://127.0.0.1:9229/devtools/page/' + pageId);
+socket.on('open', () => socket.send(JSON.stringify({id:1, method:'Page.captureScreenshot', params:{format:'png'}})));
+socket.on('message', (d) => { const m = JSON.parse(d.toString()); if(m.result?.data) { fs.writeFileSync('/tmp/cc-pewpew-screenshot.png', Buffer.from(m.result.data,'base64')); socket.close(); }});
+"
+```
+
+Then `Read /tmp/cc-pewpew-screenshot.png` to view the UI visually.
 
 ## Code Style
 
