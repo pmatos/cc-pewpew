@@ -26,6 +26,10 @@ import {
   removeSession,
 } from './session-manager'
 
+// Apply UI scale to the entire app (native menu bar + web content) before app is ready
+const uiScale = getConfig().uiScale ?? 1.2
+app.commandLine.appendSwitch('force-device-scale-factor', uiScale.toString())
+
 function installNotifyScript(): void {
   const hooksDir = join(CONFIG_DIR, 'hooks')
   mkdirSync(hooksDir, { recursive: true })

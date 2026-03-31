@@ -47,7 +47,7 @@ Edit `~/.config/cc-pewpew/config.json`:
 ```json
 {
   "scanDirs": ["~/dev"],
-  "uiScale": 1.0,
+  "uiScale": 1.2,
   "sidebarWidth": 250
 }
 ```

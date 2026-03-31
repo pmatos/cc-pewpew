@@ -36,7 +36,7 @@ const DEFAULT_CONFIG: AppConfig = {
   canvas: { zoom: 0.7, panX: 0, panY: 0 },
   clusterPositions: {},
   sidebarWidth: 250,
-  uiScale: 1.0,
+  uiScale: 1.2,
 }
 
 export function resolvePath(p: string): string {

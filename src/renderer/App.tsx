@@ -39,15 +39,6 @@ export default function App() {
     window.api.getSidebarWidth().then((w) => setSidebarWidth(w))
   }, [])
 
-  // Apply UI scale from config
-  useEffect(() => {
-    window.api.getUiScale().then((scale) => {
-      if (scale && scale !== 1.0) {
-        document.documentElement.style.zoom = `${scale}`
-      }
-    })
-  }, [])
-
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
