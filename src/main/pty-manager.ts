@@ -161,7 +161,7 @@ export function captureThumbnails(): Record<string, string> {
 export function getScrollback(sessionId: string): string {
   const tmuxSession = `cc-pewpew-${sessionId}`
   try {
-    return execFileSync('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-S', '-5000'], {
+    return execFileSync('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-e', '-S', '-5000'], {
       encoding: 'utf-8',
       timeout: 5000,
     })
@@ -216,7 +216,7 @@ export function reattachPty(sessionId: string): void {
   try {
     const scrollback = execFileSync(
       'tmux',
-      ['capture-pane', '-t', tmuxSession, '-p', '-S', '-5000'],
+      ['capture-pane', '-t', tmuxSession, '-p', '-e', '-S', '-5000'],
       { encoding: 'utf-8', timeout: 5000 }
     )
     if (scrollback) {

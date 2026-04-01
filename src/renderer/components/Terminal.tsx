@@ -34,29 +34,36 @@ export default function Terminal({ sessionId }: Props) {
     termRef.current = term
     fitRef.current = fitAddon
 
-    // Fit after layout settles
-    requestAnimationFrame(() => {
-      fitAddon.fit()
-      window.api.ptyResize(sessionId, term.cols, term.rows)
-    })
-
-    // Replay scrollback so returning to a session shows current content
-    window.api.ptyGetScrollback(sessionId).then((scrollback) => {
-      if (scrollback) {
-        term.write(scrollback)
-      }
-    })
-
     // Forward user input to pty
     const inputDisposable = term.onData((data) => {
       window.api.ptyWrite(sessionId, data)
     })
 
-    // Receive pty data — filter by sessionId
-    const cleanup = window.api.onPtyData((event) => {
-      if (event.sessionId === sessionId) {
-        term.write(event.data)
-      }
+    let aborted = false
+    let dataCleanup: (() => void) | null = null
+
+    // Sequenced init: fit → resize pty → wait for tmux → scrollback → live data → focus
+    requestAnimationFrame(() => {
+      ;(async () => {
+        fitAddon.fit()
+        await window.api.ptyResize(sessionId, term.cols, term.rows)
+        await new Promise((r) => setTimeout(r, 50))
+        if (aborted) return
+
+        const scrollback = await window.api.ptyGetScrollback(sessionId)
+        if (aborted) return
+        if (scrollback) {
+          term.write(scrollback)
+        }
+
+        dataCleanup = window.api.onPtyData((event) => {
+          if (event.sessionId === sessionId) {
+            term.write(event.data)
+          }
+        })
+
+        term.focus()
+      })()
     })
 
     // Resize observer
@@ -67,9 +74,10 @@ export default function Terminal({ sessionId }: Props) {
     observer.observe(containerRef.current)
 
     return () => {
+      aborted = true
       observer.disconnect()
       inputDisposable.dispose()
-      cleanup()
+      if (dataCleanup) dataCleanup()
       term.dispose()
       termRef.current = null
       fitRef.current = null
