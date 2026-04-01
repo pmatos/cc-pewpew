@@ -15,7 +15,7 @@ interface TreeProps {
 }
 
 export default function ProjectTree({ onOpenSession }: TreeProps) {
-  const { projects, loading, scanProjects } = useProjectsStore()
+  const { projects, loading, scanProjects, filterReady } = useProjectsStore()
   const { sessions } = useSessionsStore()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -89,10 +89,14 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     return <div className="project-loading">Scanning...</div>
   }
 
-  if (projects.length === 0) {
+  const displayProjects = filterReady ? projects.filter((p) => p.setupState === 'ready') : projects
+
+  if (displayProjects.length === 0) {
     return (
       <div className="project-empty">
-        No git repos found in scan directories. Use &quot;+ New project&quot; below to create one.
+        {filterReady
+          ? 'No setup projects. Right-click a project to set it up, or disable the filter.'
+          : 'No git repos found in scan directories. Use "+ New project" below to create one.'}
       </div>
     )
   }
@@ -137,7 +141,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           </div>
         </div>
       )}
-      {projects.map((project) => {
+      {displayProjects.map((project) => {
         const isExpanded = expanded.has(project.path)
         const hasWorktrees = project.worktrees.length > 1
 

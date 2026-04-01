@@ -7,7 +7,7 @@ import { useProjectsStore } from './stores/projects'
 import { useSessionsStore } from './stores/sessions'
 
 export default function App() {
-  const { scanProjects } = useProjectsStore()
+  const { scanProjects, filterReady, toggleFilterReady } = useProjectsStore()
   const { init: initSessions } = useSessionsStore()
 
   useEffect(() => {
@@ -106,9 +106,22 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-header">
           <span>Projects</span>
-          <button className="refresh-btn" onClick={scanProjects} title="Refresh projects (Ctrl+R)">
-            ⟳
-          </button>
+          <div className="sidebar-header-actions">
+            <button
+              className={`filter-btn${filterReady ? ' active' : ''}`}
+              onClick={toggleFilterReady}
+              title={filterReady ? 'Showing setup projects only' : 'Show only setup projects'}
+            >
+              ●
+            </button>
+            <button
+              className="refresh-btn"
+              onClick={scanProjects}
+              title="Refresh projects (Ctrl+R)"
+            >
+              ⟳
+            </button>
+          </div>
         </div>
         <div className="sidebar-content">
           <ProjectTree

@@ -4,12 +4,16 @@ import type { Project } from '../../shared/types'
 interface ProjectsState {
   projects: Project[]
   loading: boolean
+  filterReady: boolean
   scanProjects: () => Promise<void>
+  toggleFilterReady: () => void
 }
 
 export const useProjectsStore = create<ProjectsState>((set) => ({
   projects: [],
   loading: false,
+  filterReady: false,
+  toggleFilterReady: () => set((state) => ({ filterReady: !state.filterReady })),
   scanProjects: async () => {
     set({ loading: true })
     try {
