@@ -34,6 +34,32 @@ export default function Terminal({ sessionId }: Props) {
     termRef.current = term
     fitRef.current = fitAddon
 
+    // Auto-copy selection to clipboard
+    const selectionDisposable = term.onSelectionChange(() => {
+      const text = term.getSelection()
+      if (text) {
+        navigator.clipboard.writeText(text)
+      }
+    })
+
+    // Ctrl+Shift+C to copy, Ctrl+Shift+V to paste
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.ctrlKey && e.shiftKey && e.type === 'keydown') {
+        if (e.key === 'C') {
+          const text = term.getSelection()
+          if (text) navigator.clipboard.writeText(text)
+          return false
+        }
+        if (e.key === 'V') {
+          navigator.clipboard.readText().then((text) => {
+            if (text) window.api.ptyWrite(sessionId, text)
+          })
+          return false
+        }
+      }
+      return true
+    })
+
     // Forward user input to pty
     const inputDisposable = term.onData((data) => {
       window.api.ptyWrite(sessionId, data)
@@ -76,6 +102,7 @@ export default function Terminal({ sessionId }: Props) {
     return () => {
       aborted = true
       observer.disconnect()
+      selectionDisposable.dispose()
       inputDisposable.dispose()
       if (dataCleanup) dataCleanup()
       term.dispose()
