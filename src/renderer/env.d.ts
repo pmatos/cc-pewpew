@@ -13,6 +13,7 @@ declare global {
       createSession: (projectPath: string, name?: string) => Promise<Session>
       getSessions: () => Promise<Session[]>
       killSession: (id: string) => Promise<void>
+      reviveSession: (id: string) => Promise<void>
       removeWorktree: (id: string) => Promise<void>
       removeSession: (id: string) => Promise<void>
       onSessionsUpdated: (callback: (sessions: Session[]) => void) => () => void

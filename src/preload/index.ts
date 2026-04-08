@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('sessions:create', projectPath, name),
   getSessions: () => ipcRenderer.invoke('sessions:list'),
   killSession: (id: string) => ipcRenderer.invoke('sessions:kill', id),
+  reviveSession: (id: string) => ipcRenderer.invoke('sessions:revive', id),
   removeWorktree: (id: string) => ipcRenderer.invoke('sessions:remove-worktree', id),
   removeSession: (id: string) => ipcRenderer.invoke('sessions:remove', id),
   onSessionsUpdated: (callback: (sessions: unknown[]) => void) => {

@@ -22,6 +22,7 @@ import {
   getSessions,
   restoreSessions,
   killSession,
+  reviveSession,
   removeWorktree,
   removeSession,
 } from './session-manager'
@@ -123,6 +124,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('sessions:kill', (_event, id: string) => {
     killSession(id)
+  })
+
+  ipcMain.handle('sessions:revive', (_event, id: string) => {
+    reviveSession(id)
   })
 
   ipcMain.handle('sessions:remove-worktree', async (_event, id: string) => {

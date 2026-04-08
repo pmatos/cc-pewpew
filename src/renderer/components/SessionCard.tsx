@@ -53,7 +53,7 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession }
 
   const menuItems: MenuItem[] = [
     {
-      label: 'Open terminal',
+      label: session.status === 'dead' ? 'Restart terminal' : 'Open terminal',
       onClick: () => onOpenSession?.(session.id, sessionName),
     },
     {

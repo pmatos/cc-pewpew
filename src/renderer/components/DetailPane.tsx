@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Terminal from './Terminal'
+import { useSessionsStore } from '../stores/sessions'
 
 interface Props {
   sessionId: string
@@ -8,10 +9,12 @@ interface Props {
 }
 
 export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
+  const session = useSessionsStore((s) => s.sessions.find((s) => s.id === sessionId))
+  const isDead = session?.status === 'dead'
+  const [reviving, setReviving] = useState(false)
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Only close on Escape if terminal is NOT focused
-      // (terminal needs Escape for vim, etc.)
       const target = e.target as HTMLElement
       const isTerminalFocused = target.closest('.terminal-container')
       if (e.key === 'Escape' && !isTerminalFocused) {
@@ -22,6 +25,15 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
     document.addEventListener('keydown', handler, true)
     return () => document.removeEventListener('keydown', handler, true)
   }, [onClose])
+
+  const handleRevive = async () => {
+    setReviving(true)
+    try {
+      await window.api.reviveSession(sessionId)
+    } catch {
+      setReviving(false)
+    }
+  }
 
   return (
     <div className="detail-pane">
@@ -37,7 +49,23 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
         <span className="detail-pane-title">{sessionName}</span>
       </div>
       <div className="detail-pane-terminal">
-        <Terminal sessionId={sessionId} />
+        {isDead ? (
+          <div className="dead-session-overlay">
+            <div className="dead-session-content">
+              <div className="dead-session-icon">&#x1f480;</div>
+              <h3>Session terminated</h3>
+              <p>
+                This session&apos;s terminal was lost (e.g. after a reboot). You can restart a new
+                terminal in the same worktree.
+              </p>
+              <button className="dead-session-restart" onClick={handleRevive} disabled={reviving}>
+                {reviving ? 'Restarting...' : 'Restart terminal'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <Terminal sessionId={sessionId} />
+        )}
       </div>
     </div>
   )

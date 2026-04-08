@@ -626,6 +626,60 @@ body,
   height: 100%;
 }
 
+.dead-session-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-terminal);
+}
+
+.dead-session-content {
+  text-align: center;
+  max-width: 400px;
+  padding: 32px;
+}
+
+.dead-session-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.dead-session-content h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: var(--text-primary);
+}
+
+.dead-session-content p {
+  margin: 0 0 24px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.dead-session-restart {
+  background: var(--accent-green);
+  color: var(--text-on-accent);
+  border: none;
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.dead-session-restart:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.dead-session-restart:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .statusbar {
   grid-column: 1 / -1;
   grid-row: 2;

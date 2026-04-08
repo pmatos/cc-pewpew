@@ -152,6 +152,18 @@ export function killSession(id: string): void {
   updateSession(id, 'dead')
 }
 
+export function reviveSession(id: string): void {
+  const entry = sessions.get(id)
+  if (!entry) throw new Error(`Session ${id} not found`)
+
+  const session = entry.session
+  if (session.status !== 'dead')
+    throw new Error(`Session ${id} is not dead (status: ${session.status})`)
+
+  createPty(id, session.worktreePath)
+  updateSession(id, 'idle')
+}
+
 export async function removeWorktree(id: string): Promise<void> {
   const entry = sessions.get(id)
   if (!entry) return
