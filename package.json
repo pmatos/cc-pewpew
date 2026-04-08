@@ -30,7 +30,8 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "hooks/**/*"
     ],
     "linux": {
       "target": [
