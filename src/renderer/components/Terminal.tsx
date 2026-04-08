@@ -57,6 +57,11 @@ export default function Terminal({ sessionId }: Props) {
           return false
         }
       }
+      // Shift+Enter → kitty protocol sequence for "newline, don't submit"
+      if (e.type === 'keydown' && e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
+        window.api.ptyWrite(sessionId, '\x1b[13;2u')
+        return false
+      }
       return true
     })
 
