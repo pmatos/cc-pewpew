@@ -68,6 +68,13 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           setSessionNameInput('')
         },
       })
+      items.push({
+        label: 'Re-setup for cc-pewpew',
+        onClick: async () => {
+          await window.api.setupProject(menu.projectPath)
+          scanProjects()
+        },
+      })
     }
 
     items.push({ label: '', separator: true, onClick: () => {} })

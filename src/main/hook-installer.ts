@@ -1,43 +1,18 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'fs'
 import { join } from 'path'
+import { CONFIG_DIR } from './config'
 
-const CC_PEWPEW_HOOKS = {
-  SessionStart: [
-    {
-      hooks: [
-        { type: 'command', command: '${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew/hooks/notify.sh' },
-      ],
-    },
-  ],
-  Stop: [
-    {
-      hooks: [
-        { type: 'command', command: '${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew/hooks/notify.sh' },
-      ],
-    },
-  ],
-  PostToolUse: [
-    {
-      matcher: 'Read|Write|Edit|Bash',
-      hooks: [
-        { type: 'command', command: '${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew/hooks/notify.sh' },
-      ],
-    },
-  ],
-  SessionEnd: [
-    {
-      hooks: [
-        { type: 'command', command: '${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew/hooks/notify.sh' },
-      ],
-    },
-  ],
-  Notification: [
-    {
-      hooks: [
-        { type: 'command', command: '${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew/hooks/notify.sh' },
-      ],
-    },
-  ],
+const NOTIFY_SCRIPT = join(CONFIG_DIR, 'hooks', 'notify.sh')
+
+function buildHooks(): Record<string, unknown[]> {
+  const hook = { type: 'command', command: NOTIFY_SCRIPT }
+  return {
+    SessionStart: [{ hooks: [hook] }],
+    Stop: [{ hooks: [hook] }],
+    PostToolUse: [{ matcher: 'Read|Write|Edit|Bash', hooks: [hook] }],
+    SessionEnd: [{ hooks: [hook] }],
+    Notification: [{ hooks: [hook] }],
+  }
 }
 
 export async function installHooks(projectPath: string): Promise<void> {
@@ -55,7 +30,7 @@ export async function installHooks(projectPath: string): Promise<void> {
     }
   }
 
-  existing.hooks = CC_PEWPEW_HOOKS
+  existing.hooks = buildHooks()
   writeFileSync(settingsPath, JSON.stringify(existing, null, 2))
 
   ensureGitignore(projectPath, '.claude/settings.local.json')
