@@ -14,7 +14,38 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "rebuild-pty": "cd node_modules/node-pty && npx node-gyp rebuild --target=$(node -e \"console.log(require('electron/package.json').version)\") --arch=x64 --dist-url=https://electronjs.org/headers"
+    "rebuild-pty": "cd node_modules/node-pty && npx node-gyp rebuild --target=$(node -e \"console.log(require('electron/package.json').version)\") --arch=x64 --dist-url=https://electronjs.org/headers",
+    "dist": "electron-vite build && electron-builder --publish never",
+    "dist:linux": "electron-vite build && electron-builder --linux --publish never"
+  },
+  "build": {
+    "appId": "com.cc-pewpew.app",
+    "productName": "cc-pewpew",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -25,12 +56,13 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "@electron/rebuild": "^3.6.0",
     "electron": "^31.0.0",
+    "electron-builder": "^26.8.1",
     "electron-devtools-installer": "^4.0.0",
     "electron-vite": "^2.3.0",
     "eslint": "^9.5.0",
