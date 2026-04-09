@@ -11,6 +11,7 @@ declare global {
       openInFileManager: (path: string) => Promise<void>
       onHookEvent: (callback: (event: { method: string; params: unknown }) => void) => () => void
       createSession: (projectPath: string, name?: string) => Promise<Session>
+      createPrSession: (projectPath: string, prNumber: number) => Promise<Session | string>
       getSessions: () => Promise<Session[]>
       killSession: (id: string) => Promise<void>
       reviveSession: (id: string) => Promise<void>

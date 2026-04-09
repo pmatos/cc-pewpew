@@ -22,6 +22,9 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(null)
   const [sessionNameInput, setSessionNameInput] = useState('')
   const [creating, setCreating] = useState(false)
+  const [pendingPrPath, setPendingPrPath] = useState<string | null>(null)
+  const [prNumberInput, setPrNumberInput] = useState('')
+  const [prError, setPrError] = useState<string | null>(null)
 
   useEffect(() => {
     scanProjects()
@@ -66,6 +69,14 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
         onClick: () => {
           setPendingSessionPath(menu.projectPath)
           setSessionNameInput('')
+        },
+      })
+      items.push({
+        label: 'New PR session...',
+        onClick: () => {
+          setPendingPrPath(menu.projectPath)
+          setPrNumberInput('')
+          setPrError(null)
         },
       })
       items.push({
@@ -121,6 +132,28 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     }
   }
 
+  const handleCreatePrSession = async () => {
+    if (!pendingPrPath || creating) return
+    const num = parseInt(prNumberInput.trim(), 10)
+    if (isNaN(num) || num <= 0) {
+      setPrError('Enter a valid PR number.')
+      return
+    }
+    setCreating(true)
+    setPrError(null)
+    try {
+      const result = await window.api.createPrSession(pendingPrPath, num)
+      if (typeof result === 'string') {
+        setPrError(result)
+      } else {
+        setPendingPrPath(null)
+        setPrNumberInput('')
+      }
+    } finally {
+      setCreating(false)
+    }
+  }
+
   return (
     <div className="project-tree">
       {pendingSessionPath && (
@@ -143,6 +176,41 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
               {creating ? 'Creating...' : 'Create'}
             </button>
             <button className="create-btn cancel" onClick={() => setPendingSessionPath(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {pendingPrPath && (
+        <div className="session-name-dialog">
+          <div className="session-name-label">PR number:</div>
+          <input
+            type="text"
+            className="create-input"
+            placeholder="e.g. 42"
+            value={prNumberInput}
+            onChange={(e) => setPrNumberInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleCreatePrSession()
+              if (e.key === 'Escape') {
+                setPendingPrPath(null)
+                setPrError(null)
+              }
+            }}
+            autoFocus
+          />
+          {prError && <div className="pr-error">{prError}</div>}
+          <div className="create-actions">
+            <button className="create-btn" onClick={handleCreatePrSession} disabled={creating}>
+              {creating ? 'Creating...' : 'Create'}
+            </button>
+            <button
+              className="create-btn cancel"
+              onClick={() => {
+                setPendingPrPath(null)
+                setPrError(null)
+              }}
+            >
               Cancel
             </button>
           </div>

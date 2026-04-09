@@ -19,6 +19,7 @@ import {
 import {
   initSessionManager,
   createSession,
+  createPrSession,
   getSessions,
   restoreSessions,
   killSession,
@@ -116,6 +117,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('sessions:create', async (_event, projectPath: string, name?: string) => {
     return createSession(projectPath, name)
+  })
+
+  ipcMain.handle('sessions:create-pr', async (_event, projectPath: string, prNumber: number) => {
+    return createPrSession(projectPath, prNumber)
   })
 
   ipcMain.handle('sessions:list', () => {

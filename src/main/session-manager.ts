@@ -231,6 +231,82 @@ async function promptCleanup(id: string): Promise<void> {
   cleanupInProgress.delete(id)
 }
 
+export async function createPrSession(
+  projectPath: string,
+  prNumber: number
+): Promise<Session | string> {
+  // Look up PR via gh CLI
+  let prInfo: { headRefName: string; state: string; title: string }
+  try {
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['pr', 'view', String(prNumber), '--json', 'headRefName,state,title'],
+      { cwd: projectPath }
+    )
+    prInfo = JSON.parse(stdout)
+  } catch {
+    return `PR #${prNumber} not found in this repository.`
+  }
+
+  if (prInfo.state !== 'OPEN') {
+    return `PR #${prNumber} is ${prInfo.state.toLowerCase()}, not open.`
+  }
+
+  const branch = prInfo.headRefName
+  const id = randomUUID().slice(0, 8)
+  const worktreeName = `pr-${prNumber}`
+  const projectName = basename(projectPath)
+  const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
+  const tmuxSession = `cc-pewpew-${id}`
+
+  // Fetch the PR branch
+  try {
+    await execFileAsync('git', ['-C', projectPath, 'fetch', 'origin', branch])
+  } catch {
+    // May already be available locally
+  }
+
+  // Create worktree from the PR branch
+  try {
+    await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath, branch])
+  } catch {
+    // Branch may already be checked out — try tracking remote
+    try {
+      await execFileAsync('git', [
+        '-C',
+        projectPath,
+        'worktree',
+        'add',
+        worktreePath,
+        '-b',
+        branch,
+        `origin/${branch}`,
+      ])
+    } catch (err) {
+      return `Failed to create worktree for branch "${branch}": ${(err as Error).message}`
+    }
+  }
+
+  createPty(id, worktreePath)
+
+  const session: Session = {
+    id,
+    projectPath,
+    projectName,
+    worktreeName,
+    worktreePath,
+    pid: 0,
+    tmuxSession,
+    status: 'running',
+    lastActivity: Date.now(),
+    hookEvents: [],
+  }
+
+  sessions.set(id, { session })
+  onSessionsChanged()
+  return session
+}
+
 export function getSessions(): Session[] {
   return Array.from(sessions.values()).map((e) => e.session)
 }

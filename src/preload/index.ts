@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   createSession: (projectPath: string, name?: string) =>
     ipcRenderer.invoke('sessions:create', projectPath, name),
+  createPrSession: (projectPath: string, prNumber: number) =>
+    ipcRenderer.invoke('sessions:create-pr', projectPath, prNumber),
   getSessions: () => ipcRenderer.invoke('sessions:list'),
   killSession: (id: string) => ipcRenderer.invoke('sessions:kill', id),
   reviveSession: (id: string) => ipcRenderer.invoke('sessions:revive', id),

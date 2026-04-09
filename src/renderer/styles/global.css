@@ -577,6 +577,12 @@ body,
   opacity: 0.9;
 }
 
+.pr-error {
+  color: #f87171;
+  font-size: 12px;
+  padding: 4px 0;
+}
+
 .detail-pane {
   display: flex;
   flex-direction: column;
