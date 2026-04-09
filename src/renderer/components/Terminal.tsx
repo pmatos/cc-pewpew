@@ -51,6 +51,7 @@ export default function Terminal({ sessionId }: Props) {
           return false
         }
         if (e.key === 'V') {
+          e.preventDefault()
           navigator.clipboard.readText().then((text) => {
             if (text) window.api.ptyWrite(sessionId, text)
           })
@@ -58,8 +59,11 @@ export default function Terminal({ sessionId }: Props) {
         }
       }
       // Shift+Enter → kitty protocol sequence for "newline, don't submit"
-      if (e.type === 'keydown' && e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
-        window.api.ptyWrite(sessionId, '\x1b[13;2u')
+      // Block both keydown and keyup to prevent xterm sending \r on keyup
+      if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
+        if (e.type === 'keydown') {
+          window.api.ptyWrite(sessionId, '\x1b[13;2u')
+        }
         return false
       }
       return true
