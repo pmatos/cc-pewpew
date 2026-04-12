@@ -143,6 +143,22 @@ app.whenReady().then(async () => {
     await removeSession(id)
   })
 
+  ipcMain.handle('sessions:kill-batch', (_event, ids: string[]) => {
+    for (const id of ids) killSession(id)
+  })
+
+  ipcMain.handle('sessions:revive-batch', (_event, ids: string[]) => {
+    for (const id of ids) {
+      try {
+        reviveSession(id)
+      } catch {}
+    }
+  })
+
+  ipcMain.handle('sessions:remove-batch', async (_event, ids: string[]) => {
+    for (const id of ids) await removeSession(id)
+  })
+
   ipcMain.handle('pty:write', (_event, sessionId: string, data: string) => {
     writePty(sessionId, data)
   })

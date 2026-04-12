@@ -268,6 +268,36 @@ body,
   border-color: var(--accent-green);
 }
 
+.session-card.selected {
+  position: relative;
+  border-color: var(--accent-green);
+  box-shadow:
+    0 0 0 2px var(--accent-green),
+    0 0 12px rgba(74, 222, 128, 0.15);
+}
+
+.session-card.selected::after {
+  content: '\2713';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  background: var(--accent-green);
+  color: var(--text-on-accent);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.session-card.selected:hover {
+  border-color: var(--accent-green);
+}
+
 .session-card.needs-input {
   animation: pulse-border 1.5s ease-in-out infinite;
 }

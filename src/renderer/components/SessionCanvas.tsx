@@ -39,7 +39,7 @@ interface CanvasProps {
 }
 
 export default function SessionCanvas({ onOpenSession }: CanvasProps) {
-  const { sessions, thumbnails } = useSessionsStore()
+  const { sessions, thumbnails, toggleSelect, rangeSelect, clearSelection } = useSessionsStore()
   const viewportRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLCanvasElement>(null)
 
@@ -273,16 +273,34 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
     [panX, panY, persistCanvas]
   )
 
+  const handleSelect = useCallback(
+    (id: string, e: React.MouseEvent) => {
+      if (e.shiftKey) {
+        const clusterEntry = Array.from(clusters.entries()).find(([, clusterSessions]) =>
+          clusterSessions.some((s) => s.id === id)
+        )
+        if (clusterEntry) {
+          const orderedIds = clusterEntry[1].map((s) => s.id)
+          rangeSelect(id, orderedIds)
+        }
+      } else {
+        toggleSelect(id, e.ctrlKey || e.metaKey)
+      }
+    },
+    [clusters, rangeSelect, toggleSelect]
+  )
+
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return
       const target = e.target as HTMLElement
       if (target.closest('.session-cluster')) return
 
+      clearSelection()
       setDragging(true)
       dragStart.current = { x: e.clientX, y: e.clientY, panX, panY }
     },
-    [panX, panY]
+    [panX, panY, clearSelection]
   )
 
   const handleMouseMove = useCallback(
@@ -349,6 +367,7 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
             onDrag={handleClusterDrag}
             onDragEnd={handleClusterDragEnd}
             onOpenSession={onOpenSession}
+            onSelect={handleSelect}
           />
         ))}
       </div>

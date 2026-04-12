@@ -51,6 +51,8 @@ export default function App() {
       } else if (e.key === 'Escape') {
         if (activeSessionId) {
           setActiveSessionId(null)
+        } else if (useSessionsStore.getState().selectedIds.size > 0) {
+          useSessionsStore.getState().clearSelection()
         } else {
           setShowCreateDialog(false)
         }

@@ -1,6 +1,8 @@
-import { useRef, useCallback, useEffect } from 'react'
+import { useRef, useCallback, useEffect, useState } from 'react'
 import type { Session } from '../../shared/types'
+import { useSessionsStore } from '../stores/sessions'
 import SessionCard from './SessionCard'
+import ContextMenu, { type MenuItem } from './ContextMenu'
 
 const CARD_WIDTH = 240
 const CARD_GAP = 12
@@ -17,6 +19,7 @@ interface Props {
   onDrag: (projectPath: string, pos: { x: number; y: number }) => void
   onDragEnd: () => void
   onOpenSession?: (id: string, name: string) => void
+  onSelect?: (id: string, e: React.MouseEvent) => void
 }
 
 export default function SessionCluster({
@@ -30,9 +33,11 @@ export default function SessionCluster({
   onDrag,
   onDragEnd,
   onOpenSession,
+  onSelect,
 }: Props) {
   const dragging = useRef(false)
   const dragStart = useRef({ x: 0, y: 0, posX: 0, posY: 0 })
+  const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null)
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -70,6 +75,18 @@ export default function SessionCluster({
     }
   }, [projectPath, zoom, onDrag, onDragEnd])
 
+  const handleHeaderContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setHeaderMenu({ x: e.clientX, y: e.clientY })
+  }
+
+  const headerMenuItems: MenuItem[] = [
+    {
+      label: `Select all in ${projectName}`,
+      onClick: () => useSessionsStore.getState().selectAll(projectPath),
+    },
+  ]
+
   return (
     <div
       className="session-cluster"
@@ -80,7 +97,12 @@ export default function SessionCluster({
         borderColor: accentColor,
       }}
     >
-      <div className="cluster-header" style={{ color: accentColor }} onMouseDown={handleMouseDown}>
+      <div
+        className="cluster-header"
+        style={{ color: accentColor }}
+        onMouseDown={handleMouseDown}
+        onContextMenu={handleHeaderContextMenu}
+      >
         {projectName}
       </div>
       <div
@@ -99,6 +121,7 @@ export default function SessionCluster({
               session={session}
               thumbnail={thumbnails[session.id]}
               onOpenSession={onOpenSession}
+              onSelect={onSelect}
               style={{
                 position: 'absolute',
                 left: col * (CARD_WIDTH + CARD_GAP),
@@ -109,6 +132,15 @@ export default function SessionCluster({
           )
         })}
       </div>
+
+      {headerMenu && (
+        <ContextMenu
+          x={headerMenu.x}
+          y={headerMenu.y}
+          items={headerMenuItems}
+          onClose={() => setHeaderMenu(null)}
+        />
+      )}
     </div>
   )
 }

@@ -17,6 +17,9 @@ declare global {
       reviveSession: (id: string) => Promise<void>
       removeWorktree: (id: string) => Promise<void>
       removeSession: (id: string) => Promise<void>
+      killSessionBatch: (ids: string[]) => Promise<void>
+      reviveSessionBatch: (ids: string[]) => Promise<void>
+      removeSessionBatch: (ids: string[]) => Promise<void>
       onSessionsUpdated: (callback: (sessions: Session[]) => void) => () => void
       onOpenDetail: (callback: (sessionId: string) => void) => () => void
       getCanvasState: () => Promise<{ zoom: number; panX: number; panY: number }>
