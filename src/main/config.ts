@@ -18,6 +18,7 @@ export interface WindowState {
 
 export interface AppConfig {
   scanDirs: string[]
+  pinnedPaths: string[]
   canvas: CanvasState
   clusterPositions: Record<string, { x: number; y: number }>
   windowState?: WindowState
@@ -33,6 +34,7 @@ const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
 
 const DEFAULT_CONFIG: AppConfig = {
   scanDirs: ['~/dev'],
+  pinnedPaths: [],
   canvas: { zoom: 0.7, panX: 0, panY: 0 },
   clusterPositions: {},
   sidebarWidth: 250,

@@ -50,6 +50,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('thumbnails:text-updated', handler)
     return () => ipcRenderer.removeListener('thumbnails:text-updated', handler)
   },
+  pickDirectory: () => ipcRenderer.invoke('projects:pick-directory'),
+  relocateProject: (oldPath: string, newPath: string) =>
+    ipcRenderer.invoke('projects:relocate', oldPath, newPath),
+  pinProjectPath: (path: string) => ipcRenderer.invoke('projects:pin-path', path),
   ptyWrite: (sessionId: string, data: string) => ipcRenderer.invoke('pty:write', sessionId, data),
   ptyResize: (sessionId: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty:resize', sessionId, cols, rows),

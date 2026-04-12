@@ -1,5 +1,5 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
-import { join } from 'path'
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
+import { join, resolve } from 'path'
 import { copyFileSync, mkdirSync, chmodSync } from 'fs'
 import installExtension, { REACT_DEVELOPER_TOOLS } from 'electron-devtools-installer'
 import { getConfig, saveConfig, resolvePath, CONFIG_DIR, type CanvasState } from './config'
@@ -26,6 +26,7 @@ import {
   reviveSession,
   removeWorktree,
   removeSession,
+  relocateProject,
 } from './session-manager'
 
 // Apply UI scale to the entire app (native menu bar + web content) before app is ready
@@ -93,7 +94,27 @@ app.whenReady().then(async () => {
   ipcMain.handle('projects:scan', async () => {
     const config = getConfig()
     const dirs = config.scanDirs.map(resolvePath)
-    return scanProjects(dirs)
+    const pinned = (config.pinnedPaths || []).map(resolvePath)
+    return scanProjects(dirs, pinned)
+  })
+
+  ipcMain.handle('projects:pick-directory', async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('projects:relocate', async (_event, oldPath: string, newPath: string) => {
+    return relocateProject(oldPath, newPath)
+  })
+
+  ipcMain.handle('projects:pin-path', async (_event, path: string) => {
+    const config = getConfig()
+    const resolved = resolve(path)
+    if (!config.pinnedPaths.includes(resolved)) {
+      config.pinnedPaths.push(resolved)
+      saveConfig(config)
+    }
   })
 
   ipcMain.handle('projects:setup', async (_event, projectPath: string) => {

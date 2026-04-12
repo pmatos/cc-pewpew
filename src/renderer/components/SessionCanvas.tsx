@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useSessionsStore } from '../stores/sessions'
+import { useProjectsStore } from '../stores/projects'
 import { useCanvasStore } from '../stores/canvas'
 import SessionCluster from './SessionCluster'
 import EdgeIndicators from './EdgeIndicators'
@@ -40,6 +41,8 @@ interface CanvasProps {
 
 export default function SessionCanvas({ onOpenSession }: CanvasProps) {
   const { sessions, thumbnails, toggleSelect, rangeSelect, clearSelection } = useSessionsStore()
+  const projects = useProjectsStore((s) => s.projects)
+  const knownPaths = useMemo(() => new Set(projects.map((p) => p.path)), [projects])
   const viewportRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLCanvasElement>(null)
 
@@ -364,6 +367,7 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
             accentColor={hashColor(projectPath)}
             position={clusterPositions[projectPath] || { x: 0, y: 0 }}
             zoom={zoom}
+            isOrphaned={!knownPaths.has(projectPath)}
             onDrag={handleClusterDrag}
             onDragEnd={handleClusterDragEnd}
             onOpenSession={onOpenSession}

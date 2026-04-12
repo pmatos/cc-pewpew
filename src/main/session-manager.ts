@@ -4,10 +4,12 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join, basename } from 'path'
 import { randomUUID } from 'crypto'
 import { type BrowserWindow, dialog, shell } from 'electron'
-import { CONFIG_DIR } from './config'
+import { CONFIG_DIR, getConfig, saveConfig } from './config'
 import { updateTray } from './tray'
 import { notifyNeedsInput } from './notifications'
 import { createPty, destroyPty, discoverTmuxSessions, reattachPty } from './pty-manager'
+import { getRepoFingerprint } from './project-scanner'
+import { installHooks } from './hook-installer'
 import type { Session, SessionStatus } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
@@ -90,6 +92,13 @@ export async function createSession(projectPath: string, name?: string): Promise
   }
 
   sessions.set(id, { session })
+
+  getRepoFingerprint(projectPath).then((fp) => {
+    if (fp) {
+      session.repoFingerprint = fp
+      onSessionsChanged()
+    }
+  })
 
   onSessionsChanged()
 
@@ -303,12 +312,62 @@ export async function createPrSession(
   }
 
   sessions.set(id, { session })
+
+  getRepoFingerprint(projectPath).then((fp) => {
+    if (fp) {
+      session.repoFingerprint = fp
+      onSessionsChanged()
+    }
+  })
+
   onSessionsChanged()
   return session
 }
 
 export function getSessions(): Session[] {
   return Array.from(sessions.values()).map((e) => e.session)
+}
+
+export async function relocateProject(
+  oldProjectPath: string,
+  newProjectPath: string
+): Promise<{ migratedCount: number }> {
+  if (!existsSync(join(newProjectPath, '.git'))) {
+    throw new Error(`${newProjectPath} is not a git repository`)
+  }
+
+  const toMigrate: SessionEntry[] = []
+  for (const entry of sessions.values()) {
+    if (entry.session.projectPath === oldProjectPath) {
+      toMigrate.push(entry)
+    }
+  }
+
+  const fingerprint = await getRepoFingerprint(newProjectPath)
+
+  for (const entry of toMigrate) {
+    const s = entry.session
+    s.projectPath = newProjectPath
+    s.projectName = basename(newProjectPath)
+    s.worktreePath = join(newProjectPath, '.claude', 'worktrees', s.worktreeName)
+    if (fingerprint) s.repoFingerprint = fingerprint
+  }
+
+  const config = getConfig()
+  if (config.clusterPositions[oldProjectPath]) {
+    config.clusterPositions[newProjectPath] = config.clusterPositions[oldProjectPath]
+    delete config.clusterPositions[oldProjectPath]
+  }
+
+  if (!config.pinnedPaths.includes(newProjectPath)) {
+    config.pinnedPaths.push(newProjectPath)
+  }
+  saveConfig(config)
+
+  await installHooks(newProjectPath)
+  onSessionsChanged()
+
+  return { migratedCount: toMigrate.length }
 }
 
 export function restoreSessions(): void {

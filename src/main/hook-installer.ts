@@ -30,7 +30,19 @@ export async function installHooks(projectPath: string): Promise<void> {
     }
   }
 
-  existing.hooks = buildHooks()
+  const newHooks = buildHooks()
+  const existingHooks = (existing.hooks || {}) as Record<string, unknown[]>
+  const merged: Record<string, unknown[]> = { ...existingHooks }
+
+  for (const [event, entries] of Object.entries(newHooks)) {
+    const kept = (existingHooks[event] || []).filter((entry) => {
+      const json = JSON.stringify(entry)
+      return !json.includes('cc-pewpew')
+    })
+    merged[event] = [...kept, ...entries]
+  }
+
+  existing.hooks = merged
   writeFileSync(settingsPath, JSON.stringify(existing, null, 2))
 
   ensureGitignore(projectPath, '.claude/settings.local.json')

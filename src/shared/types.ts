@@ -25,6 +25,7 @@ export interface Session {
   status: SessionStatus
   lastActivity: number
   hookEvents: HookEvent[]
+  repoFingerprint?: string
 }
 
 export interface HookEvent {

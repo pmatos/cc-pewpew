@@ -72,8 +72,12 @@ function detectSetupState(repoPath: string): 'ready' | 'unsetup' {
   }
 }
 
-function discoverRepos(scanDirs: string[]): { name: string; path: string }[] {
+function discoverRepos(
+  scanDirs: string[],
+  pinnedPaths: string[]
+): { name: string; path: string }[] {
   const repos: { name: string; path: string }[] = []
+  const seen = new Set<string>()
 
   for (const dir of scanDirs) {
     if (!existsSync(dir)) continue
@@ -94,7 +98,20 @@ function discoverRepos(scanDirs: string[]): { name: string; path: string }[] {
       }
       if (!existsSync(join(entryPath, '.git'))) continue
       repos.push({ name: entry, path: entryPath })
+      seen.add(entryPath)
     }
+  }
+
+  for (const pinned of pinnedPaths) {
+    if (seen.has(pinned)) continue
+    try {
+      if (!statSync(pinned).isDirectory()) continue
+    } catch {
+      continue
+    }
+    if (!existsSync(join(pinned, '.git'))) continue
+    repos.push({ name: basename(pinned), path: pinned })
+    seen.add(pinned)
   }
 
   return repos.sort((a, b) => a.name.localeCompare(b.name))
@@ -114,8 +131,22 @@ async function enrichRepo(repo: { name: string; path: string }): Promise<Project
 
 const CONCURRENCY = 10
 
-export async function scanProjects(scanDirs: string[]): Promise<Project[]> {
-  const repos = discoverRepos(scanDirs)
+export async function getRepoFingerprint(repoPath: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', repoPath, 'rev-list', '--max-parents=0', 'HEAD'],
+      { timeout: 5000 }
+    )
+    const firstLine = stdout.trim().split('\n')[0]
+    return firstLine || undefined
+  } catch {
+    return undefined
+  }
+}
+
+export async function scanProjects(scanDirs: string[], pinnedPaths?: string[]): Promise<Project[]> {
+  const repos = discoverRepos(scanDirs, pinnedPaths || [])
   const projects: Project[] = []
 
   // Process in batches to avoid spawning hundreds of git processes

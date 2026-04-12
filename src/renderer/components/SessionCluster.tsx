@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
 import type { Session } from '../../shared/types'
 import { useSessionsStore } from '../stores/sessions'
+import { useProjectsStore } from '../stores/projects'
 import SessionCard from './SessionCard'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 
@@ -16,6 +17,7 @@ interface Props {
   accentColor: string
   position: { x: number; y: number }
   zoom: number
+  isOrphaned?: boolean
   onDrag: (projectPath: string, pos: { x: number; y: number }) => void
   onDragEnd: () => void
   onOpenSession?: (id: string, name: string) => void
@@ -30,6 +32,7 @@ export default function SessionCluster({
   accentColor,
   position,
   zoom,
+  isOrphaned,
   onDrag,
   onDragEnd,
   onOpenSession,
@@ -80,11 +83,24 @@ export default function SessionCluster({
     setHeaderMenu({ x: e.clientX, y: e.clientY })
   }
 
+  const handleLocateProject = async () => {
+    const picked = await window.api.pickDirectory()
+    if (!picked) return
+    await window.api.relocateProject(projectPath, picked)
+    useProjectsStore.getState().scanProjects()
+  }
+
   const headerMenuItems: MenuItem[] = [
     {
       label: `Select all in ${projectName}`,
       onClick: () => useSessionsStore.getState().selectAll(projectPath),
     },
+    ...(isOrphaned
+      ? [
+          { separator: true } as MenuItem,
+          { label: 'Locate moved project...', onClick: handleLocateProject } as MenuItem,
+        ]
+      : []),
   ]
 
   return (
@@ -98,8 +114,8 @@ export default function SessionCluster({
       }}
     >
       <div
-        className="cluster-header"
-        style={{ color: accentColor }}
+        className={`cluster-header${isOrphaned ? ' cluster-header--orphaned' : ''}`}
+        style={isOrphaned ? undefined : { color: accentColor }}
         onMouseDown={handleMouseDown}
         onContextMenu={handleHeaderContextMenu}
       >

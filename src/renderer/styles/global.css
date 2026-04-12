@@ -249,6 +249,11 @@ body,
   cursor: grabbing;
 }
 
+.cluster-header--orphaned {
+  color: #f59e0b;
+  border-bottom: 1px dashed #f59e0b;
+}
+
 .cluster-cards {
   position: relative;
 }
