@@ -78,6 +78,10 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
       }).length
       return [
         {
+          label: `Send command to ${selectedCount} sessions`,
+          onClick: () => useSessionsStore.getState().openBroadcastDialog(),
+        },
+        {
           label: `Kill ${selectedCount} sessions`,
           onClick: async () => {
             await window.api.killSessionBatch(ids)

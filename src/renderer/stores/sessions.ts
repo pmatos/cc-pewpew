@@ -6,12 +6,15 @@ interface SessionsState {
   thumbnails: Record<string, string>
   selectedIds: Set<string>
   lastSelectedId: string | null
+  broadcastDialogOpen: boolean
   fetchSessions: () => Promise<void>
   init: () => () => void
   toggleSelect: (id: string, multi: boolean) => void
   rangeSelect: (id: string, orderedIds: string[]) => void
   selectAll: (projectPath: string) => void
   clearSelection: () => void
+  openBroadcastDialog: () => void
+  closeBroadcastDialog: () => void
 }
 
 export const useSessionsStore = create<SessionsState>((set, get) => ({
@@ -19,6 +22,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   thumbnails: {},
   selectedIds: new Set<string>(),
   lastSelectedId: null,
+  broadcastDialogOpen: false,
   fetchSessions: async () => {
     const sessions = await window.api.getSessions()
     set({ sessions })
@@ -83,6 +87,12 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     set({ selectedIds: new Set(ids), lastSelectedId: ids[ids.length - 1] ?? null })
   },
   clearSelection: () => {
-    set({ selectedIds: new Set(), lastSelectedId: null })
+    set({ selectedIds: new Set(), lastSelectedId: null, broadcastDialogOpen: false })
+  },
+  openBroadcastDialog: () => {
+    set({ broadcastDialogOpen: true })
+  },
+  closeBroadcastDialog: () => {
+    set({ broadcastDialogOpen: false })
   },
 }))

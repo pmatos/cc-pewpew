@@ -4,6 +4,7 @@ import { useProjectsStore } from '../stores/projects'
 import { useCanvasStore } from '../stores/canvas'
 import SessionCluster from './SessionCluster'
 import EdgeIndicators from './EdgeIndicators'
+import BroadcastDialog from './BroadcastDialog'
 
 const MIN_ZOOM = 0.3
 const MAX_ZOOM = 1.0
@@ -388,6 +389,7 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
         viewportWidth={viewportSize.width}
         viewportHeight={viewportSize.height}
       />
+      <BroadcastDialog />
     </div>
   )
 }

@@ -184,6 +184,10 @@ app.whenReady().then(async () => {
     writePty(sessionId, data)
   })
 
+  ipcMain.handle('pty:write-batch', (_event, ids: string[], data: string) => {
+    for (const id of ids) writePty(id, data)
+  })
+
   ipcMain.handle('pty:resize', (_event, sessionId: string, cols: number, rows: number) => {
     resizePty(sessionId, cols, rows)
   })

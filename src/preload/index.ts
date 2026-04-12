@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('api', {
   killSessionBatch: (ids: string[]) => ipcRenderer.invoke('sessions:kill-batch', ids),
   reviveSessionBatch: (ids: string[]) => ipcRenderer.invoke('sessions:revive-batch', ids),
   removeSessionBatch: (ids: string[]) => ipcRenderer.invoke('sessions:remove-batch', ids),
+  ptyWriteBatch: (ids: string[], data: string) => ipcRenderer.invoke('pty:write-batch', ids, data),
   onSessionsUpdated: (callback: (sessions: unknown[]) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: unknown[]) => callback(data)
     ipcRenderer.on('sessions:updated', handler)

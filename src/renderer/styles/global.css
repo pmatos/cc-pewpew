@@ -771,6 +771,27 @@ body,
   color: var(--text-on-accent);
 }
 
+.broadcast-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.broadcast-dialog {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .edge-indicators {
   position: absolute;
   inset: 0;
