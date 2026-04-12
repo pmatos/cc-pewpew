@@ -40,7 +40,11 @@ export default function BroadcastDialog() {
   }
 
   return (
-    <div className="broadcast-dialog-overlay" onClick={closeBroadcastDialog}>
+    <div
+      className="broadcast-dialog-overlay"
+      onClick={closeBroadcastDialog}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       <div className="broadcast-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="session-name-label">Send command to {selectedIds.size} sessions</div>
         <input

@@ -61,7 +61,13 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
   }, [onClose])
 
   return createPortal(
-    <div className="context-menu" ref={ref} role="menu" style={{ left: x, top: y }}>
+    <div
+      className="context-menu"
+      ref={ref}
+      role="menu"
+      style={{ left: x, top: y }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       {items.map((item, i) =>
         item.separator ? (
           <div key={i} className="context-menu-separator" role="separator" />
