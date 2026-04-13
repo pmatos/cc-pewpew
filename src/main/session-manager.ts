@@ -75,6 +75,9 @@ export async function createSession(projectPath: string, name?: string): Promise
     await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath])
   }
 
+  // Install hooks in the worktree so Claude Code fires events back to cc-pewpew
+  await installHooks(worktreePath, { skipGitignore: true })
+
   // Create embedded terminal via PTY manager (tmux + node-pty)
   createPty(id, worktreePath)
 
@@ -295,6 +298,9 @@ export async function createPrSession(
       return `Failed to create worktree for branch "${branch}": ${(err as Error).message}`
     }
   }
+
+  // Install hooks in the worktree so Claude Code fires events back to cc-pewpew
+  await installHooks(worktreePath, { skipGitignore: true })
 
   createPty(id, worktreePath)
 

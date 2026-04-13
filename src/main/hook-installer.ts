@@ -15,7 +15,10 @@ function buildHooks(): Record<string, unknown[]> {
   }
 }
 
-export async function installHooks(projectPath: string): Promise<void> {
+export async function installHooks(
+  projectPath: string,
+  { skipGitignore = false }: { skipGitignore?: boolean } = {}
+): Promise<void> {
   const claudeDir = join(projectPath, '.claude')
   mkdirSync(claudeDir, { recursive: true })
 
@@ -45,7 +48,9 @@ export async function installHooks(projectPath: string): Promise<void> {
   existing.hooks = merged
   writeFileSync(settingsPath, JSON.stringify(existing, null, 2))
 
-  ensureGitignore(projectPath, '.claude/settings.local.json')
+  if (!skipGitignore) {
+    ensureGitignore(projectPath, '.claude/settings.local.json')
+  }
 }
 
 function ensureGitignore(projectPath: string, entry: string): void {
