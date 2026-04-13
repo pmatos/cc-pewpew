@@ -7,7 +7,7 @@ import { type BrowserWindow, dialog, shell } from 'electron'
 import { CONFIG_DIR, getConfig, saveConfig } from './config'
 import { updateTray } from './tray'
 import { notifyNeedsInput } from './notifications'
-import { createPty, destroyPty, discoverTmuxSessions, reattachPty } from './pty-manager'
+import { createPty, destroyPty, hasPty, discoverTmuxSessions, reattachPty } from './pty-manager'
 import { getRepoFingerprint } from './project-scanner'
 import { installHooks } from './hook-installer'
 import type { Session, SessionStatus } from '../shared/types'
@@ -351,6 +351,17 @@ export async function relocateProject(
     s.projectName = basename(newProjectPath)
     s.worktreePath = join(newProjectPath, '.claude', 'worktrees', s.worktreeName)
     if (fingerprint) s.repoFingerprint = fingerprint
+
+    // Recreate PTY so tmux gets the new worktree cwd
+    if (hasPty(s.id)) {
+      destroyPty(s.id)
+      if (existsSync(s.worktreePath)) {
+        createPty(s.id, s.worktreePath)
+        s.status = 'idle'
+      } else {
+        s.status = 'dead'
+      }
+    }
   }
 
   const config = getConfig()

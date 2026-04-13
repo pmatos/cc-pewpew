@@ -1,6 +1,7 @@
 import * as pty from 'node-pty'
 import type { IPty } from 'node-pty'
 import { execFileSync } from 'child_process'
+import { existsSync } from 'fs'
 import { type BrowserWindow, dialog } from 'electron'
 
 interface PtyEntry {
@@ -47,6 +48,10 @@ export function stopPtyManager(): void {
 }
 
 export function createPty(sessionId: string, cwd: string): void {
+  if (!existsSync(cwd)) {
+    throw new Error(`Working directory does not exist: ${cwd}`)
+  }
+
   if (!checkTmux()) {
     dialog.showErrorBox(
       'tmux not found',
