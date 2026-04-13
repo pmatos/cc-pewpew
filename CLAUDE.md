@@ -46,6 +46,47 @@ socket.on('message', (d) => { const m = JSON.parse(d.toString()); if(m.result?.d
 
 Then `Read /tmp/cc-pewpew-screenshot.png` to view the UI visually.
 
+### Automated UI debugging workflow
+
+Port 9229 may conflict with cc-pewpew's own tmux server. If so, use a different port:
+
+```bash
+npx electron-vite build && npx electron --remote-debugging-port=9333 .
+```
+
+To interact with the app via CDP (click elements, take timed screenshots):
+
+```js
+const WebSocket = require('ws')
+const fs = require('fs')
+const WS_URL = 'ws://127.0.0.1:9333/devtools/page/<PAGE_ID>'
+const socket = new WebSocket(WS_URL)
+let id = 0
+const pending = {}
+function send(method, params) {
+  const i = ++id
+  return new Promise((resolve) => {
+    pending[i] = resolve
+    socket.send(JSON.stringify({ id: i, method, params }))
+  })
+}
+socket.on('message', (d) => {
+  const m = JSON.parse(d.toString())
+  if (pending[m.id]) {
+    pending[m.id](m)
+    delete pending[m.id]
+  }
+})
+```
+
+Useful CDP methods:
+
+- `Runtime.evaluate` — run JS in the page (query DOM, check state)
+- `Page.captureScreenshot` — take PNG screenshot
+- `Input.dispatchMouseEvent` — click at coordinates (send mousePressed + mouseReleased)
+
+When debugging visual issues, **always use this approach first** rather than asking the user to test manually. Build, launch with CDP, take screenshots at key moments, and verify the fix yourself. Use `Runtime.evaluate` to query DOM element positions, then `Input.dispatchMouseEvent` to click them.
+
 ## Code Style
 
 - Comments sparingly — only on complex logic
