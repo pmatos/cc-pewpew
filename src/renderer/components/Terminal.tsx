@@ -76,10 +76,15 @@ export default function Terminal({ sessionId }: Props) {
 
     let aborted = false
     let dataCleanup: (() => void) | null = null
+    let refitTimer: ReturnType<typeof setTimeout> | null = null
 
     // Sequenced init: fit → resize pty → wait for tmux → scrollback → live data → focus
     requestAnimationFrame(() => {
       ;(async () => {
+        // Ensure fonts are loaded before measuring — wrong metrics cause garbled rendering
+        await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 500))])
+        if (aborted) return
+
         fitAddon.fit()
         await window.api.ptyResize(sessionId, term.cols, term.rows)
         await new Promise((r) => setTimeout(r, 50))
@@ -98,6 +103,17 @@ export default function Terminal({ sessionId }: Props) {
         })
 
         term.focus()
+
+        // Recovery pass: Wayland compositors + fractional DPR can leave the canvas
+        // renderer in a bad state. clearTextureAtlas + refresh matches what
+        // fullscreen toggle repairs.
+        refitTimer = setTimeout(() => {
+          if (aborted) return
+          fitAddon.fit()
+          term.clearTextureAtlas()
+          term.refresh(0, term.rows - 1)
+          window.api.ptyResize(sessionId, term.cols, term.rows)
+        }, 150)
       })()
     })
 
@@ -110,6 +126,7 @@ export default function Terminal({ sessionId }: Props) {
 
     return () => {
       aborted = true
+      if (refitTimer) clearTimeout(refitTimer)
       observer.disconnect()
       selectionDisposable.dispose()
       inputDisposable.dispose()
