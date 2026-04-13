@@ -72,6 +72,32 @@ export default function Terminal({ sessionId }: Props) {
     let dataCleanup: (() => void) | null = null
     let webglAddon: WebglAddon | null = null
 
+    const syncTerminal = async (invalidateAtlas = false) => {
+      if (aborted) return
+      fitAddon.fit()
+      if (invalidateAtlas && webglAddon) {
+        try {
+          webglAddon.clearTextureAtlas()
+        } catch {
+          // Atlas rebuild can fail if the renderer is mid-dispose.
+        }
+      }
+      term.refresh(0, term.rows - 1)
+      await window.api.ptyResize(sessionId, term.cols, term.rows)
+    }
+
+    const pulsePtyResize = async () => {
+      if (aborted) return
+      const cols = term.cols
+      const rows = term.rows
+      const pulseCols = cols > 2 ? cols - 1 : cols + 1
+
+      await window.api.ptyResize(sessionId, pulseCols, rows)
+      await new Promise((r) => setTimeout(r, 40))
+      if (aborted) return
+      await window.api.ptyResize(sessionId, cols, rows)
+    }
+
     // Defer term.open() until fonts are loaded and layout is stable.
     // Opening before fonts causes xterm to render with wrong glyph metrics,
     // producing garbled output on Wayland with fractional DPR.
@@ -91,22 +117,33 @@ export default function Terminal({ sessionId }: Props) {
         termRef.current = term
         fitRef.current = fitAddon
 
-        fitAddon.fit()
-        await window.api.ptyResize(sessionId, term.cols, term.rows)
-        await new Promise((r) => setTimeout(r, 50))
-        if (aborted) return
-
-        const scrollback = await window.api.ptyGetScrollback(sessionId)
-        if (aborted) return
-        if (scrollback) {
-          term.write(scrollback)
-        }
+        let sawLiveData = false
 
         dataCleanup = window.api.onPtyData((event) => {
           if (event.sessionId === sessionId) {
+            sawLiveData = true
             term.write(event.data)
           }
         })
+
+        await syncTerminal(true)
+        await new Promise((r) => setTimeout(r, 120))
+        if (aborted) return
+
+        if (!sawLiveData) {
+          await pulsePtyResize()
+          await new Promise((r) => setTimeout(r, 120))
+        }
+        if (aborted) return
+
+        if (!sawLiveData) {
+          const scrollback = await window.api.ptyGetScrollback(sessionId)
+          if (aborted) return
+          if (scrollback) {
+            await new Promise<void>((resolve) => term.write(scrollback, resolve))
+            await syncTerminal(true)
+          }
+        }
 
         term.focus()
       })()
@@ -114,14 +151,28 @@ export default function Terminal({ sessionId }: Props) {
 
     const observer = new ResizeObserver(() => {
       if (!termRef.current) return
-      fitAddon.fit()
-      window.api.ptyResize(sessionId, term.cols, term.rows)
+      void syncTerminal()
     })
     observer.observe(container)
+
+    const handleWindowFocus = () => {
+      void syncTerminal(true)
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void syncTerminal(true)
+      }
+    }
+
+    window.addEventListener('focus', handleWindowFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       aborted = true
       observer.disconnect()
+      window.removeEventListener('focus', handleWindowFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       selectionDisposable.dispose()
       inputDisposable.dispose()
       if (dataCleanup) dataCleanup()
