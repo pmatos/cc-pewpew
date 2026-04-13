@@ -29,6 +29,9 @@ import {
   relocateProject,
 } from './session-manager'
 
+// Use native Wayland rendering when available (avoids Xwayland scaling artifacts)
+app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
+
 // Apply UI scale to the entire app (native menu bar + web content) before app is ready
 const uiScale = getConfig().uiScale ?? 1.2
 app.commandLine.appendSwitch('force-device-scale-factor', uiScale.toString())

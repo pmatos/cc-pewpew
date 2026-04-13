@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 
 interface Props {
@@ -14,6 +15,7 @@ export default function Terminal({ sessionId }: Props) {
 
   useEffect(() => {
     if (!containerRef.current) return
+    const container = containerRef.current
 
     const term = new XTerm({
       theme: {
@@ -29,12 +31,8 @@ export default function Terminal({ sessionId }: Props) {
 
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
-    term.open(containerRef.current)
 
-    termRef.current = term
-    fitRef.current = fitAddon
-
-    // Auto-copy selection to clipboard
+    // Register handlers before open() — they queue until the terminal has DOM
     const selectionDisposable = term.onSelectionChange(() => {
       const text = term.getSelection()
       if (text) {
@@ -42,7 +40,6 @@ export default function Terminal({ sessionId }: Props) {
       }
     })
 
-    // Ctrl+Shift+C to copy, Ctrl+Shift+V to paste
     term.attachCustomKeyEventHandler((e) => {
       if (e.ctrlKey && e.shiftKey && e.type === 'keydown') {
         if (e.key === 'C') {
@@ -58,8 +55,6 @@ export default function Terminal({ sessionId }: Props) {
           return false
         }
       }
-      // Shift+Enter → kitty protocol sequence for "newline, don't submit"
-      // Block both keydown and keyup to prevent xterm sending \r on keyup
       if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
         if (e.type === 'keydown') {
           window.api.ptyWrite(sessionId, '\x1b[13;2u')
@@ -69,21 +64,32 @@ export default function Terminal({ sessionId }: Props) {
       return true
     })
 
-    // Forward user input to pty
     const inputDisposable = term.onData((data) => {
       window.api.ptyWrite(sessionId, data)
     })
 
     let aborted = false
     let dataCleanup: (() => void) | null = null
-    let refitTimer: ReturnType<typeof setTimeout> | null = null
+    let webglAddon: WebglAddon | null = null
 
-    // Sequenced init: fit → resize pty → wait for tmux → scrollback → live data → focus
+    // Defer term.open() until fonts are loaded and layout is stable.
+    // Opening before fonts causes xterm to render with wrong glyph metrics,
+    // producing garbled output on Wayland with fractional DPR.
     requestAnimationFrame(() => {
       ;(async () => {
-        // Ensure fonts are loaded before measuring — wrong metrics cause garbled rendering
         await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 500))])
         if (aborted) return
+
+        term.open(container)
+        try {
+          const addon = new WebglAddon()
+          term.loadAddon(addon)
+          webglAddon = addon
+        } catch {
+          // WebGL not available, fall back to default canvas renderer
+        }
+        termRef.current = term
+        fitRef.current = fitAddon
 
         fitAddon.fit()
         await window.api.ptyResize(sessionId, term.cols, term.rows)
@@ -103,35 +109,30 @@ export default function Terminal({ sessionId }: Props) {
         })
 
         term.focus()
-
-        // Recovery pass: Wayland compositors + fractional DPR cause xterm to
-        // measure wrong font metrics on init. Toggle fontSize to force a full
-        // character-cell re-measurement, then refit.
-        refitTimer = setTimeout(() => {
-          if (aborted) return
-          const size = term.options.fontSize!
-          term.options.fontSize = size + 1
-          term.options.fontSize = size
-          fitAddon.fit()
-          window.api.ptyResize(sessionId, term.cols, term.rows)
-        }, 150)
       })()
     })
 
-    // Resize observer
     const observer = new ResizeObserver(() => {
+      if (!termRef.current) return
       fitAddon.fit()
       window.api.ptyResize(sessionId, term.cols, term.rows)
     })
-    observer.observe(containerRef.current)
+    observer.observe(container)
 
     return () => {
       aborted = true
-      if (refitTimer) clearTimeout(refitTimer)
       observer.disconnect()
       selectionDisposable.dispose()
       inputDisposable.dispose()
       if (dataCleanup) dataCleanup()
+      if (webglAddon) {
+        try {
+          webglAddon.dispose()
+        } catch {
+          // WebglAddon.dispose() can throw on _isDisposed check
+        }
+        webglAddon = null
+      }
       term.dispose()
       termRef.current = null
       fitRef.current = null
