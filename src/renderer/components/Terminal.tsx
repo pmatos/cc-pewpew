@@ -105,12 +105,14 @@ export default function Terminal({ sessionId }: Props) {
         term.focus()
 
         // Recovery pass: Wayland compositors + fractional DPR can leave the canvas
-        // renderer in a bad state. clearTextureAtlas + refresh matches what
-        // fullscreen toggle repairs.
+        // renderer in a bad state. Force a resize cycle (shrink then restore) to
+        // trigger a full re-render — same effect as fullscreen toggle.
         refitTimer = setTimeout(() => {
           if (aborted) return
-          fitAddon.fit()
+          console.log('[Terminal] recovery pass firing', { cols: term.cols, rows: term.rows })
           term.clearTextureAtlas()
+          term.resize(term.cols - 1, term.rows)
+          fitAddon.fit()
           term.refresh(0, term.rows - 1)
           window.api.ptyResize(sessionId, term.cols, term.rows)
         }, 150)
