@@ -104,16 +104,15 @@ export default function Terminal({ sessionId }: Props) {
 
         term.focus()
 
-        // Recovery pass: Wayland compositors + fractional DPR can leave the canvas
-        // renderer in a bad state. Force a resize cycle (shrink then restore) to
-        // trigger a full re-render — same effect as fullscreen toggle.
+        // Recovery pass: Wayland compositors + fractional DPR cause xterm to
+        // measure wrong font metrics on init. Toggle fontSize to force a full
+        // character-cell re-measurement, then refit.
         refitTimer = setTimeout(() => {
           if (aborted) return
-          console.log('[Terminal] recovery pass firing', { cols: term.cols, rows: term.rows })
-          term.clearTextureAtlas()
-          term.resize(term.cols - 1, term.rows)
+          const size = term.options.fontSize!
+          term.options.fontSize = size + 1
+          term.options.fontSize = size
           fitAddon.fit()
-          term.refresh(0, term.rows - 1)
           window.api.ptyResize(sessionId, term.cols, term.rows)
         }, 150)
       })()
