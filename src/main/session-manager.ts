@@ -3,7 +3,8 @@ import { promisify } from 'util'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join, basename } from 'path'
 import { randomUUID } from 'crypto'
-import { type BrowserWindow, dialog, shell } from 'electron'
+import { dialog, shell } from 'electron'
+import { broadcastToAll, getMainWindow } from './window-registry'
 import { CONFIG_DIR, getConfig, saveConfig } from './config'
 import { updateTray } from './tray'
 import { notifyNeedsInput } from './notifications'
@@ -20,7 +21,6 @@ interface SessionEntry {
 }
 
 const sessions = new Map<string, SessionEntry>()
-let mainWindowRef: BrowserWindow | null = null
 
 function persistSessions(): void {
   const data = Array.from(sessions.values()).map((e) => e.session)
@@ -28,10 +28,8 @@ function persistSessions(): void {
 }
 
 function notifyRenderer(): void {
-  if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-    const data = Array.from(sessions.values()).map((e) => e.session)
-    mainWindowRef.webContents.send('sessions:updated', data)
-  }
+  const data = Array.from(sessions.values()).map((e) => e.session)
+  broadcastToAll('sessions:updated', data)
 }
 
 function onSessionsChanged(): void {
@@ -48,8 +46,8 @@ function updateSession(id: string, status: SessionStatus): void {
   onSessionsChanged()
 }
 
-export function initSessionManager(mainWindow: BrowserWindow): void {
-  mainWindowRef = mainWindow
+export function initSessionManager(): void {
+  // No-op — session manager now uses the window registry for IPC
 }
 
 export async function createSession(projectPath: string, name?: string): Promise<Session> {
@@ -214,7 +212,7 @@ async function promptCleanup(id: string): Promise<void> {
   }
 
   const session = entry.session
-  const parentWindow = mainWindowRef && !mainWindowRef.isDestroyed() ? mainWindowRef : null
+  const parentWindow = getMainWindow()
 
   const options = {
     type: 'question' as const,

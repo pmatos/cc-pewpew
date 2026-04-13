@@ -2,7 +2,8 @@ import * as pty from 'node-pty'
 import type { IPty } from 'node-pty'
 import { execFileSync } from 'child_process'
 import { existsSync } from 'fs'
-import { type BrowserWindow, dialog } from 'electron'
+import { dialog } from 'electron'
+import { broadcastToAll } from './window-registry'
 
 interface PtyEntry {
   pty: IPty
@@ -11,15 +12,12 @@ interface PtyEntry {
 }
 
 const ptys = new Map<string, PtyEntry>()
-let mainWindowRef: BrowserWindow | null = null
 let flushInterval: ReturnType<typeof setInterval> | null = null
 
 function flushBuffers(): void {
-  if (!mainWindowRef || mainWindowRef.isDestroyed()) return
-
   for (const [sessionId, entry] of ptys) {
     if (entry.buffer.length > 0) {
-      mainWindowRef.webContents.send('pty:data', { sessionId, data: entry.buffer })
+      broadcastToAll('pty:data', { sessionId, data: entry.buffer })
       entry.buffer = ''
     }
   }
@@ -34,8 +32,7 @@ function checkTmux(): boolean {
   }
 }
 
-export function initPtyManager(mainWindow: BrowserWindow): void {
-  mainWindowRef = mainWindow
+export function initPtyManager(): void {
   flushInterval = setInterval(flushBuffers, 16)
 }
 
@@ -44,7 +41,6 @@ export function stopPtyManager(): void {
     clearInterval(flushInterval)
     flushInterval = null
   }
-  mainWindowRef = null
 }
 
 export function createPty(sessionId: string, cwd: string): void {

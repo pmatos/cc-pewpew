@@ -39,6 +39,7 @@ declare global {
       ptyDestroy: (sessionId: string) => Promise<void>
       ptyGetScrollback: (sessionId: string) => Promise<string>
       onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => () => void
+      openSwimLanes: (sessionIds: string[]) => Promise<void>
     }
   }
 }

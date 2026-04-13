@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import type { Session, SessionStatus } from '../../shared/types'
+import type { Session } from '../../shared/types'
 import { useProjectsStore } from '../stores/projects'
 import { useSessionsStore } from '../stores/sessions'
+import { STATUS_CONFIG } from '../utils/status-config'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 
 function timeAgo(ts: number): string {
@@ -11,15 +12,6 @@ function timeAgo(ts: number): string {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
   return `${Math.floor(diff / 86400)}d ago`
-}
-
-const STATUS_CONFIG: Record<SessionStatus, { className: string; label: string }> = {
-  running: { className: 'status-running', label: 'Running' },
-  needs_input: { className: 'status-needs-input', label: 'Needs input' },
-  completed: { className: 'status-completed', label: 'Completed' },
-  idle: { className: 'status-idle', label: 'Idle' },
-  dead: { className: 'status-dead', label: 'Dead' },
-  error: { className: 'status-dead', label: 'Error' },
 }
 
 interface Props {
@@ -77,6 +69,13 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
         return s?.status === 'dead' || s?.status === 'error'
       }).length
       return [
+        {
+          label: `Open ${selectedCount} as swimming lanes`,
+          onClick: async () => {
+            await window.api.openSwimLanes([...selectedIds])
+            clearSelection()
+          },
+        },
         {
           label: `Send command to ${selectedCount} sessions`,
           onClick: () => useSessionsStore.getState().openBroadcastDialog(),

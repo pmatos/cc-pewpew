@@ -7,6 +7,7 @@ import { scanProjects } from './project-scanner'
 import { installHooks } from './hook-installer'
 import { startHookServer, stopHookServer } from './hook-server'
 import { createTray } from './tray'
+import { registerWindow, broadcastToAll } from './window-registry'
 import {
   initPtyManager,
   stopPtyManager,
@@ -240,26 +241,48 @@ app.whenReady().then(async () => {
     return getConfig().uiScale
   })
 
+  ipcMain.handle('swim-lanes:open', (_event, sessionIds: string[]) => {
+    const swimWindow = new BrowserWindow({
+      width: 1200,
+      height: 800,
+      title: `cc-pewpew — Swimming Lanes (${sessionIds.length})`,
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    })
+
+    registerWindow(swimWindow)
+
+    const query = `?sessions=${sessionIds.join(',')}`
+    if (process.env.ELECTRON_RENDERER_URL) {
+      swimWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/swim-lanes.html${query}`)
+    } else {
+      swimWindow.loadFile(join(__dirname, '../../dist/swim-lanes.html'), { search: query })
+    }
+  })
+
   const mainWindow = createWindow()
-  startHookServer(mainWindow)
-  initSessionManager(mainWindow)
-  createTray(mainWindow)
-  initPtyManager(mainWindow)
+  registerWindow(mainWindow, true)
+  startHookServer()
+  initSessionManager()
+  createTray()
+  initPtyManager()
   restoreSessions()
 
   // Periodic text thumbnail capture from tmux
   const thumbInterval = setInterval(() => {
-    if (mainWindow.isDestroyed()) return
     const thumbs = captureThumbnails()
     if (Object.keys(thumbs).length > 0) {
-      mainWindow.webContents.send('thumbnails:text-updated', thumbs)
+      broadcastToAll('thumbnails:text-updated', thumbs)
     }
   }, 3000)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const win = createWindow()
-      startHookServer(win)
+      registerWindow(win, true)
     }
   })
 

@@ -1,7 +1,7 @@
 import { createServer, type Server, type Socket } from 'net'
 import { writeFileSync, unlinkSync, existsSync } from 'fs'
 import { join } from 'path'
-import { type BrowserWindow } from 'electron'
+import { broadcastToAll } from './window-registry'
 import { CONFIG_DIR } from './config'
 import { handleHookEvent } from './session-manager'
 
@@ -18,7 +18,6 @@ const METHODS = new Set([
 ])
 
 let server: Server | null = null
-let mainWindowRef: BrowserWindow | null = null
 
 function handleRequest(
   raw: string
@@ -53,12 +52,10 @@ function handleRequest(
   // Update session state in session manager
   handleHookEvent(req.method, (req.params as Record<string, unknown>) ?? {})
 
-  if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-    mainWindowRef.webContents.send('hook:event', {
-      method: req.method,
-      params: req.params,
-    })
-  }
+  broadcastToAll('hook:event', {
+    method: req.method,
+    params: req.params,
+  })
 
   return { jsonrpc: '2.0', result: 'ok', id: req.id ?? null }
 }
@@ -99,9 +96,7 @@ function handleConnection(socket: Socket): void {
   })
 }
 
-export function startHookServer(mainWindow: BrowserWindow): void {
-  mainWindowRef = mainWindow
-
+export function startHookServer(): void {
   // Clean up stale socket
   if (existsSync(SOCKET_PATH)) {
     try {
@@ -138,6 +133,4 @@ export function stopHookServer(): void {
   } catch {
     // ignore
   }
-
-  mainWindowRef = null
 }

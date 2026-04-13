@@ -1,8 +1,8 @@
-import { Tray, Menu, nativeImage, type BrowserWindow, app } from 'electron'
+import { Tray, Menu, nativeImage, app } from 'electron'
 import type { Session } from '../shared/types'
+import { getMainWindow } from './window-registry'
 
 let tray: Tray | null = null
-let mainWindowRef: BrowserWindow | null = null
 
 function createTrayIcon(): Electron.NativeImage {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
@@ -14,24 +14,25 @@ function createTrayIcon(): Electron.NativeImage {
 }
 
 function showAndOpenSession(sessionId: string): void {
-  if (!mainWindowRef || mainWindowRef.isDestroyed()) return
-  mainWindowRef.show()
-  mainWindowRef.focus()
-  mainWindowRef.webContents.send('sessions:open-detail', sessionId)
+  const win = getMainWindow()
+  if (!win) return
+  win.show()
+  win.focus()
+  win.webContents.send('sessions:open-detail', sessionId)
 }
 
-export function createTray(mainWindow: BrowserWindow): void {
-  mainWindowRef = mainWindow
+export function createTray(): void {
   tray = new Tray(createTrayIcon())
   tray.setToolTip('cc-pewpew — 0 sessions')
 
   tray.on('click', () => {
-    if (!mainWindowRef || mainWindowRef.isDestroyed()) return
-    if (mainWindowRef.isVisible()) {
-      mainWindowRef.hide()
+    const win = getMainWindow()
+    if (!win) return
+    if (win.isVisible()) {
+      win.hide()
     } else {
-      mainWindowRef.show()
-      mainWindowRef.focus()
+      win.show()
+      win.focus()
     }
   })
 
@@ -49,9 +50,10 @@ export function updateTray(sessions: Session[]): void {
     {
       label: 'Show cc-pewpew',
       click: () => {
-        if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-          mainWindowRef.show()
-          mainWindowRef.focus()
+        const win = getMainWindow()
+        if (win) {
+          win.show()
+          win.focus()
         }
       },
     },

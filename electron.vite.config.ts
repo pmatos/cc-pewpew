@@ -36,6 +36,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
+          'swim-lanes': resolve(__dirname, 'src/renderer/swim-lanes.html'),
         },
       },
     },

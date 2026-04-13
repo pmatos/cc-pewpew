@@ -68,4 +68,5 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('pty:data', handler)
     return () => ipcRenderer.removeListener('pty:data', handler)
   },
+  openSwimLanes: (sessionIds: string[]) => ipcRenderer.invoke('swim-lanes:open', sessionIds),
 })
