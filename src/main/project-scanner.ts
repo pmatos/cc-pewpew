@@ -1,4 +1,4 @@
-import { readdirSync, existsSync, readFileSync, statSync } from 'fs'
+import { readdirSync, existsSync, readFileSync, statSync, lstatSync, realpathSync } from 'fs'
 import { join, basename } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -74,7 +74,8 @@ function detectSetupState(repoPath: string): 'ready' | 'unsetup' {
 
 function discoverRepos(
   scanDirs: string[],
-  pinnedPaths: string[]
+  pinnedPaths: string[],
+  followSymlinks: boolean
 ): { name: string; path: string }[] {
   const repos: { name: string; path: string }[] = []
   const seen = new Set<string>()
@@ -92,26 +93,31 @@ function discoverRepos(
     for (const entry of entries) {
       const entryPath = join(dir, entry)
       try {
+        if (!followSymlinks && lstatSync(entryPath).isSymbolicLink()) continue
         if (!statSync(entryPath).isDirectory()) continue
       } catch {
         continue
       }
       if (!existsSync(join(entryPath, '.git'))) continue
+      const realPath = followSymlinks ? realpathSync(entryPath) : entryPath
+      if (seen.has(realPath)) continue
       repos.push({ name: entry, path: entryPath })
-      seen.add(entryPath)
+      seen.add(realPath)
     }
   }
 
   for (const pinned of pinnedPaths) {
-    if (seen.has(pinned)) continue
+    const realPinned = followSymlinks ? realpathSync(pinned) : pinned
+    if (seen.has(realPinned)) continue
     try {
+      if (!followSymlinks && lstatSync(pinned).isSymbolicLink()) continue
       if (!statSync(pinned).isDirectory()) continue
     } catch {
       continue
     }
     if (!existsSync(join(pinned, '.git'))) continue
     repos.push({ name: basename(pinned), path: pinned })
-    seen.add(pinned)
+    seen.add(realPinned)
   }
 
   return repos.sort((a, b) => a.name.localeCompare(b.name))
@@ -145,8 +151,12 @@ export async function getRepoFingerprint(repoPath: string): Promise<string | und
   }
 }
 
-export async function scanProjects(scanDirs: string[], pinnedPaths?: string[]): Promise<Project[]> {
-  const repos = discoverRepos(scanDirs, pinnedPaths || [])
+export async function scanProjects(
+  scanDirs: string[],
+  pinnedPaths?: string[],
+  followSymlinks?: boolean
+): Promise<Project[]> {
+  const repos = discoverRepos(scanDirs, pinnedPaths || [], followSymlinks ?? true)
   const projects: Project[] = []
 
   // Process in batches to avoid spawning hundreds of git processes

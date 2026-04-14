@@ -99,7 +99,7 @@ app.whenReady().then(async () => {
     const config = getConfig()
     const dirs = config.scanDirs.map(resolvePath)
     const pinned = (config.pinnedPaths || []).map(resolvePath)
-    return scanProjects(dirs, pinned)
+    return scanProjects(dirs, pinned, config.followSymlinks)
   })
 
   ipcMain.handle('projects:pick-directory', async () => {
