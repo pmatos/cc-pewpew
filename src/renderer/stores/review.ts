@@ -94,9 +94,30 @@ export const useReviewStore = create<ReviewStore>((set) => ({
       const files = await window.api.getReviewDiff(sessionId, mode, baseBranch)
 
       if (hasCachedData) {
-        const oldJson = JSON.stringify(existing.files)
-        const newJson = JSON.stringify(files)
-        if (oldJson === newJson) return
+        // Quick structural comparison: file count + total hunk count + total line count
+        const oldFiles = existing.files
+        const unchanged =
+          oldFiles.length === files.length &&
+          oldFiles.every(
+            (f, i) =>
+              f.path === files[i].path &&
+              f.hunks.length === files[i].hunks.length &&
+              f.hunks.every((h, j) => h.lines.length === files[i].hunks[j].lines.length)
+          )
+        if (unchanged) {
+          // Clear any stale error even when diff hasn't changed
+          set((state) => {
+            const session = state.sessions[sessionId]
+            if (!session || !session.error) return state
+            return {
+              sessions: {
+                ...state.sessions,
+                [sessionId]: { ...session, error: null },
+              },
+            }
+          })
+          return
+        }
 
         set((state) => ({
           sessions: {

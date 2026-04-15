@@ -40,6 +40,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
   const [branches, setBranches] = useState<string[]>([])
   const [selectedBranch, setSelectedBranch] = useState('main')
   const [pendingModeSwitch, setPendingModeSwitch] = useState<DiffMode | null>(null)
+  const [pendingBranch, setPendingBranch] = useState<string | null>(null)
 
   useEffect(() => {
     containerRef.current?.focus()
@@ -91,10 +92,11 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
 
   const handleBranchChange = useCallback(
     (branch: string) => {
-      setSelectedBranch(branch)
       if (hasAnnotations) {
+        setPendingBranch(branch)
         setPendingModeSwitch('branch')
       } else {
+        setSelectedBranch(branch)
         switchMode('branch', branch)
       }
     },
@@ -349,15 +351,20 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
                 <div className="rv-confirm-actions">
                   <button
                     className="rv-feedback-btn rv-feedback-btn--cancel"
-                    onClick={() => setPendingModeSwitch(null)}
+                    onClick={() => {
+                      setPendingModeSwitch(null)
+                      setPendingBranch(null)
+                    }}
                   >
                     Cancel
                   </button>
                   <button
                     className="rv-feedback-btn rv-feedback-btn--submit"
                     onClick={() => {
-                      switchMode(pendingModeSwitch)
+                      if (pendingBranch) setSelectedBranch(pendingBranch)
+                      switchMode(pendingModeSwitch, pendingBranch ?? undefined)
                       setPendingModeSwitch(null)
+                      setPendingBranch(null)
                     }}
                   >
                     Continue

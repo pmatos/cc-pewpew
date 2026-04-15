@@ -220,9 +220,16 @@ app.whenReady().then(async () => {
 
       let diffArgs: string[]
       switch (mode) {
-        case 'uncommitted':
-          diffArgs = ['diff', 'HEAD']
+        case 'uncommitted': {
+          // Check if HEAD exists — new repos with no commits have no HEAD
+          try {
+            await execAsync('git', ['rev-parse', 'HEAD'], { cwd })
+            diffArgs = ['diff', 'HEAD']
+          } catch {
+            diffArgs = ['diff', '--cached']
+          }
           break
+        }
         case 'unpushed':
           diffArgs = ['diff', '@{upstream}']
           break
@@ -240,9 +247,14 @@ app.whenReady().then(async () => {
           ['ls-files', '--others', '--exclude-standard'],
           { cwd }
         )
+        const { stat } = await import('fs/promises')
         const untrackedPaths = untrackedRaw.split('\n').filter(Boolean)
+        const MAX_FILE_SIZE = 1_000_000 // 1MB
         for (const filePath of untrackedPaths) {
-          const content = await readFile(join(cwd, filePath), 'utf-8').catch(() => '')
+          const fullPath = join(cwd, filePath)
+          const fileStat = await stat(fullPath).catch(() => null)
+          if (!fileStat || fileStat.size > MAX_FILE_SIZE) continue
+          const content = await readFile(fullPath, 'utf-8').catch(() => '')
           files.push(synthesizeUntrackedFile(filePath, content))
         }
       }
