@@ -183,6 +183,9 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Scope shortcuts to this overlay instance (prevents cross-lane actions in swim lanes)
+      if (!containerRef.current?.contains(e.target as Node)) return
+
       if (feedbackState) return
       if (confirmAction) return
       if (pendingModeSwitch) return

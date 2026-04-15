@@ -139,6 +139,7 @@ export const useReviewStore = create<ReviewStore>((set, get) => ({
             [sessionId]: {
               ...getSession(state.sessions, sessionId),
               files,
+              annotations: {},
               cachedMode: mode,
               diffUpdated: true,
             },
