@@ -70,7 +70,7 @@ function getSession(
   return state[sessionId] ?? emptySession()
 }
 
-export const useReviewStore = create<ReviewStore>((set) => ({
+export const useReviewStore = create<ReviewStore>((set, get) => ({
   sessions: {},
   fetchDiff: async (sessionId, mode, baseBranch) => {
     const existing = useReviewStore.getState().sessions[sessionId]
@@ -93,8 +93,17 @@ export const useReviewStore = create<ReviewStore>((set) => ({
     try {
       const files = await window.api.getReviewDiff(sessionId, mode, baseBranch)
 
+      // Guard against stale async responses: if mode changed while awaiting, discard
+      const currentSession = get().sessions[sessionId]
+      if (
+        currentSession &&
+        currentSession.cachedMode !== null &&
+        currentSession.cachedMode !== mode
+      ) {
+        return
+      }
+
       if (hasCachedData) {
-        // Quick structural comparison: file count + total hunk count + total line count
         const oldFiles = existing.files
         const unchanged =
           oldFiles.length === files.length &&
@@ -102,7 +111,12 @@ export const useReviewStore = create<ReviewStore>((set) => ({
             (f, i) =>
               f.path === files[i].path &&
               f.hunks.length === files[i].hunks.length &&
-              f.hunks.every((h, j) => h.lines.length === files[i].hunks[j].lines.length)
+              f.hunks.every(
+                (h, j) =>
+                  h.lines.length === files[i].hunks[j].lines.length &&
+                  h.header === files[i].hunks[j].header &&
+                  h.lines.every((l, k) => l.content === files[i].hunks[j].lines[k].content)
+              )
           )
         if (unchanged) {
           // Clear any stale error even when diff hasn't changed

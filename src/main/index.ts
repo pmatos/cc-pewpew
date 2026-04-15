@@ -226,7 +226,13 @@ app.whenReady().then(async () => {
             await execAsync('git', ['rev-parse', 'HEAD'], { cwd })
             diffArgs = ['diff', 'HEAD']
           } catch {
-            diffArgs = ['diff', '--cached']
+            // No HEAD: diff staged+unstaged against the empty tree
+            const { stdout: emptyTree } = await execAsync(
+              'git',
+              ['hash-object', '-t', 'tree', '/dev/null'],
+              { cwd }
+            )
+            diffArgs = ['diff', emptyTree.trim()]
           }
           break
         }
