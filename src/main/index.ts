@@ -21,6 +21,7 @@ import {
   initSessionManager,
   createSession,
   createPrSession,
+  getSession,
   getSessions,
   restoreSessions,
   killSession,
@@ -29,6 +30,8 @@ import {
   removeSession,
   relocateProject,
 } from './session-manager'
+import { parseDiff, synthesizeUntrackedFile } from './diff-parser'
+import type { DiffMode } from '../shared/types'
 
 // Use native Wayland rendering when available (avoids Xwayland scaling artifacts)
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
@@ -202,6 +205,99 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('pty:scrollback', (_event, sessionId: string) => {
     return getScrollback(sessionId)
+  })
+
+  ipcMain.handle(
+    'review:get-diff',
+    async (_event, sessionId: string, mode: DiffMode, baseBranch?: string) => {
+      const session = getSession(sessionId)
+      if (!session) throw new Error(`Session not found: ${sessionId}`)
+      const cwd = session.worktreePath || session.projectPath
+      const { execFile: execFileCb } = await import('child_process')
+      const { promisify: pfy } = await import('util')
+      const { readFile } = await import('fs/promises')
+      const execAsync = pfy(execFileCb)
+
+      let diffArgs: string[]
+      switch (mode) {
+        case 'uncommitted': {
+          // Check if HEAD exists — new repos with no commits have no HEAD
+          try {
+            await execAsync('git', ['rev-parse', 'HEAD'], { cwd })
+            diffArgs = ['diff', 'HEAD']
+          } catch {
+            // No HEAD: diff staged+unstaged against the empty tree
+            const { stdout: emptyTree } = await execAsync(
+              'git',
+              ['hash-object', '-t', 'tree', '/dev/null'],
+              { cwd }
+            )
+            diffArgs = ['diff', emptyTree.trim()]
+          }
+          break
+        }
+        case 'unpushed':
+          diffArgs = ['diff', '@{upstream}']
+          break
+        case 'branch':
+          diffArgs = ['diff', `${baseBranch ?? 'main'}...`]
+          break
+      }
+
+      const { stdout: rawDiff } = await execAsync('git', diffArgs, { cwd, maxBuffer: 10_000_000 })
+      const files = parseDiff(rawDiff)
+
+      if (mode === 'uncommitted') {
+        const { stdout: untrackedRaw } = await execAsync(
+          'git',
+          ['ls-files', '--others', '--exclude-standard'],
+          { cwd }
+        )
+        const { stat } = await import('fs/promises')
+        const untrackedPaths = untrackedRaw.split('\n').filter(Boolean)
+        const MAX_FILE_SIZE = 1_000_000 // 1MB
+        for (const filePath of untrackedPaths) {
+          const fullPath = join(cwd, filePath)
+          const fileStat = await stat(fullPath).catch(() => null)
+          if (!fileStat || fileStat.size > MAX_FILE_SIZE) continue
+          const content = await readFile(fullPath, 'utf-8').catch(() => '')
+          files.push(synthesizeUntrackedFile(filePath, content))
+        }
+      }
+
+      return files
+    }
+  )
+
+  ipcMain.handle('review:list-branches', async (_event, sessionId: string) => {
+    const session = getSession(sessionId)
+    if (!session) throw new Error(`Session not found: ${sessionId}`)
+    const cwd = session.worktreePath || session.projectPath
+    const { execFile: execFileCb } = await import('child_process')
+    const { promisify: pfy } = await import('util')
+    const execAsync = pfy(execFileCb)
+    const { stdout } = await execAsync('git', ['branch', '-a', '--format=%(refname:short)'], {
+      cwd,
+    })
+    return stdout.split('\n').filter(Boolean)
+  })
+
+  ipcMain.handle('review:get-default-branch', async (_event, sessionId: string) => {
+    const session = getSession(sessionId)
+    if (!session) throw new Error(`Session not found: ${sessionId}`)
+    const cwd = session.worktreePath || session.projectPath
+    const { execFile: execFileCb } = await import('child_process')
+    const { promisify: pfy } = await import('util')
+    const execAsync = pfy(execFileCb)
+    try {
+      const { stdout } = await execAsync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+        cwd,
+      })
+      const ref = stdout.trim()
+      return ref.replace('refs/remotes/origin/', '')
+    } catch {
+      return 'main'
+    }
   })
 
   ipcMain.handle('config:get-canvas', () => {

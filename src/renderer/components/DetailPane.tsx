@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Terminal from './Terminal'
+import ReviewOverlay from './ReviewOverlay'
 import { useSessionsStore } from '../stores/sessions'
 
 interface Props {
@@ -12,19 +13,57 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
   const session = useSessionsStore((s) => s.sessions.find((s) => s.id === sessionId))
   const isDead = session?.status === 'dead'
   const [reviving, setReviving] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
+
+  const closeReview = useCallback(() => {
+    setReviewOpen(false)
+    // Return focus to the terminal after the flip animation
+    setTimeout(() => {
+      const term = document.querySelector<HTMLElement>(
+        '.detail-pane-terminal .xterm-helper-textarea'
+      )
+      term?.focus()
+    }, 420)
+  }, [])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement
-      const isTerminalFocused = target.closest('.terminal-container')
-      if (e.key === 'Escape' && !isTerminalFocused) {
+      if (e.ctrlKey && e.key === 'r') {
+        e.preventDefault()
         e.stopPropagation()
-        onClose()
+        setReviewOpen((prev) => {
+          if (prev) {
+            // Flipping back — refocus terminal after animation
+            setTimeout(() => {
+              const term = document.querySelector<HTMLElement>(
+                '.detail-pane-terminal .xterm-helper-textarea'
+              )
+              term?.focus()
+            }, 420)
+          }
+          return !prev
+        })
+        return
+      }
+
+      if (e.key === 'Escape') {
+        if (reviewOpen) {
+          e.preventDefault()
+          e.stopPropagation()
+          closeReview()
+          return
+        }
+        const target = e.target as HTMLElement
+        const isTerminalFocused = target.closest('.terminal-container')
+        if (!isTerminalFocused) {
+          e.stopPropagation()
+          onClose()
+        }
       }
     }
     document.addEventListener('keydown', handler, true)
     return () => document.removeEventListener('keydown', handler, true)
-  }, [onClose])
+  }, [onClose, reviewOpen, closeReview])
 
   const handleRevive = async () => {
     setReviving(true)
@@ -64,7 +103,16 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
             </div>
           </div>
         ) : (
-          <Terminal sessionId={sessionId} />
+          <div className="flip-container">
+            <div className={`flip-inner${reviewOpen ? ' flipped' : ''}`}>
+              <div className="flip-front">
+                <Terminal sessionId={sessionId} />
+              </div>
+              <div className="flip-back">
+                {reviewOpen && <ReviewOverlay sessionId={sessionId} onClose={closeReview} />}
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

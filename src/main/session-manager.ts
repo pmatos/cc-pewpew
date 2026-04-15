@@ -328,6 +328,10 @@ export async function createPrSession(
   return session
 }
 
+export function getSession(id: string): Session | undefined {
+  return sessions.get(id)?.session
+}
+
 export function getSessions(): Session[] {
   return Array.from(sessions.values()).map((e) => e.session)
 }
