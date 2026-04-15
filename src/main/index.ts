@@ -36,6 +36,23 @@ import type { DiffMode } from '../shared/types'
 // Use native Wayland rendering when available (avoids Xwayland scaling artifacts)
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
 
+// Linux dual-GPU workaround: ANGLE/EGL initialization can fail inside AppImages
+// or on systems with multiple GPUs (e.g. Intel iGPU + NVIDIA dGPU) because the
+// bundled Chromium can't access the right driver libraries. If the user passed
+// --disable-gpu on the command line, honour it; otherwise enable the Vulkan ANGLE
+// backend which handles dual-GPU setups more reliably than the default EGL path.
+if (process.platform === 'linux') {
+  if (process.argv.includes('--disable-gpu')) {
+    app.disableHardwareAcceleration()
+  } else {
+    // Prefer Vulkan backend — it sidesteps the EGL/GBM initialisation failures
+    // seen on hybrid Intel+NVIDIA laptops under Wayland.
+    app.commandLine.appendSwitch('use-angle', 'vulkan')
+    app.commandLine.appendSwitch('enable-features', 'Vulkan')
+    // If Vulkan also fails, Chromium will fall back to SwiftShader automatically.
+  }
+}
+
 // Apply UI scale to the entire app (native menu bar + web content) before app is ready
 const uiScale = getConfig().uiScale ?? 1.2
 app.commandLine.appendSwitch('force-device-scale-factor', uiScale.toString())

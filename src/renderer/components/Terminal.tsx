@@ -112,6 +112,18 @@ export default function Terminal({ sessionId }: Props) {
         term.open(container)
         try {
           const addon = new WebglAddon()
+          addon.onContextLoss(() => {
+            // GPU process crashed or GL context was lost (common on dual-GPU
+            // Linux systems). Dispose the WebGL addon so xterm.js falls back
+            // to its built-in canvas renderer — garbled output otherwise.
+            try {
+              addon.dispose()
+            } catch {
+              // Already disposed
+            }
+            webglAddon = null
+            term.refresh(0, term.rows - 1)
+          })
           term.loadAddon(addon)
           webglAddon = addon
         } catch {
