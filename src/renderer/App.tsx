@@ -45,7 +45,7 @@ export default function App() {
       if (e.ctrlKey && e.key === 'n') {
         e.preventDefault()
         setShowCreateDialog(true)
-      } else if (e.ctrlKey && e.key === 'r') {
+      } else if (e.ctrlKey && e.shiftKey && e.key === 'R') {
         e.preventDefault()
         scanProjects()
       } else if (e.key === 'Escape') {
@@ -119,7 +119,7 @@ export default function App() {
             <button
               className="refresh-btn"
               onClick={scanProjects}
-              title="Refresh projects (Ctrl+R)"
+              title="Refresh projects (Ctrl+Shift+R)"
             >
               ⟳
             </button>

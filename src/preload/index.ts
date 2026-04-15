@@ -69,4 +69,9 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('pty:data', handler)
   },
   openSwimLanes: (sessionIds: string[]) => ipcRenderer.invoke('swim-lanes:open', sessionIds),
+  getReviewDiff: (sessionId: string, mode: string, baseBranch?: string) =>
+    ipcRenderer.invoke('review:get-diff', sessionId, mode, baseBranch),
+  getReviewBranches: (sessionId: string) => ipcRenderer.invoke('review:list-branches', sessionId),
+  getReviewDefaultBranch: (sessionId: string) =>
+    ipcRenderer.invoke('review:get-default-branch', sessionId),
 })

@@ -55,6 +55,9 @@ export default function Terminal({ sessionId }: Props) {
           return false
         }
       }
+      if (e.ctrlKey && !e.shiftKey && e.key === 'r') {
+        return false
+      }
       if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
         if (e.type === 'keydown') {
           window.api.ptyWrite(sessionId, '\x1b[13;2u')

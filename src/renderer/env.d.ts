@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { Project, Session } from '../shared/types'
+import type { DiffFile, DiffMode, Project, Session } from '../shared/types'
 
 declare global {
   interface Window {
@@ -40,6 +40,9 @@ declare global {
       ptyGetScrollback: (sessionId: string) => Promise<string>
       onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => () => void
       openSwimLanes: (sessionIds: string[]) => Promise<void>
+      getReviewDiff: (sessionId: string, mode: DiffMode, baseBranch?: string) => Promise<DiffFile[]>
+      getReviewBranches: (sessionId: string) => Promise<string[]>
+      getReviewDefaultBranch: (sessionId: string) => Promise<string>
     }
   }
 }
