@@ -115,23 +115,41 @@ export function resizePty(sessionId: string, cols: number, rows: number): void {
   }
 }
 
-export function destroyPty(sessionId: string): void {
+/** Detach node-pty but keep the tmux session alive (for disconnect/reconnect). */
+export function detachPty(sessionId: string): void {
   const entry = ptys.get(sessionId)
   if (!entry) return
 
   ptys.delete(sessionId)
 
-  // Kill tmux session first — this causes the attached pty to exit naturally
-  try {
-    execFileSync('tmux', ['kill-session', '-t', entry.tmuxSession])
-  } catch {
-    // Session may already be dead
-  }
-
   try {
     entry.pty.kill()
   } catch {
-    // Pty may already be dead from tmux exit
+    // Pty may already be dead
+  }
+}
+
+/** Kill both node-pty and the tmux session (full teardown). */
+export function destroyPty(sessionId: string): void {
+  const entry = ptys.get(sessionId)
+  const tmuxSession = entry?.tmuxSession ?? `cc-pewpew-${sessionId}`
+
+  if (entry) {
+    ptys.delete(sessionId)
+
+    try {
+      entry.pty.kill()
+    } catch {
+      // Pty may already be dead from tmux exit
+    }
+  }
+
+  // Always attempt to kill the tmux session — the pty onExit handler may have
+  // already removed the map entry, but the tmux session can still be alive.
+  try {
+    execFileSync('tmux', ['kill-session', '-t', tmuxSession])
+  } catch {
+    // Session may already be dead
   }
 }
 
@@ -141,6 +159,15 @@ export function getPtyIds(): string[] {
 
 export function hasPty(sessionId: string): boolean {
   return ptys.has(sessionId)
+}
+
+export function hasTmuxSession(sessionId: string): boolean {
+  try {
+    execFileSync('tmux', ['has-session', '-t', `cc-pewpew-${sessionId}`], { timeout: 3000 })
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function captureThumbnails(): Record<string, string> {

@@ -8,7 +8,15 @@ import { broadcastToAll, getMainWindow } from './window-registry'
 import { CONFIG_DIR, getConfig, saveConfig } from './config'
 import { updateTray } from './tray'
 import { notifyNeedsInput } from './notifications'
-import { createPty, destroyPty, hasPty, discoverTmuxSessions, reattachPty } from './pty-manager'
+import {
+  createPty,
+  detachPty,
+  destroyPty,
+  hasPty,
+  hasTmuxSession,
+  discoverTmuxSessions,
+  reattachPty,
+} from './pty-manager'
 import { getRepoFingerprint } from './project-scanner'
 import { installHooks } from './hook-installer'
 import type { Session, SessionStatus } from '../shared/types'
@@ -158,7 +166,7 @@ export function handleHookEvent(method: string, params: Record<string, unknown>)
 }
 
 export function killSession(id: string): void {
-  destroyPty(id)
+  detachPty(id)
   updateSession(id, 'dead')
 }
 
@@ -170,7 +178,11 @@ export function reviveSession(id: string): void {
   if (session.status !== 'dead')
     throw new Error(`Session ${id} is not dead (status: ${session.status})`)
 
-  createPty(id, session.worktreePath)
+  if (hasTmuxSession(id)) {
+    reattachPty(id)
+  } else {
+    createPty(id, session.worktreePath)
+  }
   updateSession(id, 'idle')
 }
 
