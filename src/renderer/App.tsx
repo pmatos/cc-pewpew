@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import ProjectTree from './components/ProjectTree'
-import SessionCanvas from './components/SessionCanvas'
+import SessionCanvas, { type ZoomOpenPayload } from './components/SessionCanvas'
 import DetailPane from './components/DetailPane'
 import StatusBar from './components/StatusBar'
 import ManageHostsDialog from './components/ManageHostsDialog'
+import ZoomOpenMorph from './components/ZoomOpenMorph'
 import { useProjectsStore } from './stores/projects'
 import { useSessionsStore } from './stores/sessions'
 import { useHostsStore } from './stores/hosts'
@@ -40,6 +41,12 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(250)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [activeSessionName, setActiveSessionName] = useState('')
+  const [morphPayload, setMorphPayload] = useState<ZoomOpenPayload | null>(null)
+
+  const handleZoomOpen = useCallback((payload: ZoomOpenPayload) => {
+    // Keep canvas rendered during the morph; mount DetailPane only on morph grown.
+    setMorphPayload(payload)
+  }, [])
   const resizing = useRef(false)
   const resizeStart = useRef({ x: 0, width: 0 })
 
@@ -62,7 +69,10 @@ export default function App() {
         // one is open (avoids side-effect clearing of active session /
         // selection when dismissing a modal via Escape).
         if (useHostsStore.getState().dialogOpen) return
-        if (activeSessionId) {
+        if (morphPayload && !activeSessionId) {
+          // Cancel zoom-open mid-morph: abort the transition and stay on canvas.
+          setMorphPayload(null)
+        } else if (activeSessionId) {
           setActiveSessionId(null)
         } else if (useSessionsStore.getState().selectedIds.size > 0) {
           useSessionsStore.getState().clearSelection()
@@ -73,7 +83,7 @@ export default function App() {
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [scanProjects, activeSessionId])
+  }, [scanProjects, activeSessionId, morphPayload])
 
   const handleCreate = async () => {
     const name = newProjectName.trim()
@@ -204,11 +214,23 @@ export default function App() {
               setActiveSessionId(id)
               setActiveSessionName(name)
             }}
+            onZoomOpen={handleZoomOpen}
           />
         )}
       </main>
 
       <ManageHostsDialog />
+      {morphPayload && (
+        <ZoomOpenMorph
+          startRect={morphPayload.startRect}
+          onGrown={() => {
+            setActiveSessionId(morphPayload.sessionId)
+            setActiveSessionName(morphPayload.sessionName)
+          }}
+          onDone={() => setMorphPayload(null)}
+        />
+      )}
+
       <StatusBar />
     </div>
   )

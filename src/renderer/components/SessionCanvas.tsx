@@ -7,12 +7,28 @@ import EdgeIndicators from './EdgeIndicators'
 import BroadcastDialog from './BroadcastDialog'
 
 const MIN_ZOOM = 0.3
-const MAX_ZOOM = 1.0
+const RESTING_MAX_ZOOM = 1.0
 const ZOOM_SENSITIVITY = 0.001
 const KEYBOARD_ZOOM_STEP = 0.1
 const DOT_SPACING = 30
 const DOT_COLOR = '#2a2a4a'
 const DOT_RADIUS = 1.5
+
+// Source of truth in SessionCluster.tsx — keep in sync.
+const CARD_WIDTH = 240
+const CARD_HEIGHT = 230
+
+// Ceiling for wheel/keyboard zoom. Must exceed what zoom-to-open needs so the
+// gesture can push a card past the 95% fill threshold.
+function computeMaxZoom(viewportW: number, viewportH: number): number {
+  if (viewportW <= 0 || viewportH <= 0) return RESTING_MAX_ZOOM
+  return Math.max(viewportW / CARD_WIDTH, viewportH / CARD_HEIGHT) * 1.05
+}
+
+// Zoom-to-open: fire when card reaches this fraction of either viewport dimension,
+// sustained for DWELL_MS (filters accidental wheel flicks).
+const FILL_THRESHOLD = 0.95
+const DWELL_MS = 120
 
 const ACCENT_COLORS = [
   '#4ade80',
@@ -36,12 +52,21 @@ function hashColor(path: string): string {
 const CLUSTER_WIDTH = 510
 const CLUSTER_GAP = 40
 
-interface CanvasProps {
-  onOpenSession?: (id: string, name: string) => void
+export interface ZoomOpenPayload {
+  sessionId: string
+  sessionName: string
+  startRect: { left: number; top: number; width: number; height: number }
+  thumbnail: string | undefined
 }
 
-export default function SessionCanvas({ onOpenSession }: CanvasProps) {
+interface CanvasProps {
+  onOpenSession?: (id: string, name: string) => void
+  onZoomOpen?: (payload: ZoomOpenPayload) => void
+}
+
+export default function SessionCanvas({ onOpenSession, onZoomOpen }: CanvasProps) {
   const { sessions, thumbnails, toggleSelect, rangeSelect, clearSelection } = useSessionsStore()
+  const broadcastDialogOpen = useSessionsStore((s) => s.broadcastDialogOpen)
   const projects = useProjectsStore((s) => s.projects)
   const knownPaths = useMemo(() => new Set(projects.map((p) => p.path)), [projects])
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -68,6 +93,13 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
   panXRef.current = panX
   panYRef.current = panY
   zoomRef.current = zoom
+
+  // Zoom-to-open state
+  const thresholdCrossedAtRef = useRef<number | null>(null)
+  const isAnimatingPanRef = useRef(false)
+  const zoomOpenFiredRef = useRef(false)
+  const broadcastDialogOpenRef = useRef(broadcastDialogOpen)
+  broadcastDialogOpenRef.current = broadcastDialogOpen
 
   // Group sessions by project
   const clusters = useMemo(() => {
@@ -138,6 +170,7 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
       const startTime = performance.now()
       const duration = 350
 
+      isAnimatingPanRef.current = true
       const animate = (now: number) => {
         const t = Math.min(1, (now - startTime) / duration)
         const ease = 1 - Math.pow(1 - t, 3)
@@ -148,7 +181,12 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
         if (t < 1) {
           requestAnimationFrame(animate)
         } else {
-          window.api.saveCanvasState({ zoom: zoomRef.current, panX: targetPanX, panY: targetPanY })
+          isAnimatingPanRef.current = false
+          window.api.saveCanvasState({
+            zoom: Math.min(zoomRef.current, RESTING_MAX_ZOOM),
+            panX: targetPanX,
+            panY: targetPanY,
+          })
         }
       }
       requestAnimationFrame(animate)
@@ -157,7 +195,8 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
     setPanToCluster(panToClusterFn)
   }, [clusterPositions, setPanToCluster])
 
-  // Track viewport size
+  // Track viewport size. Depends on `loaded` because pre-load renders null (ref
+  // is unattached); effect must re-run once the DOM mounts.
   useEffect(() => {
     const viewport = viewportRef.current
     if (!viewport) return
@@ -169,15 +208,31 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
     const observer = new ResizeObserver(updateSize)
     observer.observe(viewport)
     return () => observer.disconnect()
-  }, [])
+  }, [loaded])
 
-  // Persist canvas with debounce
-  const persistCanvas = useCallback((z: number, px: number, py: number) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => {
-      window.api.saveCanvasState({ zoom: z, panX: px, panY: py })
-    }, 500)
-  }, [])
+  // Persist canvas with debounce. Clamp zoom to RESTING_MAX_ZOOM so a
+  // mid-gesture extreme zoom is never restored on next launch. When clamping,
+  // also recompute pan so the viewport-center world point stays fixed — otherwise
+  // on remount the user lands in empty world space far from their content.
+  const persistCanvas = useCallback(
+    (z: number, px: number, py: number) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = setTimeout(() => {
+        let saveZoom = z
+        let savePanX = px
+        let savePanY = py
+        if (z > RESTING_MAX_ZOOM && viewportSize.width > 0 && viewportSize.height > 0) {
+          const worldCx = (viewportSize.width / 2 - px) / z
+          const worldCy = (viewportSize.height / 2 - py) / z
+          saveZoom = RESTING_MAX_ZOOM
+          savePanX = viewportSize.width / 2 - worldCx * RESTING_MAX_ZOOM
+          savePanY = viewportSize.height / 2 - worldCy * RESTING_MAX_ZOOM
+        }
+        window.api.saveCanvasState({ zoom: saveZoom, panX: savePanX, panY: savePanY })
+      }, 500)
+    },
+    [viewportSize.width, viewportSize.height]
+  )
 
   // Draw dot grid
   useEffect(() => {
@@ -236,8 +291,9 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
         persistCanvas(0.7, 0, 0)
       } else if (e.key === '=' || e.key === '+') {
         e.preventDefault()
+        const cap = computeMaxZoom(viewportSize.width, viewportSize.height)
         setZoom((prev) => {
-          const next = Math.min(MAX_ZOOM, prev + KEYBOARD_ZOOM_STEP)
+          const next = Math.min(cap, prev + KEYBOARD_ZOOM_STEP)
           persistCanvas(next, panX, panY)
           return next
         })
@@ -252,7 +308,7 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [panX, panY, persistCanvas])
+  }, [panX, panY, persistCanvas, viewportSize.width, viewportSize.height])
 
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -263,18 +319,79 @@ export default function SessionCanvas({ onOpenSession }: CanvasProps) {
       const cx = e.clientX - rect.left
       const cy = e.clientY - rect.top
 
+      const cap = computeMaxZoom(rect.width, rect.height)
+      let committedZoom = zoomRef.current
       setZoom((prevZoom) => {
         const zoomDelta = -e.deltaY * ZOOM_SENSITIVITY * prevZoom
-        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prevZoom + zoomDelta))
+        const newZoom = Math.max(MIN_ZOOM, Math.min(cap, prevZoom + zoomDelta))
         const newPanX = cx - (cx - panX) * (newZoom / prevZoom)
         const newPanY = cy - (cy - panY) * (newZoom / prevZoom)
         setPanX(newPanX)
         setPanY(newPanY)
         persistCanvas(newZoom, newPanX, newPanY)
+        committedZoom = newZoom
         return newZoom
       })
+
+      // Zoom-to-open detection (wheel-only path).
+      // Guards: no modal, not mid-drag, no automated pan, not already fired.
+      const armed =
+        !broadcastDialogOpenRef.current &&
+        !dragging &&
+        !isAnimatingPanRef.current &&
+        !zoomOpenFiredRef.current
+      if (!armed) {
+        thresholdCrossedAtRef.current = null
+        return
+      }
+
+      // Target card: whichever .session-card sits under the cursor.
+      const hit = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+      const cardEl = hit?.closest('.session-card') as HTMLElement | null
+      if (!cardEl) {
+        thresholdCrossedAtRef.current = null
+        return
+      }
+
+      // Threshold: either dimension of the rendered card >= FILL_THRESHOLD of viewport.
+      const renderedW = CARD_WIDTH * committedZoom
+      const renderedH = CARD_HEIGHT * committedZoom
+      const filled =
+        renderedW >= rect.width * FILL_THRESHOLD || renderedH >= rect.height * FILL_THRESHOLD
+      if (!filled) {
+        thresholdCrossedAtRef.current = null
+        return
+      }
+
+      // Dwell: commit only after DWELL_MS of sustained threshold crossing.
+      const now = performance.now()
+      if (thresholdCrossedAtRef.current === null) {
+        thresholdCrossedAtRef.current = now
+        return
+      }
+      if (now - thresholdCrossedAtRef.current < DWELL_MS) return
+
+      // Fire.
+      const sessionId = cardEl.dataset.sessionId
+      if (!sessionId) return
+      const sessionRec = sessions.find((s) => s.id === sessionId)
+      if (!sessionRec) return
+      const cardRect = cardEl.getBoundingClientRect()
+      zoomOpenFiredRef.current = true
+      thresholdCrossedAtRef.current = null
+      onZoomOpen?.({
+        sessionId,
+        sessionName: `${sessionRec.projectName}/${sessionRec.worktreeName}`,
+        startRect: {
+          left: cardRect.left,
+          top: cardRect.top,
+          width: cardRect.width,
+          height: cardRect.height,
+        },
+        thumbnail: thumbnails[sessionId],
+      })
     },
-    [panX, panY, persistCanvas]
+    [panX, panY, persistCanvas, dragging, sessions, thumbnails, onZoomOpen]
   )
 
   const handleSelect = useCallback(
