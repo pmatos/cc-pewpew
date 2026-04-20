@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('sessions:create', projectPath, name),
   createPrSession: (projectPath: string, prNumber: number) =>
     ipcRenderer.invoke('sessions:create-pr', projectPath, prNumber),
+  mirrorWorktree: (projectPath: string, worktreePath: string) =>
+    ipcRenderer.invoke('sessions:mirror', projectPath, worktreePath),
+  mirrorAllWorktrees: (projectPath: string) =>
+    ipcRenderer.invoke('sessions:mirror-all', projectPath),
   getSessions: () => ipcRenderer.invoke('sessions:list'),
   killSession: (id: string) => ipcRenderer.invoke('sessions:kill', id),
   reviveSession: (id: string) => ipcRenderer.invoke('sessions:revive', id),

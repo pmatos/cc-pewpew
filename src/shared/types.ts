@@ -12,6 +12,7 @@ export interface Worktree {
   name: string
   path: string
   branch: string
+  isMain: boolean
 }
 
 export interface Session {

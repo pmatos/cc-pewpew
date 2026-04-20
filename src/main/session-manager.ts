@@ -18,7 +18,7 @@ import {
   discoverTmuxSessions,
   reattachPty,
 } from './pty-manager'
-import { getRepoFingerprint } from './project-scanner'
+import { getRepoFingerprint, gitWorktrees } from './project-scanner'
 import { installHooks } from './hook-installer'
 import type { Session, SessionStatus } from '../shared/types'
 
@@ -59,33 +59,36 @@ export function initSessionManager(): void {
   // No-op — session manager now uses the window registry for IPC
 }
 
-export async function createSession(projectPath: string, name?: string): Promise<Session> {
-  const id = randomUUID().slice(0, 8)
-  const worktreeName = name || `session-${id}`
-  const projectName = basename(projectPath)
-  const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
-  const tmuxSession = `cc-pewpew-${id}`
-
-  // Create worktree
+async function deriveLabel(worktreePath: string): Promise<string> {
   try {
-    await execFileAsync('git', [
-      '-C',
-      projectPath,
-      'worktree',
-      'add',
-      worktreePath,
-      '-b',
-      `cc-pewpew/${worktreeName}`,
-    ])
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+      { timeout: 5000 }
+    )
+    const branch = stdout.trim()
+    if (branch && branch !== 'HEAD') return branch
   } catch {
-    // Branch may already exist — try without -b
-    await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath])
+    // fall through to basename
+  }
+  return basename(worktreePath)
+}
+
+export async function createSessionForWorktree(
+  projectPath: string,
+  worktreePath: string,
+  label?: string
+): Promise<Session> {
+  for (const e of sessions.values()) {
+    if (e.session.worktreePath === worktreePath) return e.session
   }
 
-  // Install hooks in the worktree so Claude Code fires events back to cc-pewpew
-  await installHooks(worktreePath, { skipGitignore: true })
+  const id = randomUUID().slice(0, 8)
+  const projectName = basename(projectPath)
+  const worktreeName = label || (await deriveLabel(worktreePath))
+  const tmuxSession = `cc-pewpew-${id}`
 
-  // Create embedded terminal via PTY manager (tmux + node-pty)
+  await installHooks(worktreePath, { skipGitignore: true })
   createPty(id, worktreePath)
 
   const session: Session = {
@@ -113,6 +116,54 @@ export async function createSession(projectPath: string, name?: string): Promise
   onSessionsChanged()
 
   return session
+}
+
+export interface MirrorAllResult {
+  mirrored: Session[]
+  failed: { path: string; error: string }[]
+}
+
+export async function mirrorAllWorktrees(projectPath: string): Promise<MirrorAllResult> {
+  const worktrees = await gitWorktrees(projectPath)
+  const existingPaths = new Set<string>()
+  for (const e of sessions.values()) existingPaths.add(e.session.worktreePath)
+
+  const targets = worktrees.filter((wt) => !wt.isMain && !existingPaths.has(wt.path))
+
+  const results = await Promise.allSettled(
+    targets.map((wt) => createSessionForWorktree(projectPath, wt.path))
+  )
+
+  const mirrored: Session[] = []
+  const failed: { path: string; error: string }[] = []
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') mirrored.push(r.value)
+    else failed.push({ path: targets[i].path, error: String(r.reason) })
+  })
+
+  return { mirrored, failed }
+}
+
+export async function createSession(projectPath: string, name?: string): Promise<Session> {
+  const worktreeName = name || `session-${randomUUID().slice(0, 8)}`
+  const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
+
+  try {
+    await execFileAsync('git', [
+      '-C',
+      projectPath,
+      'worktree',
+      'add',
+      worktreePath,
+      '-b',
+      `cc-pewpew/${worktreeName}`,
+    ])
+  } catch {
+    // Branch may already exist — try without -b
+    await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath])
+  }
+
+  return createSessionForWorktree(projectPath, worktreePath, worktreeName)
 }
 
 export function handleHookEvent(method: string, params: Record<string, unknown>): void {
