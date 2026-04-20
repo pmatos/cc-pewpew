@@ -110,24 +110,32 @@ export default function Terminal({ sessionId }: Props) {
         if (aborted) return
 
         term.open(container)
-        try {
-          const addon = new WebglAddon()
-          addon.onContextLoss(() => {
-            // GPU process crashed or GL context was lost (common on dual-GPU
-            // Linux systems). Dispose the WebGL addon so xterm.js falls back
-            // to its built-in canvas renderer — garbled output otherwise.
-            try {
-              addon.dispose()
-            } catch {
-              // Already disposed
-            }
-            webglAddon = null
-            term.refresh(0, term.rows - 1)
-          })
-          term.loadAddon(addon)
-          webglAddon = addon
-        } catch {
-          // WebGL not available, fall back to default canvas renderer
+        // Skip WebglAddon on Linux. ANGLE's Vulkan backend (enabled in
+        // src/main/index.ts for dual-GPU support) can't always import the
+        // Ozone DMA-BUF shared-image backing into a Vulkan texture, producing
+        // silent WebGL errors (`ProduceGLTexturePassthrough: incompatible
+        // backing`) that leave the glyph atlas invalid. xterm.js never sees a
+        // context-loss event, so glyphs render as garbled/scattered text. The
+        // canvas renderer is marginally slower but reliable across Linux GPU
+        // stacks.
+        const isLinux = navigator.userAgent.includes('Linux')
+        if (!isLinux) {
+          try {
+            const addon = new WebglAddon()
+            addon.onContextLoss(() => {
+              try {
+                addon.dispose()
+              } catch {
+                // Already disposed
+              }
+              webglAddon = null
+              term.refresh(0, term.rows - 1)
+            })
+            term.loadAddon(addon)
+            webglAddon = addon
+          } catch {
+            // WebGL not available, fall back to default canvas renderer
+          }
         }
         termRef.current = term
         fitRef.current = fitAddon
