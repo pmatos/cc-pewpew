@@ -80,7 +80,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
 
   const [dragging, setDragging] = useState(false)
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>()
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const [clusterPositions, setClusterPositions] = useState<
     Record<string, { x: number; y: number }>
