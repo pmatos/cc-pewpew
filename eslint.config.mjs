@@ -1,4 +1,5 @@
 import js from '@eslint/js'
+import globals from 'globals'
 import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 import eslintConfigPrettier from 'eslint-config-prettier'
@@ -14,6 +15,14 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    files: ['.github/scripts/**/*.mjs', '.github/scripts/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
     },
   },
   {

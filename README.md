@@ -1,5 +1,8 @@
 # cc-pewpew
 
+[![CI](https://github.com/pmatos/cc-pewpew/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pmatos/cc-pewpew/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/pmatos/cc-pewpew/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/pmatos/cc-pewpew/actions/workflows/codeql.yml)
+
 A desktop GUI for launching, monitoring, and visualizing Claude Code sessions with embedded terminals across your git projects.
 
 ## What it does
@@ -71,6 +74,18 @@ Edit `~/.config/cc-pewpew/config.json`:
 - **Electron** + **TypeScript** + **React** + **Zustand**
 - **xterm.js** + **node-pty** + **tmux** for embedded persistent terminals
 - **electron-vite** for build tooling
+
+## Releasing
+
+Linux builds are produced by the `Release` workflow. From the GitHub UI:
+
+1. Go to **Actions → Release → Run workflow**.
+2. Pick a semver bump (`patch`/`minor`/`major`) or pass an explicit `version` (e.g. `1.2.3`).
+3. Optionally toggle `draft` or `prerelease`.
+
+The job bumps `package.json`, commits + tags on `main`, builds the AppImage and
+`.deb`, uploads `SHA256SUMS.txt` alongside them, and creates a GitHub Release
+with auto-generated notes. Requires the workflow to be run against `main`.
 
 ## License
 
