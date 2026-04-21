@@ -14,13 +14,10 @@ interface ExecResult {
   stdout: string
   stderr: string
   code: number
-}
-
-interface SshRunResult extends ExecResult {
   timedOut: boolean
 }
 
-function runSsh(argv: string[], timeoutMs: number): Promise<SshRunResult> {
+function runSsh(argv: string[], timeoutMs: number): Promise<ExecResult> {
   return new Promise((resolve) => {
     const child = execFile(
       'ssh',
@@ -90,8 +87,7 @@ export async function exec(
   const timeoutMs = opts.timeoutMs ?? 30000
   const quoted = argv.map(shellQuote)
   const sshArgv = ['-o', 'BatchMode=yes', '--', alias, ...quoted]
-  const { stdout, stderr, code } = await runSsh(sshArgv, timeoutMs)
-  return { stdout, stderr, code }
+  return runSsh(sshArgv, timeoutMs)
 }
 
 // Validates that a remote path is a git repository and extracts its root-commit
@@ -104,17 +100,31 @@ export async function exec(
 // so that worktrees and submodules (where `.git` is a file pointing at a
 // separate gitdir) are accepted as valid. The fingerprint step is best-effort:
 // an empty repo with no HEAD returns an empty fingerprint, not a rejection.
+//
+// The probe deliberately does NOT swallow stderr on rev-parse and propagates
+// the original exit code, so that a missing `git` binary on the remote
+// (shell-level exit 127 + "command not found") remains distinguishable from a
+// path that simply isn't a git repo — `classifySshExit` routes the former to
+// `dep-missing`.
 export async function validateRemoteRepo(
   alias: string,
   path: string,
   opts: { timeoutMs?: number } = {}
 ): Promise<ValidateRemoteRepoResult> {
   const script =
-    'git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || exit 1; ' +
-    'git -C "$1" rev-list --max-parents=0 HEAD 2>/dev/null || true'
-  const { stdout, stderr, code } = await exec(alias, ['sh', '-c', script, '_', path], {
+    'git -C "$1" rev-parse --git-dir >/dev/null\n' +
+    'rc=$?\n' +
+    'if [ $rc -eq 0 ]; then\n' +
+    '  git -C "$1" rev-list --max-parents=0 HEAD 2>/dev/null || true\n' +
+    'else\n' +
+    '  exit $rc\n' +
+    'fi'
+  const { stdout, stderr, code, timedOut } = await exec(alias, ['sh', '-c', script, '_', path], {
     timeoutMs: opts.timeoutMs ?? 15000,
   })
+  if (timedOut) {
+    return { ok: false, reason: 'network', message: 'ssh timed out' }
+  }
   if (code === 0) {
     const fingerprint = stdout.trim().split('\n')[0] || undefined
     return { ok: true, fingerprint }

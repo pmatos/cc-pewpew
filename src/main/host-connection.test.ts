@@ -101,6 +101,31 @@ describe('validateRemoteRepo', () => {
     expect(result.reason).toBe('dep-missing')
   })
 
+  it('returns dep-missing when remote git is absent (shell emits 127)', async () => {
+    nextResult = {
+      stdout: '',
+      stderr: 'sh: 1: git: not found',
+      error: { name: 'Error', message: 'x', code: 127 } as unknown as NodeJS.ErrnoException,
+      exitCode: 127,
+    }
+    const result = await validateRemoteRepo('dev', '/srv/repo')
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('dep-missing')
+  })
+
+  it('returns network when ssh is killed by the timeout', async () => {
+    nextResult = {
+      stdout: '',
+      stderr: '',
+      error: Object.assign(new Error('timeout'), {
+        killed: true,
+      }) as NodeJS.ErrnoException & { killed?: boolean },
+      exitCode: null,
+    }
+    const result = await validateRemoteRepo('dev', '/srv/repo')
+    expect(result).toEqual({ ok: false, reason: 'network', message: 'ssh timed out' })
+  })
+
   it('passes the remote path as a positional argv element (not interpolated)', async () => {
     nextResult = { stdout: 'abc\n', stderr: '', error: null, exitCode: 0 }
     await validateRemoteRepo('dev', "/pa'th")
