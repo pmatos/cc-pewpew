@@ -1715,3 +1715,19 @@ body,
   border-color: var(--accent-green);
   outline: none;
 }
+
+.zoom-open-morph {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  pointer-events: none;
+  transition:
+    left 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    top 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 60ms linear;
+}

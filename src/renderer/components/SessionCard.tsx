@@ -136,7 +136,13 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
     .join(' ')
 
   return (
-    <div className={classes} onClick={handleClick} onContextMenu={handleContextMenu} style={style}>
+    <div
+      className={classes}
+      data-session-id={session.id}
+      onClick={handleClick}
+      onContextMenu={handleContextMenu}
+      style={style}
+    >
       <div className="session-card-thumb">
         {thumbnail ? <pre className="session-card-text-thumb">{thumbnail}</pre> : null}
       </div>
