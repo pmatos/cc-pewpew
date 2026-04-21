@@ -25,9 +25,8 @@ case "$EVENT_NAME" in
   *)              exit 0 ;;
 esac
 
-PAYLOAD=$(jq -cn \
+PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg method "$METHOD" \
-  --argjson params "$INPUT" \
-  '{"jsonrpc":"2.0","method":$method,"params":$params,"id":null}')
+  '{jsonrpc:"2.0",method:$method,params:.,id:null}')
 
 echo "$PAYLOAD" | socat - UNIX-CONNECT:"$SOCKET" >/dev/null 2>/dev/null || true
