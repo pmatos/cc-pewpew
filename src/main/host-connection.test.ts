@@ -44,6 +44,12 @@ describe('validateRemoteRepo', () => {
     expect(result).toEqual({ ok: true, fingerprint: 'abc123' })
   })
 
+  it('returns ok without fingerprint for an empty repo (no commits yet)', async () => {
+    nextResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
+    const result = await validateRemoteRepo('dev', '/srv/empty-repo')
+    expect(result).toEqual({ ok: true, fingerprint: undefined })
+  })
+
   it('returns not-a-git-repo when remote exits non-zero with no ssh markers', async () => {
     nextResult = {
       stdout: '',

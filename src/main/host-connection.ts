@@ -99,12 +99,19 @@ export async function exec(
 // positional argument ($1) to `sh -c`, never interpolated into the script text
 // — this keeps the INVARIANT at the top of this file intact even for paths
 // containing shell metacharacters.
+//
+// The probe uses `git rev-parse --git-dir` rather than a bare `test -d .git`
+// so that worktrees and submodules (where `.git` is a file pointing at a
+// separate gitdir) are accepted as valid. The fingerprint step is best-effort:
+// an empty repo with no HEAD returns an empty fingerprint, not a rejection.
 export async function validateRemoteRepo(
   alias: string,
   path: string,
   opts: { timeoutMs?: number } = {}
 ): Promise<ValidateRemoteRepoResult> {
-  const script = 'test -d "$1/.git" && git -C "$1" rev-list --max-parents=0 HEAD'
+  const script =
+    'git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || exit 1; ' +
+    'git -C "$1" rev-list --max-parents=0 HEAD 2>/dev/null || true'
   const { stdout, stderr, code } = await exec(alias, ['sh', '-c', script, '_', path], {
     timeoutMs: opts.timeoutMs ?? 15000,
   })
@@ -119,6 +126,6 @@ export async function validateRemoteRepo(
   return {
     ok: false,
     reason: 'not-a-git-repo',
-    message: 'Path is not a git repository (.git not found on remote)',
+    message: 'Path is not a git repository',
   }
 }
