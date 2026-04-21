@@ -851,10 +851,6 @@ body,
   transition: transform 400ms ease-in-out;
 }
 
-.flip-inner.flipped {
-  transform: rotateY(180deg);
-}
-
 .flip-front,
 .flip-back {
   position: absolute;
