@@ -136,6 +136,7 @@ async function enrichRepo(repo: { name: string; path: string }): Promise<Project
     branches,
     worktrees,
     setupState: detectSetupState(repo.path),
+    hostId: null,
   }
 }
 

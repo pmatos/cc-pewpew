@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { CONFIG_DIR, getConfig, saveConfig } from './config'
+import { hasRemoteProjectsBoundTo } from './remote-project-registry'
 import type { Host, HostId } from '../shared/types'
 
 const SESSIONS_PATH = join(CONFIG_DIR, 'sessions.json')
@@ -97,6 +98,9 @@ function hasSessionsBoundTo(hostId: HostId): boolean {
 }
 
 export function deleteHost(hostId: HostId): void {
+  if (hasRemoteProjectsBoundTo(hostId)) {
+    throw new Error('Cannot delete host: remote projects are registered on it')
+  }
   if (hasSessionsBoundTo(hostId)) {
     throw new Error('Cannot delete host: sessions are still bound to it')
   }

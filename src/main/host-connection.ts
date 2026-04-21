@@ -8,7 +8,7 @@
 import { execFile } from 'child_process'
 import { shellQuote } from './shell-quote'
 import { classifySshExit } from './ssh-exit-parser'
-import type { TestConnectionResult } from '../shared/types'
+import type { TestConnectionResult, ValidateRemoteRepoResult } from '../shared/types'
 
 interface ExecResult {
   stdout: string
@@ -92,4 +92,33 @@ export async function exec(
   const sshArgv = ['-o', 'BatchMode=yes', '--', alias, ...quoted]
   const { stdout, stderr, code } = await runSsh(sshArgv, timeoutMs)
   return { stdout, stderr, code }
+}
+
+// Validates that a remote path is a git repository and extracts its root-commit
+// fingerprint in a single ssh round-trip. The remote path is passed as a
+// positional argument ($1) to `sh -c`, never interpolated into the script text
+// — this keeps the INVARIANT at the top of this file intact even for paths
+// containing shell metacharacters.
+export async function validateRemoteRepo(
+  alias: string,
+  path: string,
+  opts: { timeoutMs?: number } = {}
+): Promise<ValidateRemoteRepoResult> {
+  const script = 'test -d "$1/.git" && git -C "$1" rev-list --max-parents=0 HEAD'
+  const { stdout, stderr, code } = await exec(alias, ['sh', '-c', script, '_', path], {
+    timeoutMs: opts.timeoutMs ?? 15000,
+  })
+  if (code === 0) {
+    const fingerprint = stdout.trim().split('\n')[0] || undefined
+    return { ok: true, fingerprint }
+  }
+  const { reason, message } = classifySshExit({ exitCode: code, stderr })
+  if (reason === 'auth-failed' || reason === 'network' || reason === 'dep-missing') {
+    return { ok: false, reason, message }
+  }
+  return {
+    ok: false,
+    reason: 'not-a-git-repo',
+    message: 'Path is not a git repository (.git not found on remote)',
+  }
 }

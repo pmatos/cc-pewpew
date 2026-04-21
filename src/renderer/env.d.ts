@@ -5,6 +5,7 @@ import type {
   DiffMode,
   Host,
   Project,
+  RemoteProject,
   Session,
   TestConnectionResult,
 } from '../shared/types'
@@ -63,6 +64,8 @@ declare global {
       updateHost: (hostId: string, alias: string, label: string) => Promise<Host>
       deleteHost: (hostId: string) => Promise<void>
       testHostConnection: (hostId: string) => Promise<TestConnectionResult>
+      addRemoteProject: (input: { hostId: string; path: string }) => Promise<RemoteProject>
+      removeRemoteProject: (hostId: string, path: string) => Promise<void>
     }
   }
 }

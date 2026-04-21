@@ -42,8 +42,14 @@ import {
 } from './session-manager'
 import { parseDiff, synthesizeUntrackedFile } from './diff-parser'
 import { listHosts, addHost, updateHost, deleteHost, getHost } from './host-registry'
-import { testConnection } from './host-connection'
-import type { DiffMode } from '../shared/types'
+import { testConnection, validateRemoteRepo } from './host-connection'
+import {
+  listRemoteProjects,
+  addRemoteProject as persistRemoteProject,
+  removeRemoteProject,
+  toProject as remoteToProject,
+} from './remote-project-registry'
+import type { DiffMode, ValidateRemoteRepoReason } from '../shared/types'
 
 // Use native Wayland rendering when available (avoids Xwayland scaling artifacts)
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
@@ -131,7 +137,9 @@ app.whenReady().then(async () => {
     const config = getConfig()
     const dirs = config.scanDirs.map(resolvePath)
     const pinned = (config.pinnedPaths || []).map(resolvePath)
-    return scanProjects(dirs, pinned, config.followSymlinks)
+    const local = await scanProjects(dirs, pinned, config.followSymlinks)
+    const remote = listRemoteProjects().map(remoteToProject)
+    return [...local, ...remote].sort((a, b) => a.name.localeCompare(b.name))
   })
 
   ipcMain.handle('projects:pick-directory', async () => {
@@ -151,6 +159,32 @@ app.whenReady().then(async () => {
       config.pinnedPaths.push(resolved)
       saveConfig(config)
     }
+  })
+
+  ipcMain.handle('projects:add-remote', async (_event, input: { hostId: string; path: string }) => {
+    const host = getHost(input.hostId)
+    if (!host) throw new Error('Unknown host')
+    const result = await validateRemoteRepo(host.alias, input.path)
+    if (!result.ok) {
+      const labels: Record<ValidateRemoteRepoReason, string> = {
+        'not-a-git-repo': 'Not a git repository',
+        'auth-failed': 'Auth failed',
+        network: 'Network error',
+        'dep-missing': 'Missing dependency',
+        unknown: 'ssh error',
+      }
+      const label = labels[result.reason ?? 'unknown']
+      throw new Error(`${label}: ${result.message ?? 'unknown'}`)
+    }
+    return persistRemoteProject({
+      hostId: input.hostId,
+      path: input.path,
+      repoFingerprint: result.fingerprint,
+    })
+  })
+
+  ipcMain.handle('projects:remove-remote', async (_event, hostId: string, path: string) => {
+    removeRemoteProject(hostId, path)
   })
 
   ipcMain.handle('projects:setup', async (_event, projectPath: string) => {
