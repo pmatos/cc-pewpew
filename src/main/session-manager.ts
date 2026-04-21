@@ -14,6 +14,7 @@ import {
   destroyPty,
   hasPty,
   hasTmuxSession,
+  isTmuxAvailable,
   discoverTmuxSessions,
   reattachPty,
 } from './pty-manager'
@@ -407,7 +408,11 @@ export function restoreSessions(): void {
   try {
     const data: Session[] = JSON.parse(readFileSync(SESSIONS_PATH, 'utf-8'))
     const liveTmuxIds = new Set(discoverTmuxSessions())
+    // One-time tmux precheck so we don't fire a blocking error modal per
+    // session on startup when tmux is missing from PATH.
+    const tmuxAvailable = isTmuxAvailable()
     let recoveredCount = 0
+    let skippedForNoTmux = 0
 
     for (const session of data) {
       if (
@@ -424,6 +429,9 @@ export function restoreSessions(): void {
           session.status = resumedStatus
         } else if (!existsSync(session.worktreePath)) {
           session.status = 'dead'
+        } else if (!tmuxAvailable) {
+          session.status = 'dead'
+          skippedForNoTmux++
         } else {
           // tmux server lost the session (e.g., PC reboot) but the worktree
           // survives — auto-recreate and resume the claude conversation.
@@ -439,6 +447,12 @@ export function restoreSessions(): void {
       }
       session.lastActivity = Date.now()
       sessions.set(session.id, { session })
+    }
+
+    if (skippedForNoTmux > 0) {
+      console.warn(
+        `tmux not found — ${skippedForNoTmux} session(s) left as 'dead'. Install tmux to enable auto-recovery.`
+      )
     }
 
     // Reattach ptys after all sessions are in the map. Sessions we just

@@ -23,7 +23,7 @@ function flushBuffers(): void {
   }
 }
 
-function checkTmux(): boolean {
+export function isTmuxAvailable(): boolean {
   try {
     execFileSync('which', ['tmux'])
     return true
@@ -52,7 +52,7 @@ export function createPty(
     throw new Error(`Working directory does not exist: ${cwd}`)
   }
 
-  if (!checkTmux()) {
+  if (!isTmuxAvailable()) {
     dialog.showErrorBox(
       'tmux not found',
       'tmux is required for embedded terminals.\nPlease install tmux and restart cc-pewpew.'
