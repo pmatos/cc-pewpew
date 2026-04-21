@@ -148,6 +148,22 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
       </div>
       <div className="session-card-body">
         <div className="session-card-header">{sessionName}</div>
+        <div className="session-card-chips">
+          <span className="session-card-chip chip-branch" title={`branch: ${session.branch}`}>
+            <span className="chip-icon">⎇</span>
+            {session.branch}
+          </span>
+          {session.issueNumber !== undefined && (
+            <span className="session-card-chip chip-issue" title={`issue #${session.issueNumber}`}>
+              issue #{session.issueNumber}
+            </span>
+          )}
+          {session.prNumber !== undefined && (
+            <span className="session-card-chip chip-pr" title={`PR #${session.prNumber}`}>
+              PR #{session.prNumber}
+            </span>
+          )}
+        </div>
         <div className="session-card-status">
           <span className={`status-dot ${statusClass}`} />
           <span>{label}</span>

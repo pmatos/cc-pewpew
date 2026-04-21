@@ -366,6 +366,56 @@ body,
   white-space: nowrap;
 }
 
+.session-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0;
+}
+
+.session-card-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  border: 1px solid transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-card-chip .chip-icon {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.session-card-chip.chip-branch {
+  background: rgba(96, 165, 250, 0.1);
+  border-color: rgba(96, 165, 250, 0.35);
+  color: var(--accent-blue);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.session-card-chip.chip-issue {
+  background: rgba(250, 204, 21, 0.1);
+  border-color: rgba(250, 204, 21, 0.35);
+  color: var(--accent-yellow);
+  flex: 0 0 auto;
+}
+
+.session-card-chip.chip-pr {
+  background: rgba(74, 222, 128, 0.1);
+  border-color: rgba(74, 222, 128, 0.35);
+  color: var(--accent-green);
+  flex: 0 0 auto;
+}
+
 .session-card-status {
   display: flex;
   align-items: center;
