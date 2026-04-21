@@ -58,6 +58,10 @@ export default function App() {
         e.preventDefault()
         scanProjects()
       } else if (e.key === 'Escape') {
+        // Modals handle Escape themselves; don't run global shortcuts when
+        // one is open (avoids side-effect clearing of active session /
+        // selection when dismissing a modal via Escape).
+        if (useHostsStore.getState().dialogOpen) return
         if (activeSessionId) {
           setActiveSessionId(null)
         } else if (useSessionsStore.getState().selectedIds.size > 0) {

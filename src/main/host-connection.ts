@@ -33,6 +33,18 @@ function runSsh(argv: string[], timeoutMs: number): Promise<SshRunResult> {
         // timeouts and is kept as a belt-and-braces check.
         const errno = (error ?? null) as (NodeJS.ErrnoException & { killed?: boolean }) | null
         const timedOut = Boolean(errno && (errno.killed === true || errno.code === 'ETIMEDOUT'))
+        // ENOENT means the ssh binary itself couldn't be launched. Surface it
+        // as an exit-127 "command not found" so classifySshExit routes it to
+        // `dep-missing` instead of the generic `unknown`.
+        if (!timedOut && errno && errno.code === 'ENOENT') {
+          resolve({
+            stdout: '',
+            stderr: 'ssh: command not found',
+            code: 127,
+            timedOut: false,
+          })
+          return
+        }
         const code = error
           ? typeof (error as { code?: unknown }).code === 'number'
             ? (error as { code: number }).code

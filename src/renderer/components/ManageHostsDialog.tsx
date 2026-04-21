@@ -145,22 +145,18 @@ export default function ManageHostsDialog() {
 
   useEffect(() => {
     if (!dialogOpen) return
-    // Capture-phase listener so this runs before App's bubble-phase global
-    // Escape handler (which would otherwise clear activeSessionId / selection
-    // as a side effect of dismissing the modal).
+    // App.tsx's global Escape handler respects useHostsStore.dialogOpen and
+    // returns early while this modal is open, so we don't need capture-phase
+    // interception — a plain bubble-phase listener is enough and avoids
+    // swallowing the form inputs' own onKeyDown Escape handling.
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       const state = useHostsStore.getState()
-      // When an Add/Edit form is open, let the form's own Escape handler cancel
-      // the form. Still stop propagation so App's global handler doesn't also
-      // fire. React synthetic events don't stop native propagation, so the
-      // form's handler alone isn't enough.
-      e.stopPropagation()
       if (state.addingNew || state.editingHostId !== null) return
       closeDialog()
     }
-    document.addEventListener('keydown', handler, true)
-    return () => document.removeEventListener('keydown', handler, true)
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
   }, [dialogOpen, closeDialog])
 
   if (!dialogOpen) return null
