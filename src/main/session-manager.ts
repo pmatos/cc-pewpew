@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, realpathSync } from 'fs'
 import { join, basename, sep } from 'path'
 import { randomUUID } from 'crypto'
 import { dialog, shell } from 'electron'
@@ -74,6 +74,14 @@ async function deriveLabel(worktreePath: string): Promise<string> {
   return basename(worktreePath)
 }
 
+function canonicalPath(p: string): string {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
 async function isGitWorktree(worktreePath: string): Promise<boolean> {
   if (!existsSync(worktreePath)) return false
   try {
@@ -93,8 +101,9 @@ export async function createSessionForWorktree(
   worktreePath: string,
   label?: string
 ): Promise<Session> {
+  const target = canonicalPath(worktreePath)
   for (const e of sessions.values()) {
-    if (e.session.worktreePath === worktreePath) return e.session
+    if (canonicalPath(e.session.worktreePath) === target) return e.session
   }
 
   if (!(await isGitWorktree(worktreePath))) {
@@ -144,9 +153,9 @@ export interface MirrorAllResult {
 export async function mirrorAllWorktrees(projectPath: string): Promise<MirrorAllResult> {
   const worktrees = await gitWorktrees(projectPath)
   const existingPaths = new Set<string>()
-  for (const e of sessions.values()) existingPaths.add(e.session.worktreePath)
+  for (const e of sessions.values()) existingPaths.add(canonicalPath(e.session.worktreePath))
 
-  const targets = worktrees.filter((wt) => !wt.isMain && !existingPaths.has(wt.path))
+  const targets = worktrees.filter((wt) => !wt.isMain && !existingPaths.has(canonicalPath(wt.path)))
 
   const results = await Promise.allSettled(
     targets.map((wt) => createSessionForWorktree(projectPath, wt.path))
@@ -441,9 +450,12 @@ export async function relocateProject(
     s.projectPath = newProjectPath
     s.projectName = basename(newProjectPath)
     // Only rewrite worktreePath for managed worktrees under the old project's
-    // .claude/worktrees tree. External mirrored paths are kept verbatim.
+    // .claude/worktrees tree, preserving the exact subpath (worktreeName may be
+    // a branch label like "cc-pewpew/feat-x" that doesn't match the dirname).
+    // External mirrored paths are kept verbatim.
     if (s.worktreePath.startsWith(oldManagedRoot)) {
-      s.worktreePath = join(newProjectPath, '.claude', 'worktrees', s.worktreeName)
+      const suffix = s.worktreePath.slice(oldManagedRoot.length)
+      s.worktreePath = join(newProjectPath, '.claude', 'worktrees', suffix)
     }
     if (fingerprint) s.repoFingerprint = fingerprint
 
