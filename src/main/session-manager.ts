@@ -112,10 +112,12 @@ async function lookupPrForBranch(projectPath: string, branch: string): Promise<n
     }[]
     // `gh pr list --head <branch>` filters by branch name only (owner:branch
     // isn't supported), so in repos that accept fork PRs a common branch name
-    // like `main` or `fix` can return an unrelated PR. Match on the local
-    // origin's owner to pick the PR that belongs to this clone.
+    // like `main` or `fix` can return an unrelated PR. Prefer the entry whose
+    // head repo owner matches the local origin's owner; fall back to the top
+    // result so upstream clones tracking a contributor's branch (where the
+    // head owner differs from origin) still get a PR number.
     const owner = getOriginOwner(projectPath)
-    const match = owner ? parsed.find((p) => p.headRepositoryOwner?.login === owner) : parsed[0]
+    const match = (owner && parsed.find((p) => p.headRepositoryOwner?.login === owner)) || parsed[0]
     const num = match?.number
     prLookupCache.set(key, { value: num ?? null, checkedAt: Date.now() })
     return num
