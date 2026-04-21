@@ -185,15 +185,16 @@ app.whenReady().then(async () => {
     checkPaths: string[]
   ): Promise<'gitignore' | undefined> {
     if (!shouldWarnGitignore(projectPath) || checkPaths.length === 0) return undefined
-    let anyUnignored = false
     for (const p of checkPaths) {
       if (!(await isSettingsGitignored(p))) {
-        anyUnignored = true
-        break
+        markGitignoreWarned(projectPath)
+        return 'gitignore'
       }
     }
-    markGitignoreWarned(projectPath)
-    return anyUnignored ? 'gitignore' : undefined
+    // All checked worktrees ignore the file. Leave the project un-warned so a
+    // later mirror of a branch that doesn't ignore it can still surface the
+    // prompt.
+    return undefined
   }
 
   ipcMain.handle('sessions:mirror', async (_event, projectPath: string, worktreePath: string) => {
