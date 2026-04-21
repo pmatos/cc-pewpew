@@ -415,8 +415,13 @@ export function restoreSessions(): void {
         session.status === 'idle' ||
         session.status === 'needs_input'
       ) {
+        // Preserve `needs_input` so the tray/status-bar attention signals
+        // (tray.ts, StatusBar.tsx) survive a restart — claude --continue
+        // resumes mid-wait, so the user still needs to answer.
+        const resumedStatus: SessionStatus =
+          session.status === 'needs_input' ? 'needs_input' : 'idle'
         if (liveTmuxIds.has(session.id)) {
-          session.status = 'idle'
+          session.status = resumedStatus
         } else if (!existsSync(session.worktreePath)) {
           session.status = 'dead'
         } else {
@@ -424,7 +429,7 @@ export function restoreSessions(): void {
           // survives — auto-recreate and resume the claude conversation.
           try {
             createPty(session.id, session.worktreePath, { continueSession: true })
-            session.status = 'idle'
+            session.status = resumedStatus
             recoveredCount++
           } catch (err) {
             console.error(`Failed to auto-recover session ${session.id}:`, err)
@@ -440,7 +445,10 @@ export function restoreSessions(): void {
     // recovered already have a node-pty spawned by createPty, so the
     // liveTmuxIds filter here correctly skips them.
     for (const session of data) {
-      if (session.status === 'idle' && liveTmuxIds.has(session.id)) {
+      if (
+        (session.status === 'idle' || session.status === 'needs_input') &&
+        liveTmuxIds.has(session.id)
+      ) {
         try {
           reattachPty(session.id)
         } catch (err) {
