@@ -146,7 +146,13 @@ export default function ManageHostsDialog() {
   useEffect(() => {
     if (!dialogOpen) return
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeDialog()
+      if (e.key !== 'Escape') return
+      // When an Add/Edit form is open, let the form's own Escape handler cancel
+      // the form. React synthetic events don't stop native propagation, so
+      // without this guard both handlers fire and the whole dialog closes.
+      const state = useHostsStore.getState()
+      if (state.addingNew || state.editingHostId !== null) return
+      closeDialog()
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)

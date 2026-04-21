@@ -27,7 +27,12 @@ function runSsh(argv: string[], timeoutMs: number): Promise<SshRunResult> {
       argv,
       { timeout: timeoutMs, maxBuffer: 64 * 1024 },
       (error, stdout, stderr) => {
-        const timedOut = Boolean(error && (error as NodeJS.ErrnoException).code === 'ETIMEDOUT')
+        // execFile's `timeout` option kills the child with `killSignal` (default
+        // SIGTERM) when it fires. Node sets `error.killed === true` in that
+        // case; `error.code === 'ETIMEDOUT'` only appears for OS-level socket
+        // timeouts and is kept as a belt-and-braces check.
+        const errno = (error ?? null) as (NodeJS.ErrnoException & { killed?: boolean }) | null
+        const timedOut = Boolean(errno && (errno.killed === true || errno.code === 'ETIMEDOUT'))
         const code = error
           ? typeof (error as { code?: unknown }).code === 'number'
             ? (error as { code: number }).code
