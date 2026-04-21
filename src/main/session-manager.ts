@@ -96,6 +96,11 @@ async function isGitWorktree(worktreePath: string): Promise<boolean> {
   }
 }
 
+// In-flight adoption promises keyed by canonical worktree path. Serializes
+// concurrent mirror requests for the same path (e.g. double-click on + Mirror,
+// racing against mirrorAllWorktrees) so only one session/PTY is created.
+const inflightAdoptions = new Map<string, Promise<Session>>()
+
 export async function createSessionForWorktree(
   projectPath: string,
   worktreePath: string,
@@ -106,6 +111,23 @@ export async function createSessionForWorktree(
     if (canonicalPath(e.session.worktreePath) === target) return e.session
   }
 
+  const inflight = inflightAdoptions.get(target)
+  if (inflight) return inflight
+
+  const promise = adoptWorktree(projectPath, worktreePath, label)
+  inflightAdoptions.set(target, promise)
+  try {
+    return await promise
+  } finally {
+    inflightAdoptions.delete(target)
+  }
+}
+
+async function adoptWorktree(
+  projectPath: string,
+  worktreePath: string,
+  label: string | undefined
+): Promise<Session> {
   if (!(await isGitWorktree(worktreePath))) {
     throw new Error(`${worktreePath} is not a valid git worktree`)
   }
