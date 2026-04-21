@@ -180,26 +180,34 @@ app.whenReady().then(async () => {
     return createPrSession(projectPath, prNumber)
   })
 
-  async function gitignoreWarning(projectPath: string): Promise<'gitignore' | undefined> {
-    if (!shouldWarnGitignore(projectPath)) return undefined
-    const ignored = await isSettingsGitignored(projectPath)
-    if (ignored) {
-      markGitignoreWarned(projectPath)
-      return undefined
+  async function gitignoreWarning(
+    projectPath: string,
+    checkPaths: string[]
+  ): Promise<'gitignore' | undefined> {
+    if (!shouldWarnGitignore(projectPath) || checkPaths.length === 0) return undefined
+    let anyUnignored = false
+    for (const p of checkPaths) {
+      if (!(await isSettingsGitignored(p))) {
+        anyUnignored = true
+        break
+      }
     }
     markGitignoreWarned(projectPath)
-    return 'gitignore'
+    return anyUnignored ? 'gitignore' : undefined
   }
 
   ipcMain.handle('sessions:mirror', async (_event, projectPath: string, worktreePath: string) => {
     const session = await createSessionForWorktree(projectPath, worktreePath)
-    const warning = await gitignoreWarning(projectPath)
+    const warning = await gitignoreWarning(projectPath, [session.worktreePath])
     return { session, warning }
   })
 
   ipcMain.handle('sessions:mirror-all', async (_event, projectPath: string) => {
     const result = await mirrorAllWorktrees(projectPath)
-    const warning = result.mirrored.length > 0 ? await gitignoreWarning(projectPath) : undefined
+    const warning = await gitignoreWarning(
+      projectPath,
+      result.mirrored.map((s) => s.worktreePath)
+    )
     return { result, warning }
   })
 
