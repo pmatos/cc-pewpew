@@ -14,6 +14,7 @@ import {
   destroyPty,
   hasPty,
   hasTmuxSession,
+  isTmuxAvailable,
   discoverTmuxSessions,
   reattachPty,
 } from './pty-manager'
@@ -181,7 +182,7 @@ export function reviveSession(id: string): void {
   if (hasTmuxSession(id)) {
     reattachPty(id)
   } else {
-    createPty(id, session.worktreePath)
+    createPty(id, session.worktreePath, { continueSession: true })
   }
   updateSession(id, 'idle')
 }
@@ -407,28 +408,71 @@ export function restoreSessions(): void {
   try {
     const data: Session[] = JSON.parse(readFileSync(SESSIONS_PATH, 'utf-8'))
     const liveTmuxIds = new Set(discoverTmuxSessions())
+    // One-time tmux precheck so we don't fire a blocking error modal per
+    // session on startup when tmux is missing from PATH.
+    const tmuxAvailable = isTmuxAvailable()
+    let recoveredCount = 0
+    let skippedForNoTmux = 0
 
     for (const session of data) {
-      if (session.status === 'running' || session.status === 'idle') {
+      if (
+        session.status === 'running' ||
+        session.status === 'idle' ||
+        session.status === 'needs_input'
+      ) {
+        // Preserve `needs_input` so the tray/status-bar attention signals
+        // (tray.ts, StatusBar.tsx) survive a restart — claude --continue
+        // resumes mid-wait, so the user still needs to answer.
+        const resumedStatus: SessionStatus =
+          session.status === 'needs_input' ? 'needs_input' : 'idle'
         if (liveTmuxIds.has(session.id)) {
-          session.status = 'idle'
-        } else {
+          session.status = resumedStatus
+        } else if (!existsSync(session.worktreePath)) {
           session.status = 'dead'
+        } else if (!tmuxAvailable) {
+          session.status = 'dead'
+          skippedForNoTmux++
+        } else {
+          // tmux server lost the session (e.g., PC reboot) but the worktree
+          // survives — auto-recreate and resume the claude conversation.
+          try {
+            createPty(session.id, session.worktreePath, { continueSession: true })
+            session.status = resumedStatus
+            recoveredCount++
+          } catch (err) {
+            console.error(`Failed to auto-recover session ${session.id}:`, err)
+            session.status = 'dead'
+          }
         }
       }
       session.lastActivity = Date.now()
       sessions.set(session.id, { session })
     }
 
-    // Reattach ptys after all sessions are in the map
+    if (skippedForNoTmux > 0) {
+      console.warn(
+        `tmux not found — ${skippedForNoTmux} session(s) left as 'dead'. Install tmux to enable auto-recovery.`
+      )
+    }
+
+    // Reattach ptys after all sessions are in the map. Sessions we just
+    // recovered already have a node-pty spawned by createPty, so the
+    // liveTmuxIds filter here correctly skips them.
     for (const session of data) {
-      if (session.status === 'idle' && liveTmuxIds.has(session.id)) {
+      if (
+        (session.status === 'idle' || session.status === 'needs_input') &&
+        liveTmuxIds.has(session.id)
+      ) {
         try {
           reattachPty(session.id)
         } catch (err) {
           console.error(`Failed to reattach pty for ${session.id}:`, err)
         }
       }
+    }
+
+    if (recoveredCount > 0) {
+      console.log(`Auto-recovered ${recoveredCount} session(s) after reboot`)
     }
 
     onSessionsChanged()
