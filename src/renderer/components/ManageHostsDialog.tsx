@@ -146,13 +146,19 @@ export default function ManageHostsDialog() {
   useEffect(() => {
     if (!dialogOpen) return
     // App.tsx's global Escape handler respects useHostsStore.dialogOpen and
-    // returns early while this modal is open, so we don't need capture-phase
-    // interception — a plain bubble-phase listener is enough and avoids
-    // swallowing the form inputs' own onKeyDown Escape handling.
+    // returns early while this modal is open, so a plain bubble-phase listener
+    // is enough.
+    //
+    // We guard on the DOM event target rather than store state: the form's
+    // React onKeyDown handler fires before this native listener and calls
+    // cancelEdit synchronously, so by the time we'd check store state it
+    // would already be cleared. `target.closest('.hosts-form')` is stable
+    // across that race — if Escape originated inside a form, the form owns
+    // it; otherwise we close the dialog.
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      const state = useHostsStore.getState()
-      if (state.addingNew || state.editingHostId !== null) return
+      const target = e.target as HTMLElement | null
+      if (target && target.closest('.hosts-form')) return
       closeDialog()
     }
     document.addEventListener('keydown', handler)
