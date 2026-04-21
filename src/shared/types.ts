@@ -76,3 +76,21 @@ export interface HunkAnnotation {
   selectedText?: string
   selectedLines?: { start: number; end: number }
 }
+
+// --- Host registry / SSH types ---
+
+export type HostId = string
+
+export interface Host {
+  hostId: HostId
+  alias: string
+  label: string
+}
+
+export type SshExitReason = 'auth-failed' | 'network' | 'dep-missing' | 'unknown'
+
+export interface TestConnectionResult {
+  ok: boolean
+  reason?: SshExitReason
+  message?: string
+}

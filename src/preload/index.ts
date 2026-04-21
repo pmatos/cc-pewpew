@@ -74,4 +74,10 @@ contextBridge.exposeInMainWorld('api', {
   getReviewBranches: (sessionId: string) => ipcRenderer.invoke('review:list-branches', sessionId),
   getReviewDefaultBranch: (sessionId: string) =>
     ipcRenderer.invoke('review:get-default-branch', sessionId),
+  listHosts: () => ipcRenderer.invoke('hosts:list'),
+  addHost: (alias: string, label: string) => ipcRenderer.invoke('hosts:add', alias, label),
+  updateHost: (hostId: string, alias: string, label: string) =>
+    ipcRenderer.invoke('hosts:update', hostId, alias, label),
+  deleteHost: (hostId: string) => ipcRenderer.invoke('hosts:delete', hostId),
+  testHostConnection: (hostId: string) => ipcRenderer.invoke('hosts:test-connection', hostId),
 })
