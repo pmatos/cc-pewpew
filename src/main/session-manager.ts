@@ -132,6 +132,9 @@ async function adoptWorktree(
     throw new Error(`${worktreePath} is not a valid git worktree`)
   }
 
+  // Store the canonical path so renderer raw-equality matches against
+  // git's canonical porcelain output (the same normalization used for dedupe).
+  const canonical = canonicalPath(worktreePath)
   const id = randomUUID().slice(0, 8)
   const projectName = basename(projectPath)
   const worktreeName = label || (await deriveLabel(worktreePath))
@@ -145,7 +148,7 @@ async function adoptWorktree(
     projectPath,
     projectName,
     worktreeName,
-    worktreePath,
+    worktreePath: canonical,
     pid: 0,
     tmuxSession,
     status: 'running',
@@ -466,7 +469,9 @@ export async function relocateProject(
 
   const fingerprint = await getRepoFingerprint(newProjectPath)
 
-  const oldManagedRoot = join(oldProjectPath, '.claude', 'worktrees') + sep
+  // Stored session paths are canonical, so canonicalize the old managed root
+  // too before prefix-matching (oldProjectPath may be a symlink form).
+  const oldManagedRoot = canonicalPath(join(oldProjectPath, '.claude', 'worktrees')) + sep
   for (const entry of toMigrate) {
     const s = entry.session
     s.projectPath = newProjectPath
@@ -553,6 +558,8 @@ export function restoreSessions(): void {
           }
         }
       }
+      // Migrate legacy symlink-form paths to canonical so renderer matches work.
+      session.worktreePath = canonicalPath(session.worktreePath)
       session.lastActivity = Date.now()
       sessions.set(session.id, { session })
     }
