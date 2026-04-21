@@ -379,11 +379,8 @@ export async function createPrSession(
   }
 
   const branch = prInfo.headRefName
-  const id = randomUUID().slice(0, 8)
   const worktreeName = `pr-${prNumber}`
-  const projectName = basename(projectPath)
   const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
-  const tmuxSession = `cc-pewpew-${id}`
 
   // Fetch the PR branch
   try {
@@ -413,35 +410,7 @@ export async function createPrSession(
     }
   }
 
-  // Install hooks in the worktree so Claude Code fires events back to cc-pewpew
-  await installHooks(worktreePath, { skipGitignore: true })
-
-  createPty(id, worktreePath)
-
-  const session: Session = {
-    id,
-    projectPath,
-    projectName,
-    worktreeName,
-    worktreePath,
-    pid: 0,
-    tmuxSession,
-    status: 'running',
-    lastActivity: Date.now(),
-    hookEvents: [],
-  }
-
-  sessions.set(id, { session })
-
-  getRepoFingerprint(projectPath).then((fp) => {
-    if (fp) {
-      session.repoFingerprint = fp
-      onSessionsChanged()
-    }
-  })
-
-  onSessionsChanged()
-  return session
+  return createSessionForWorktree(projectPath, worktreePath, worktreeName)
 }
 
 export function getSession(id: string): Session | undefined {
