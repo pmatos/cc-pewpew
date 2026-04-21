@@ -1,7 +1,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
-import { join, basename } from 'path'
+import { join, basename, sep } from 'path'
 import { randomUUID } from 'crypto'
 import { dialog, shell } from 'electron'
 import { broadcastToAll, getMainWindow } from './window-registry'
@@ -74,6 +74,20 @@ async function deriveLabel(worktreePath: string): Promise<string> {
   return basename(worktreePath)
 }
 
+async function isGitWorktree(worktreePath: string): Promise<boolean> {
+  if (!existsSync(worktreePath)) return false
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'rev-parse', '--is-inside-work-tree'],
+      { timeout: 5000 }
+    )
+    return stdout.trim() === 'true'
+  } catch {
+    return false
+  }
+}
+
 export async function createSessionForWorktree(
   projectPath: string,
   worktreePath: string,
@@ -81,6 +95,10 @@ export async function createSessionForWorktree(
 ): Promise<Session> {
   for (const e of sessions.values()) {
     if (e.session.worktreePath === worktreePath) return e.session
+  }
+
+  if (!(await isGitWorktree(worktreePath))) {
+    throw new Error(`${worktreePath} is not a valid git worktree`)
   }
 
   const id = randomUUID().slice(0, 8)
@@ -417,11 +435,16 @@ export async function relocateProject(
 
   const fingerprint = await getRepoFingerprint(newProjectPath)
 
+  const oldManagedRoot = join(oldProjectPath, '.claude', 'worktrees') + sep
   for (const entry of toMigrate) {
     const s = entry.session
     s.projectPath = newProjectPath
     s.projectName = basename(newProjectPath)
-    s.worktreePath = join(newProjectPath, '.claude', 'worktrees', s.worktreeName)
+    // Only rewrite worktreePath for managed worktrees under the old project's
+    // .claude/worktrees tree. External mirrored paths are kept verbatim.
+    if (s.worktreePath.startsWith(oldManagedRoot)) {
+      s.worktreePath = join(newProjectPath, '.claude', 'worktrees', s.worktreeName)
+    }
     if (fingerprint) s.repoFingerprint = fingerprint
 
     // Recreate PTY so tmux gets the new worktree cwd
