@@ -20,40 +20,44 @@ async function gitBranches(repoPath: string): Promise<string[]> {
   }
 }
 
-async function gitWorktrees(repoPath: string): Promise<Worktree[]> {
+export function parseWorktreeList(stdout: string): Worktree[] {
+  const worktrees: Worktree[] = []
+  const blocks = stdout.split('\n\n').filter(Boolean)
+
+  for (const block of blocks) {
+    const lines = block.split('\n')
+    let path = ''
+    let branch = ''
+
+    for (const line of lines) {
+      if (line.startsWith('worktree ')) {
+        path = line.slice('worktree '.length)
+      } else if (line.startsWith('branch ')) {
+        branch = line.slice('branch refs/heads/'.length)
+      }
+    }
+
+    if (path) {
+      worktrees.push({
+        name: basename(path),
+        path,
+        branch: branch || 'HEAD',
+        isMain: worktrees.length === 0,
+      })
+    }
+  }
+
+  return worktrees
+}
+
+export async function gitWorktrees(repoPath: string): Promise<Worktree[]> {
   try {
     const { stdout } = await execFileAsync(
       'git',
       ['-C', repoPath, 'worktree', 'list', '--porcelain'],
       { timeout: 5000 }
     )
-
-    const worktrees: Worktree[] = []
-    const blocks = stdout.split('\n\n').filter(Boolean)
-
-    for (const block of blocks) {
-      const lines = block.split('\n')
-      let path = ''
-      let branch = ''
-
-      for (const line of lines) {
-        if (line.startsWith('worktree ')) {
-          path = line.slice('worktree '.length)
-        } else if (line.startsWith('branch ')) {
-          branch = line.slice('branch refs/heads/'.length)
-        }
-      }
-
-      if (path) {
-        worktrees.push({
-          name: basename(path),
-          path,
-          branch: branch || 'HEAD',
-        })
-      }
-    }
-
-    return worktrees
+    return parseWorktreeList(stdout)
   } catch {
     return []
   }

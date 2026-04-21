@@ -471,9 +471,40 @@ body,
   padding: 2px 8px;
   font-size: 14px;
   color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.worktree-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.worktree-mirror-btn {
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.worktree-item:hover .worktree-mirror-btn {
+  opacity: 1;
+}
+
+.worktree-mirror-btn:hover {
+  background: var(--border);
+  color: var(--text-primary);
 }
 
 .session-name-dialog {
@@ -504,6 +535,21 @@ body,
 
 .worktree-branch {
   opacity: 0.6;
+}
+
+.project-tree-toast {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  background: var(--bg-context-menu);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 100;
 }
 
 .context-menu {

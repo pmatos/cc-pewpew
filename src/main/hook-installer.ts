@@ -1,6 +1,10 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'fs'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { join } from 'path'
 import { CONFIG_DIR } from './config'
+
+const execFileAsync = promisify(execFile)
 
 const NOTIFY_SCRIPT = join(CONFIG_DIR, 'hooks', 'notify.sh')
 
@@ -50,6 +54,19 @@ export async function installHooks(
 
   if (!skipGitignore) {
     ensureGitignore(projectPath, '.claude/settings.local.json')
+  }
+}
+
+export async function isSettingsGitignored(projectPath: string): Promise<boolean> {
+  try {
+    await execFileAsync(
+      'git',
+      ['-C', projectPath, 'check-ignore', '-q', '.claude/settings.local.json'],
+      { timeout: 5000 }
+    )
+    return true
+  } catch {
+    return false
   }
 }
 

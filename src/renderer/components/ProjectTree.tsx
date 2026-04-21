@@ -25,6 +25,12 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const [pendingPrPath, setPendingPrPath] = useState<string | null>(null)
   const [prNumberInput, setPrNumberInput] = useState('')
   const [prError, setPrError] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 5000)
+  }
 
   useEffect(() => {
     scanProjects()
@@ -77,6 +83,32 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           setPendingPrPath(menu.projectPath)
           setPrNumberInput('')
           setPrError(null)
+        },
+      })
+
+      const project = projects.find((p) => p.path === menu.projectPath)
+      const unmirroredCount =
+        project?.worktrees.filter(
+          (wt) => !wt.isMain && !sessions.some((s) => s.worktreePath === wt.path)
+        ).length ?? 0
+      items.push({
+        label:
+          unmirroredCount > 0
+            ? `Mirror all worktrees (${unmirroredCount})`
+            : 'Mirror all worktrees',
+        disabled: unmirroredCount === 0,
+        onClick: async () => {
+          const { result, warning } = await window.api.mirrorAllWorktrees(menu.projectPath)
+          const { mirrored, failed } = result
+          const parts: string[] = []
+          if (mirrored.length > 0) parts.push(`Mirrored ${mirrored.length}`)
+          if (failed.length > 0) parts.push(`${failed.length} failed`)
+          if (parts.length > 0) showToast(parts.join(', '))
+          if (warning === 'gitignore') {
+            showToast(
+              'Note: .claude/settings.local.json is not gitignored in this project — consider ignoring it.'
+            )
+          }
         },
       })
       items.push({
@@ -245,9 +277,8 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             {isExpanded && (
               <div className="worktree-list">
                 {project.worktrees.map((wt) => {
-                  const matchingSession = sessions.find(
-                    (s) => s.worktreeName === wt.name && s.projectPath === project.path
-                  )
+                  const matchingSession = sessions.find((s) => s.worktreePath === wt.path)
+                  const canMirror = !matchingSession && !wt.isMain
                   return (
                     <div
                       key={wt.path}
@@ -261,8 +292,34 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
                         }
                       }}
                     >
-                      {wt.name}
-                      {wt.branch && <span className="worktree-branch"> ({wt.branch})</span>}
+                      <span className="worktree-label">
+                        {wt.name}
+                        {wt.branch && <span className="worktree-branch"> ({wt.branch})</span>}
+                      </span>
+                      {canMirror && (
+                        <button
+                          className="worktree-mirror-btn"
+                          title="Mirror this worktree as a cc-pewpew session"
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            try {
+                              const { warning } = await window.api.mirrorWorktree(
+                                project.path,
+                                wt.path
+                              )
+                              if (warning === 'gitignore') {
+                                showToast(
+                                  'Note: .claude/settings.local.json is not gitignored in this project — consider ignoring it.'
+                                )
+                              }
+                            } catch (err) {
+                              showToast(`Mirror failed: ${String(err)}`)
+                            }
+                          }}
+                        >
+                          + Mirror
+                        </button>
+                      )}
                     </div>
                   )
                 })}
@@ -275,6 +332,8 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={getMenuItems()} onClose={() => setMenu(null)} />
       )}
+
+      {toast && <div className="project-tree-toast">{toast}</div>}
     </div>
   )
 }

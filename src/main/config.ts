@@ -27,6 +27,7 @@ export interface AppConfig {
   sidebarWidth: number
   uiScale: number
   hosts: Host[]
+  gitignoreWarned: string[]
 }
 
 export const CONFIG_DIR = join(
@@ -44,6 +45,18 @@ const DEFAULT_CONFIG: AppConfig = {
   sidebarWidth: 250,
   uiScale: 1.2,
   hosts: [],
+  gitignoreWarned: [],
+}
+
+export function shouldWarnGitignore(projectPath: string): boolean {
+  return !getConfig().gitignoreWarned.includes(projectPath)
+}
+
+export function markGitignoreWarned(projectPath: string): void {
+  const config = getConfig()
+  if (config.gitignoreWarned.includes(projectPath)) return
+  config.gitignoreWarned = [...config.gitignoreWarned, projectPath]
+  saveConfig(config)
 }
 
 export function resolvePath(p: string): string {

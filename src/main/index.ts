@@ -2,9 +2,17 @@ import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { join, resolve } from 'path'
 import { copyFileSync, mkdirSync, chmodSync } from 'fs'
 import installExtension, { REACT_DEVELOPER_TOOLS } from 'electron-devtools-installer'
-import { getConfig, saveConfig, resolvePath, CONFIG_DIR, type CanvasState } from './config'
+import {
+  getConfig,
+  saveConfig,
+  resolvePath,
+  CONFIG_DIR,
+  shouldWarnGitignore,
+  markGitignoreWarned,
+  type CanvasState,
+} from './config'
 import { scanProjects } from './project-scanner'
-import { installHooks } from './hook-installer'
+import { installHooks, isSettingsGitignored } from './hook-installer'
 import { startHookServer, stopHookServer } from './hook-server'
 import { createTray } from './tray'
 import { registerWindow, broadcastToAll } from './window-registry'
@@ -20,6 +28,8 @@ import {
 import {
   initSessionManager,
   createSession,
+  createSessionForWorktree,
+  mirrorAllWorktrees,
   createPrSession,
   getSession,
   getSessions,
@@ -168,6 +178,38 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('sessions:create-pr', async (_event, projectPath: string, prNumber: number) => {
     return createPrSession(projectPath, prNumber)
+  })
+
+  async function gitignoreWarning(
+    projectPath: string,
+    checkPaths: string[]
+  ): Promise<'gitignore' | undefined> {
+    if (!shouldWarnGitignore(projectPath) || checkPaths.length === 0) return undefined
+    for (const p of checkPaths) {
+      if (!(await isSettingsGitignored(p))) {
+        markGitignoreWarned(projectPath)
+        return 'gitignore'
+      }
+    }
+    // All checked worktrees ignore the file. Leave the project un-warned so a
+    // later mirror of a branch that doesn't ignore it can still surface the
+    // prompt.
+    return undefined
+  }
+
+  ipcMain.handle('sessions:mirror', async (_event, projectPath: string, worktreePath: string) => {
+    const session = await createSessionForWorktree(projectPath, worktreePath)
+    const warning = await gitignoreWarning(projectPath, [session.worktreePath])
+    return { session, warning }
+  })
+
+  ipcMain.handle('sessions:mirror-all', async (_event, projectPath: string) => {
+    const result = await mirrorAllWorktrees(projectPath)
+    const warning = await gitignoreWarning(
+      projectPath,
+      result.mirrored.map((s) => s.worktreePath)
+    )
+    return { result, warning }
   })
 
   ipcMain.handle('sessions:list', () => {

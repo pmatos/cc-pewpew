@@ -19,6 +19,14 @@ declare global {
       onHookEvent: (callback: (event: { method: string; params: unknown }) => void) => () => void
       createSession: (projectPath: string, name?: string) => Promise<Session>
       createPrSession: (projectPath: string, prNumber: number) => Promise<Session | string>
+      mirrorWorktree: (
+        projectPath: string,
+        worktreePath: string
+      ) => Promise<{ session: Session; warning?: 'gitignore' }>
+      mirrorAllWorktrees: (projectPath: string) => Promise<{
+        result: { mirrored: Session[]; failed: { path: string; error: string }[] }
+        warning?: 'gitignore'
+      }>
       getSessions: () => Promise<Session[]>
       killSession: (id: string) => Promise<void>
       reviveSession: (id: string) => Promise<void>

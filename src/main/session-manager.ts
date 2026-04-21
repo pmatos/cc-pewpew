@@ -1,7 +1,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
-import { join, basename } from 'path'
+import { readFileSync, writeFileSync, existsSync, realpathSync } from 'fs'
+import { join, basename, sep } from 'path'
 import { randomUUID } from 'crypto'
 import { dialog, shell } from 'electron'
 import { broadcastToAll, getMainWindow } from './window-registry'
@@ -18,7 +18,7 @@ import {
   discoverTmuxSessions,
   reattachPty,
 } from './pty-manager'
-import { getRepoFingerprint } from './project-scanner'
+import { getRepoFingerprint, gitWorktrees } from './project-scanner'
 import { installHooks } from './hook-installer'
 import type { Session, SessionStatus } from '../shared/types'
 
@@ -59,33 +59,88 @@ export function initSessionManager(): void {
   // No-op — session manager now uses the window registry for IPC
 }
 
-export async function createSession(projectPath: string, name?: string): Promise<Session> {
-  const id = randomUUID().slice(0, 8)
-  const worktreeName = name || `session-${id}`
-  const projectName = basename(projectPath)
-  const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
-  const tmuxSession = `cc-pewpew-${id}`
-
-  // Create worktree
+async function deriveLabel(worktreePath: string): Promise<string> {
   try {
-    await execFileAsync('git', [
-      '-C',
-      projectPath,
-      'worktree',
-      'add',
-      worktreePath,
-      '-b',
-      `cc-pewpew/${worktreeName}`,
-    ])
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+      { timeout: 5000 }
+    )
+    const branch = stdout.trim()
+    if (branch && branch !== 'HEAD') return branch
   } catch {
-    // Branch may already exist — try without -b
-    await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath])
+    // fall through to basename
+  }
+  return basename(worktreePath)
+}
+
+function canonicalPath(p: string): string {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
+async function isGitWorktree(worktreePath: string): Promise<boolean> {
+  if (!existsSync(worktreePath)) return false
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'rev-parse', '--is-inside-work-tree'],
+      { timeout: 5000 }
+    )
+    return stdout.trim() === 'true'
+  } catch {
+    return false
+  }
+}
+
+// In-flight adoption promises keyed by canonical worktree path. Serializes
+// concurrent mirror requests for the same path (e.g. double-click on + Mirror,
+// racing against mirrorAllWorktrees) so only one session/PTY is created.
+const inflightAdoptions = new Map<string, Promise<Session>>()
+
+export async function createSessionForWorktree(
+  projectPath: string,
+  worktreePath: string,
+  label?: string
+): Promise<Session> {
+  const target = canonicalPath(worktreePath)
+  for (const e of sessions.values()) {
+    if (canonicalPath(e.session.worktreePath) === target) return e.session
   }
 
-  // Install hooks in the worktree so Claude Code fires events back to cc-pewpew
-  await installHooks(worktreePath, { skipGitignore: true })
+  const inflight = inflightAdoptions.get(target)
+  if (inflight) return inflight
 
-  // Create embedded terminal via PTY manager (tmux + node-pty)
+  const promise = adoptWorktree(projectPath, worktreePath, label)
+  inflightAdoptions.set(target, promise)
+  try {
+    return await promise
+  } finally {
+    inflightAdoptions.delete(target)
+  }
+}
+
+async function adoptWorktree(
+  projectPath: string,
+  worktreePath: string,
+  label: string | undefined
+): Promise<Session> {
+  if (!(await isGitWorktree(worktreePath))) {
+    throw new Error(`${worktreePath} is not a valid git worktree`)
+  }
+
+  // Store the canonical path so renderer raw-equality matches against
+  // git's canonical porcelain output (the same normalization used for dedupe).
+  const canonical = canonicalPath(worktreePath)
+  const id = randomUUID().slice(0, 8)
+  const projectName = basename(projectPath)
+  const worktreeName = label || (await deriveLabel(worktreePath))
+  const tmuxSession = `cc-pewpew-${id}`
+
+  await installHooks(worktreePath, { skipGitignore: true })
   createPty(id, worktreePath)
 
   const session: Session = {
@@ -93,7 +148,7 @@ export async function createSession(projectPath: string, name?: string): Promise
     projectPath,
     projectName,
     worktreeName,
-    worktreePath,
+    worktreePath: canonical,
     pid: 0,
     tmuxSession,
     status: 'running',
@@ -113,6 +168,54 @@ export async function createSession(projectPath: string, name?: string): Promise
   onSessionsChanged()
 
   return session
+}
+
+export interface MirrorAllResult {
+  mirrored: Session[]
+  failed: { path: string; error: string }[]
+}
+
+export async function mirrorAllWorktrees(projectPath: string): Promise<MirrorAllResult> {
+  const worktrees = await gitWorktrees(projectPath)
+  const existingPaths = new Set<string>()
+  for (const e of sessions.values()) existingPaths.add(canonicalPath(e.session.worktreePath))
+
+  const targets = worktrees.filter((wt) => !wt.isMain && !existingPaths.has(canonicalPath(wt.path)))
+
+  const results = await Promise.allSettled(
+    targets.map((wt) => createSessionForWorktree(projectPath, wt.path))
+  )
+
+  const mirrored: Session[] = []
+  const failed: { path: string; error: string }[] = []
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') mirrored.push(r.value)
+    else failed.push({ path: targets[i].path, error: String(r.reason) })
+  })
+
+  return { mirrored, failed }
+}
+
+export async function createSession(projectPath: string, name?: string): Promise<Session> {
+  const worktreeName = name || `session-${randomUUID().slice(0, 8)}`
+  const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
+
+  try {
+    await execFileAsync('git', [
+      '-C',
+      projectPath,
+      'worktree',
+      'add',
+      worktreePath,
+      '-b',
+      `cc-pewpew/${worktreeName}`,
+    ])
+  } catch {
+    // Branch may already exist — try without -b
+    await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath])
+  }
+
+  return createSessionForWorktree(projectPath, worktreePath, worktreeName)
 }
 
 export function handleHookEvent(method: string, params: Record<string, unknown>): void {
@@ -276,11 +379,8 @@ export async function createPrSession(
   }
 
   const branch = prInfo.headRefName
-  const id = randomUUID().slice(0, 8)
   const worktreeName = `pr-${prNumber}`
-  const projectName = basename(projectPath)
   const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
-  const tmuxSession = `cc-pewpew-${id}`
 
   // Fetch the PR branch
   try {
@@ -310,35 +410,7 @@ export async function createPrSession(
     }
   }
 
-  // Install hooks in the worktree so Claude Code fires events back to cc-pewpew
-  await installHooks(worktreePath, { skipGitignore: true })
-
-  createPty(id, worktreePath)
-
-  const session: Session = {
-    id,
-    projectPath,
-    projectName,
-    worktreeName,
-    worktreePath,
-    pid: 0,
-    tmuxSession,
-    status: 'running',
-    lastActivity: Date.now(),
-    hookEvents: [],
-  }
-
-  sessions.set(id, { session })
-
-  getRepoFingerprint(projectPath).then((fp) => {
-    if (fp) {
-      session.repoFingerprint = fp
-      onSessionsChanged()
-    }
-  })
-
-  onSessionsChanged()
-  return session
+  return createSessionForWorktree(projectPath, worktreePath, worktreeName)
 }
 
 export function getSession(id: string): Session | undefined {
@@ -366,11 +438,21 @@ export async function relocateProject(
 
   const fingerprint = await getRepoFingerprint(newProjectPath)
 
+  // Stored session paths are canonical, so canonicalize the old managed root
+  // too before prefix-matching (oldProjectPath may be a symlink form).
+  const oldManagedRoot = canonicalPath(join(oldProjectPath, '.claude', 'worktrees')) + sep
   for (const entry of toMigrate) {
     const s = entry.session
     s.projectPath = newProjectPath
     s.projectName = basename(newProjectPath)
-    s.worktreePath = join(newProjectPath, '.claude', 'worktrees', s.worktreeName)
+    // Only rewrite worktreePath for managed worktrees under the old project's
+    // .claude/worktrees tree, preserving the exact subpath (worktreeName may be
+    // a branch label like "cc-pewpew/feat-x" that doesn't match the dirname).
+    // External mirrored paths are kept verbatim.
+    if (s.worktreePath.startsWith(oldManagedRoot)) {
+      const suffix = s.worktreePath.slice(oldManagedRoot.length)
+      s.worktreePath = join(newProjectPath, '.claude', 'worktrees', suffix)
+    }
     if (fingerprint) s.repoFingerprint = fingerprint
 
     // Recreate PTY so tmux gets the new worktree cwd
@@ -445,6 +527,8 @@ export function restoreSessions(): void {
           }
         }
       }
+      // Migrate legacy symlink-form paths to canonical so renderer matches work.
+      session.worktreePath = canonicalPath(session.worktreePath)
       session.lastActivity = Date.now()
       sessions.set(session.id, { session })
     }
