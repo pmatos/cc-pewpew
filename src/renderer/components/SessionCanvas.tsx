@@ -62,9 +62,10 @@ export interface ZoomOpenPayload {
 interface CanvasProps {
   onOpenSession?: (id: string, name: string) => void
   onZoomOpen?: (payload: ZoomOpenPayload) => void
+  morphActive?: boolean
 }
 
-export default function SessionCanvas({ onOpenSession, onZoomOpen }: CanvasProps) {
+export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }: CanvasProps) {
   const { sessions, thumbnails, toggleSelect, rangeSelect, clearSelection } = useSessionsStore()
   const broadcastDialogOpen = useSessionsStore((s) => s.broadcastDialogOpen)
   const projects = useProjectsStore((s) => s.projects)
@@ -98,8 +99,21 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen }: CanvasProps
   const thresholdCrossedAtRef = useRef<number | null>(null)
   const isAnimatingPanRef = useRef(false)
   const zoomOpenFiredRef = useRef(false)
+  const prevMorphActiveRef = useRef(false)
   const broadcastDialogOpenRef = useRef(broadcastDialogOpen)
   broadcastDialogOpenRef.current = broadcastDialogOpen
+
+  // Reset the zoom-open latch when a morph ends without the session opening
+  // (cancel via Escape). If the session opens, SessionCanvas unmounts so this
+  // effect never runs — the ref resets naturally on the next mount.
+  useEffect(() => {
+    const active = morphActive ?? false
+    if (prevMorphActiveRef.current && !active) {
+      zoomOpenFiredRef.current = false
+      thresholdCrossedAtRef.current = null
+    }
+    prevMorphActiveRef.current = active
+  }, [morphActive])
 
   // Group sessions by project
   const clusters = useMemo(() => {
@@ -182,11 +196,19 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen }: CanvasProps
           requestAnimationFrame(animate)
         } else {
           isAnimatingPanRef.current = false
-          window.api.saveCanvasState({
-            zoom: Math.min(zoomRef.current, RESTING_MAX_ZOOM),
-            panX: targetPanX,
-            panY: targetPanY,
-          })
+          // Clamp zoom to RESTING_MAX_ZOOM on persist. When clamping, recompute
+          // pan for the clamped zoom so the target cluster stays at viewport
+          // center — matches persistCanvas and avoids cluster landing off-screen.
+          const saveZoom = Math.min(zoomRef.current, RESTING_MAX_ZOOM)
+          const savePanX =
+            zoomRef.current > RESTING_MAX_ZOOM
+              ? -pos.x * RESTING_MAX_ZOOM + rect.width / 2
+              : targetPanX
+          const savePanY =
+            zoomRef.current > RESTING_MAX_ZOOM
+              ? -pos.y * RESTING_MAX_ZOOM + rect.height / 2
+              : targetPanY
+          window.api.saveCanvasState({ zoom: saveZoom, panX: savePanX, panY: savePanY })
         }
       }
       requestAnimationFrame(animate)

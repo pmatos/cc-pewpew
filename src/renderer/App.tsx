@@ -215,6 +215,7 @@ export default function App() {
               setActiveSessionName(name)
             }}
             onZoomOpen={handleZoomOpen}
+            morphActive={morphPayload !== null}
           />
         )}
       </main>
