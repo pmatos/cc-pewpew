@@ -54,6 +54,22 @@ function resolveBranchFromWorktree(worktreePath: string, worktreeName: string): 
   return `cc-pewpew/${worktreeName}`
 }
 
+// Extract the owner segment from a GitHub `origin` remote URL. Used to
+// disambiguate `gh pr list --head <branch>` results when a fork has opened a
+// PR whose head branch name collides with a local branch.
+function getOriginOwner(projectPath: string): string | undefined {
+  try {
+    const url = execFileSync('git', ['-C', projectPath, 'remote', 'get-url', 'origin'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim()
+    const m = url.match(/(?:[:/])([^/:]+)\/[^/]+?(?:\.git)?\/?$/)
+    return m?.[1]
+  } catch {
+    return undefined
+  }
+}
+
 interface SessionEntry {
   session: Session
 }
@@ -76,11 +92,31 @@ async function lookupPrForBranch(projectPath: string, branch: string): Promise<n
   try {
     const { stdout } = await execFileAsync(
       'gh',
-      ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number', '--limit', '1'],
+      [
+        'pr',
+        'list',
+        '--head',
+        branch,
+        '--state',
+        'open',
+        '--json',
+        'number,headRepositoryOwner',
+        '--limit',
+        '10',
+      ],
       { cwd: projectPath }
     )
-    const parsed = JSON.parse(stdout) as { number: number }[]
-    const num = parsed[0]?.number
+    const parsed = JSON.parse(stdout) as {
+      number: number
+      headRepositoryOwner?: { login?: string } | null
+    }[]
+    // `gh pr list --head <branch>` filters by branch name only (owner:branch
+    // isn't supported), so in repos that accept fork PRs a common branch name
+    // like `main` or `fix` can return an unrelated PR. Match on the local
+    // origin's owner to pick the PR that belongs to this clone.
+    const owner = getOriginOwner(projectPath)
+    const match = owner ? parsed.find((p) => p.headRepositoryOwner?.login === owner) : parsed[0]
+    const num = match?.number
     prLookupCache.set(key, { value: num ?? null, checkedAt: Date.now() })
     return num
   } catch {
