@@ -60,13 +60,18 @@ interface SessionEntry {
 
 const sessions = new Map<string, SessionEntry>()
 
-// Cache: `${projectPath}::${branch}` -> pr number (or null for "checked, none found")
-const prLookupCache = new Map<string, number | null>()
+// Positive hits are cached forever; negative hits (no PR yet / gh transient
+// error) are retained only for NEGATIVE_CACHE_TTL_MS so a PR opened after the
+// session was created can be picked up without requiring an app restart.
+const NEGATIVE_CACHE_TTL_MS = 5 * 60 * 1000
+const prLookupCache = new Map<string, { value: number | null; checkedAt: number }>()
 
 async function lookupPrForBranch(projectPath: string, branch: string): Promise<number | undefined> {
   const key = `${projectPath}::${branch}`
-  if (prLookupCache.has(key)) {
-    return prLookupCache.get(key) ?? undefined
+  const cached = prLookupCache.get(key)
+  if (cached) {
+    if (cached.value !== null) return cached.value
+    if (Date.now() - cached.checkedAt < NEGATIVE_CACHE_TTL_MS) return undefined
   }
   try {
     const { stdout } = await execFileAsync(
@@ -76,10 +81,10 @@ async function lookupPrForBranch(projectPath: string, branch: string): Promise<n
     )
     const parsed = JSON.parse(stdout) as { number: number }[]
     const num = parsed[0]?.number
-    prLookupCache.set(key, num ?? null)
+    prLookupCache.set(key, { value: num ?? null, checkedAt: Date.now() })
     return num
   } catch {
-    prLookupCache.set(key, null)
+    // Don't cache transient gh failures — next call retries immediately.
     return undefined
   }
 }
@@ -122,8 +127,16 @@ function updateSession(id: string, status: SessionStatus): void {
   onSessionsChanged()
 }
 
+// Re-probe PR numbers for sessions that don't have one yet, so a PR opened
+// after session creation shows up without an app restart.
+const PR_REFRESH_INTERVAL_MS = 5 * 60 * 1000
+
 export function initSessionManager(): void {
-  // No-op — session manager now uses the window registry for IPC
+  setInterval(() => {
+    for (const entry of sessions.values()) {
+      if (entry.session.prNumber === undefined) resolvePrNumberAsync(entry.session.id)
+    }
+  }, PR_REFRESH_INTERVAL_MS).unref()
 }
 
 async function deriveLabel(worktreePath: string): Promise<string> {
