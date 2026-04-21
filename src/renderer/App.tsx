@@ -3,12 +3,21 @@ import ProjectTree from './components/ProjectTree'
 import SessionCanvas from './components/SessionCanvas'
 import DetailPane from './components/DetailPane'
 import StatusBar from './components/StatusBar'
+import ManageHostsDialog from './components/ManageHostsDialog'
 import { useProjectsStore } from './stores/projects'
 import { useSessionsStore } from './stores/sessions'
+import { useHostsStore } from './stores/hosts'
 
 export default function App() {
   const { scanProjects, filterReady, toggleFilterReady } = useProjectsStore()
   const { init: initSessions } = useSessionsStore()
+  const hosts = useHostsStore((s) => s.hosts)
+  const openHostsDialog = useHostsStore((s) => s.openDialog)
+  const fetchHosts = useHostsStore((s) => s.fetchHosts)
+
+  useEffect(() => {
+    void fetchHosts()
+  }, [fetchHosts])
 
   useEffect(() => {
     return initSessions()
@@ -166,6 +175,13 @@ export default function App() {
               + New project
             </button>
           )}
+          <button
+            className="new-project-btn hosts-btn"
+            onClick={openHostsDialog}
+            title="Manage SSH hosts"
+          >
+            🌐 Hosts ({hosts.length})
+          </button>
         </div>
       </aside>
 
@@ -188,6 +204,7 @@ export default function App() {
         )}
       </main>
 
+      <ManageHostsDialog />
       <StatusBar />
     </div>
   )

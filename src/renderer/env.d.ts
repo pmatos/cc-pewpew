@@ -1,6 +1,13 @@
 /// <reference types="vite/client" />
 
-import type { DiffFile, DiffMode, Project, Session } from '../shared/types'
+import type {
+  DiffFile,
+  DiffMode,
+  Host,
+  Project,
+  Session,
+  TestConnectionResult,
+} from '../shared/types'
 
 declare global {
   interface Window {
@@ -43,6 +50,11 @@ declare global {
       getReviewDiff: (sessionId: string, mode: DiffMode, baseBranch?: string) => Promise<DiffFile[]>
       getReviewBranches: (sessionId: string) => Promise<string[]>
       getReviewDefaultBranch: (sessionId: string) => Promise<string>
+      listHosts: () => Promise<Host[]>
+      addHost: (alias: string, label: string) => Promise<Host>
+      updateHost: (hostId: string, alias: string, label: string) => Promise<Host>
+      deleteHost: (hostId: string) => Promise<void>
+      testHostConnection: (hostId: string) => Promise<TestConnectionResult>
     }
   }
 }

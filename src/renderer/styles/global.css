@@ -802,6 +802,111 @@ body,
   gap: 8px;
 }
 
+.hosts-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.hosts-dialog {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 480px;
+  max-height: 70vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hosts-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.hosts-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.hosts-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.hosts-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.host-label {
+  font-weight: 600;
+}
+
+.host-alias {
+  color: var(--text-secondary);
+  font-family: monospace;
+  font-size: 12px;
+}
+
+/* TODO: replace hardcoded #e07070 with a theme error-colour token once defined. */
+.host-test-result {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.host-test-result.ok {
+  color: var(--accent-green);
+}
+
+.host-test-result.err {
+  color: #e07070;
+}
+
+.host-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.hosts-error {
+  color: #e07070;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.hosts-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 8px;
+  text-align: center;
+}
+
+.hosts-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+.hosts-dialog-footer {
+  padding-top: 4px;
+}
+
 .edge-indicators {
   position: absolute;
   inset: 0;

@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import type { Host } from '../shared/types'
 
 export interface CanvasState {
   zoom: number
@@ -25,6 +26,7 @@ export interface AppConfig {
   windowState?: WindowState
   sidebarWidth: number
   uiScale: number
+  hosts: Host[]
 }
 
 export const CONFIG_DIR = join(
@@ -41,6 +43,7 @@ const DEFAULT_CONFIG: AppConfig = {
   clusterPositions: {},
   sidebarWidth: 250,
   uiScale: 1.2,
+  hosts: [],
 }
 
 export function resolvePath(p: string): string {

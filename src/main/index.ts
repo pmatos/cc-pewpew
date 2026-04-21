@@ -31,6 +31,8 @@ import {
   relocateProject,
 } from './session-manager'
 import { parseDiff, synthesizeUntrackedFile } from './diff-parser'
+import { listHosts, addHost, updateHost, deleteHost, getHost } from './host-registry'
+import { testConnection } from './host-connection'
 import type { DiffMode } from '../shared/types'
 
 // Use native Wayland rendering when available (avoids Xwayland scaling artifacts)
@@ -374,6 +376,18 @@ app.whenReady().then(async () => {
     } else {
       swimWindow.loadFile(join(__dirname, '../../dist/swim-lanes.html'), { search: query })
     }
+  })
+
+  ipcMain.handle('hosts:list', () => listHosts())
+  ipcMain.handle('hosts:add', (_event, alias: string, label: string) => addHost({ alias, label }))
+  ipcMain.handle('hosts:update', (_event, hostId: string, alias: string, label: string) =>
+    updateHost(hostId, { alias, label })
+  )
+  ipcMain.handle('hosts:delete', (_event, hostId: string) => deleteHost(hostId))
+  ipcMain.handle('hosts:test-connection', async (_event, hostId: string) => {
+    const host = getHost(hostId)
+    if (!host) throw new Error('Unknown host')
+    return testConnection(host.alias)
   })
 
   const mainWindow = createWindow()
