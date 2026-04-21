@@ -15,7 +15,9 @@ export default function SwimLanesApp() {
   const [sessionIds] = useState(parseSessionIds)
   const [sessions, setSessions] = useState<Session[]>([])
   const [focusedLane, setFocusedLane] = useState<string | null>(null)
-  const [reviewOpenLanes, setReviewOpenLanes] = useState<Set<string>>(new Set())
+  // Per-lane monotonic flip count: each toggle increments by 1, rotating +180deg.
+  // Keeps the return flip in the same direction as the opening flip.
+  const [laneFlipCounts, setLaneFlipCounts] = useState<Map<string, number>>(new Map())
 
   useEffect(() => {
     window.api.getSessions().then((all) => {
@@ -30,18 +32,18 @@ export default function SwimLanesApp() {
   }, [sessionIds])
 
   const toggleReview = useCallback((laneId: string) => {
-    setReviewOpenLanes((prev) => {
-      const next = new Set(prev)
-      if (next.has(laneId)) {
-        next.delete(laneId)
+    setLaneFlipCounts((prev) => {
+      const next = new Map(prev)
+      const count = (prev.get(laneId) ?? 0) + 1
+      next.set(laneId, count)
+      if (count % 2 === 0) {
+        // Flipping back to terminal — refocus after animation
         setTimeout(() => {
           const term = document.querySelector<HTMLElement>(
             `[data-lane-id="${laneId}"] .xterm-helper-textarea`
           )
           term?.focus()
         }, 420)
-      } else {
-        next.add(laneId)
       }
       return next
     })
@@ -72,7 +74,8 @@ export default function SwimLanesApp() {
         {sessionIds.map((id) => {
           const session = sessions.find((s) => s.id === id)
           const isDead = session?.status === 'dead' || session?.status === 'error'
-          const isReviewOpen = reviewOpenLanes.has(id)
+          const flipCount = laneFlipCounts.get(id) ?? 0
+          const isReviewOpen = flipCount % 2 === 1
 
           return (
             <div key={id} className="lane" data-lane-id={id} onClick={() => setFocusedLane(id)}>
@@ -91,7 +94,10 @@ export default function SwimLanesApp() {
                   </div>
                 ) : (
                   <div className="flip-container">
-                    <div className={`flip-inner${isReviewOpen ? ' flipped' : ''}`}>
+                    <div
+                      className="flip-inner"
+                      style={{ transform: `rotateY(${flipCount * 180}deg)` }}
+                    >
                       <div className="flip-front">
                         <Terminal sessionId={id} />
                       </div>

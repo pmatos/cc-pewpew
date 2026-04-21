@@ -13,11 +13,13 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
   const session = useSessionsStore((s) => s.sessions.find((s) => s.id === sessionId))
   const isDead = session?.status === 'dead'
   const [reviving, setReviving] = useState(false)
-  const [reviewOpen, setReviewOpen] = useState(false)
+  // Monotonic flip count — each toggle increments by 1, rotating +180deg.
+  // Using a counter (instead of a boolean) keeps the rotation going in the
+  // same direction on return instead of reversing.
+  const [flipCount, setFlipCount] = useState(0)
+  const reviewOpen = flipCount % 2 === 1
 
-  const closeReview = useCallback(() => {
-    setReviewOpen(false)
-    // Return focus to the terminal after the flip animation
+  const refocusTerminal = useCallback(() => {
     setTimeout(() => {
       const term = document.querySelector<HTMLElement>(
         '.detail-pane-terminal .xterm-helper-textarea'
@@ -26,22 +28,23 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
     }, 420)
   }, [])
 
+  const closeReview = useCallback(() => {
+    setFlipCount((c) => (c % 2 === 1 ? c + 1 : c))
+    refocusTerminal()
+  }, [refocusTerminal])
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === 'r') {
         e.preventDefault()
         e.stopPropagation()
-        setReviewOpen((prev) => {
-          if (prev) {
-            // Flipping back — refocus terminal after animation
-            setTimeout(() => {
-              const term = document.querySelector<HTMLElement>(
-                '.detail-pane-terminal .xterm-helper-textarea'
-              )
-              term?.focus()
-            }, 420)
+        setFlipCount((c) => {
+          const next = c + 1
+          if (next % 2 === 0) {
+            // Flipping back to terminal — refocus after animation
+            refocusTerminal()
           }
-          return !prev
+          return next
         })
         return
       }
@@ -63,7 +66,7 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
     }
     document.addEventListener('keydown', handler, true)
     return () => document.removeEventListener('keydown', handler, true)
-  }, [onClose, reviewOpen, closeReview])
+  }, [onClose, reviewOpen, closeReview, refocusTerminal])
 
   const handleRevive = async () => {
     setReviving(true)
@@ -104,7 +107,7 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
           </div>
         ) : (
           <div className="flip-container">
-            <div className={`flip-inner${reviewOpen ? ' flipped' : ''}`}>
+            <div className="flip-inner" style={{ transform: `rotateY(${flipCount * 180}deg)` }}>
               <div className="flip-front">
                 <Terminal sessionId={sessionId} />
               </div>
