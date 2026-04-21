@@ -181,7 +181,7 @@ export function reviveSession(id: string): void {
   if (hasTmuxSession(id)) {
     reattachPty(id)
   } else {
-    createPty(id, session.worktreePath)
+    createPty(id, session.worktreePath, { continueSession: true })
   }
   updateSession(id, 'idle')
 }
@@ -407,20 +407,38 @@ export function restoreSessions(): void {
   try {
     const data: Session[] = JSON.parse(readFileSync(SESSIONS_PATH, 'utf-8'))
     const liveTmuxIds = new Set(discoverTmuxSessions())
+    let recoveredCount = 0
 
     for (const session of data) {
-      if (session.status === 'running' || session.status === 'idle') {
+      if (
+        session.status === 'running' ||
+        session.status === 'idle' ||
+        session.status === 'needs_input'
+      ) {
         if (liveTmuxIds.has(session.id)) {
           session.status = 'idle'
-        } else {
+        } else if (!existsSync(session.worktreePath)) {
           session.status = 'dead'
+        } else {
+          // tmux server lost the session (e.g., PC reboot) but the worktree
+          // survives — auto-recreate and resume the claude conversation.
+          try {
+            createPty(session.id, session.worktreePath, { continueSession: true })
+            session.status = 'idle'
+            recoveredCount++
+          } catch (err) {
+            console.error(`Failed to auto-recover session ${session.id}:`, err)
+            session.status = 'dead'
+          }
         }
       }
       session.lastActivity = Date.now()
       sessions.set(session.id, { session })
     }
 
-    // Reattach ptys after all sessions are in the map
+    // Reattach ptys after all sessions are in the map. Sessions we just
+    // recovered already have a node-pty spawned by createPty, so the
+    // liveTmuxIds filter here correctly skips them.
     for (const session of data) {
       if (session.status === 'idle' && liveTmuxIds.has(session.id)) {
         try {
@@ -429,6 +447,10 @@ export function restoreSessions(): void {
           console.error(`Failed to reattach pty for ${session.id}:`, err)
         }
       }
+    }
+
+    if (recoveredCount > 0) {
+      console.log(`Auto-recovered ${recoveredCount} session(s) after reboot`)
     }
 
     onSessionsChanged()

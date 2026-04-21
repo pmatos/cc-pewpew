@@ -43,7 +43,11 @@ export function stopPtyManager(): void {
   }
 }
 
-export function createPty(sessionId: string, cwd: string): void {
+export function createPty(
+  sessionId: string,
+  cwd: string,
+  options?: { continueSession?: boolean }
+): void {
   if (!existsSync(cwd)) {
     throw new Error(`Working directory does not exist: ${cwd}`)
   }
@@ -58,6 +62,11 @@ export function createPty(sessionId: string, cwd: string): void {
 
   const tmuxSession = `cc-pewpew-${sessionId}`
 
+  const claudeArgs = ['claude', '--dangerously-skip-permissions']
+  if (options?.continueSession) {
+    claudeArgs.push('--continue')
+  }
+
   // Create a detached tmux session that directly runs claude
   // Using tmux's shell command avoids issues with interactive shell init (omz, etc.)
   execFileSync('tmux', [
@@ -71,8 +80,7 @@ export function createPty(sessionId: string, cwd: string): void {
     '120',
     '-y',
     '30',
-    'claude',
-    '--dangerously-skip-permissions',
+    ...claudeArgs,
   ])
 
   // Attach to it via node-pty
