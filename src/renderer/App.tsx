@@ -225,8 +225,10 @@ export default function App() {
         <ZoomOpenMorph
           startRect={morphPayload.startRect}
           onGrown={() => {
-            setActiveSessionId(morphPayload.sessionId)
-            setActiveSessionName(morphPayload.sessionName)
+            // If the user already opened a different session during the morph
+            // window (e.g. clicked another card), keep that selection.
+            setActiveSessionId((prev) => prev ?? morphPayload.sessionId)
+            setActiveSessionName((prev) => prev || morphPayload.sessionName)
           }}
           onDone={() => setMorphPayload(null)}
         />
