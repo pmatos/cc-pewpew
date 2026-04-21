@@ -240,7 +240,9 @@ app.whenReady().then(async () => {
     for (const id of ids) {
       try {
         reviveSession(id)
-      } catch {}
+      } catch (err) {
+        console.error(`Failed to revive session ${id}:`, err)
+      }
     }
   })
 

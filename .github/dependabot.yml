@@ -3,11 +3,48 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: daily
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
     open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    groups:
+      types:
+        patterns:
+          - '@types/*'
+      eslint:
+        patterns:
+          - eslint
+          - eslint-*
+          - '@typescript-eslint/*'
+          - typescript-eslint
+      vite:
+        patterns:
+          - vite
+          - '@vitejs/*'
+          - electron-vite
+          - vitest
+      react:
+        patterns:
+          - react
+          - react-dom
+      xterm:
+        patterns:
+          - '@xterm/*'
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: daily
-    open-pull-requests-limit: 5
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    labels:
+      - dependencies
+      - ci
+    groups:
+      actions:
+        patterns:
+          - '*'
