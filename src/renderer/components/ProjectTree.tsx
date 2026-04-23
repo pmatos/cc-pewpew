@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProjectsStore } from '../stores/projects'
 import { useSessionsStore } from '../stores/sessions'
+import { useHostsStore } from '../stores/hosts'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 
 interface MenuState {
@@ -8,6 +9,7 @@ interface MenuState {
   y: number
   projectPath: string
   setupState: 'unsetup' | 'ready'
+  hostId: string | null
 }
 
 interface TreeProps {
@@ -16,7 +18,9 @@ interface TreeProps {
 
 export default function ProjectTree({ onOpenSession }: TreeProps) {
   const { projects, loading, scanProjects, filterReady } = useProjectsStore()
+  const removeRemoteProject = useProjectsStore((s) => s.removeRemoteProject)
   const { sessions } = useSessionsStore()
+  const hosts = useHostsStore((s) => s.hosts)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(null)
@@ -51,15 +55,27 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const handleContextMenu = (
     e: React.MouseEvent,
     projectPath: string,
-    setupState: 'unsetup' | 'ready'
+    setupState: 'unsetup' | 'ready',
+    hostId: string | null
   ) => {
     e.preventDefault()
-    setMenu({ x: e.clientX, y: e.clientY, projectPath, setupState })
+    setMenu({ x: e.clientX, y: e.clientY, projectPath, setupState, hostId })
   }
 
   const getMenuItems = (): MenuItem[] => {
     if (!menu) return []
     const items: MenuItem[] = []
+
+    if (menu.hostId !== null) {
+      const hostId = menu.hostId
+      items.push({
+        label: 'Remove remote project',
+        onClick: () => void removeRemoteProject(hostId, menu.projectPath),
+      })
+      items.push({ label: '', separator: true, onClick: () => {} })
+      items.push({ label: 'Rescan', onClick: () => scanProjects() })
+      return items
+    }
 
     if (menu.setupState === 'unsetup') {
       items.push({
@@ -251,27 +267,36 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
       {displayProjects.map((project) => {
         const isExpanded = expanded.has(project.path)
         const hasWorktrees = project.worktrees.length > 1
+        const host = project.hostId ? hosts.find((h) => h.hostId === project.hostId) : null
 
         return (
-          <div key={project.path} className="project-node">
+          <div key={`${project.hostId ?? 'local'}:${project.path}`} className="project-node">
             <div
               className="project-row"
               onClick={() => hasWorktrees && toggle(project.path)}
-              onContextMenu={(e) => handleContextMenu(e, project.path, project.setupState)}
+              onContextMenu={(e) =>
+                handleContextMenu(e, project.path, project.setupState, project.hostId)
+              }
             >
               <span className="project-toggle">
                 {hasWorktrees ? (isExpanded ? '▼' : '▶') : ' '}
               </span>
               <span className="project-name">{project.name}</span>
-              {project.setupState === 'ready' ? (
-                <span className="badge-ready" title="cc-pewpew hooks installed">
-                  ●
-                </span>
-              ) : (
-                <span className="badge-unsetup" title="Not set up">
-                  [Setup]
+              {host && (
+                <span className="host-pill" title={`Remote on ${host.alias}`}>
+                  {host.label}
                 </span>
               )}
+              {project.hostId === null &&
+                (project.setupState === 'ready' ? (
+                  <span className="badge-ready" title="cc-pewpew hooks installed">
+                    ●
+                  </span>
+                ) : (
+                  <span className="badge-unsetup" title="Not set up">
+                    [Setup]
+                  </span>
+                ))}
             </div>
 
             {isExpanded && (

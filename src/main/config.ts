@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import type { Host } from '../shared/types'
+import type { Host, RemoteProject } from '../shared/types'
 
 export interface CanvasState {
   zoom: number
@@ -28,6 +28,7 @@ export interface AppConfig {
   uiScale: number
   hosts: Host[]
   gitignoreWarned: string[]
+  remoteProjects: RemoteProject[]
 }
 
 export const CONFIG_DIR = join(
@@ -46,6 +47,7 @@ const DEFAULT_CONFIG: AppConfig = {
   uiScale: 1.2,
   hosts: [],
   gitignoreWarned: [],
+  remoteProjects: [],
 }
 
 export function shouldWarnGitignore(projectPath: string): boolean {

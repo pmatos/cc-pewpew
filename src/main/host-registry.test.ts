@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { Host } from '../shared/types'
+import type { Host, RemoteProject } from '../shared/types'
 
 let fakeHosts: Host[] = []
 const saveConfigSpy = vi.fn()
@@ -15,11 +15,16 @@ vi.mock('./config', () => ({
     sidebarWidth: 250,
     uiScale: 1,
     hosts: fakeHosts,
+    remoteProjects: [] as RemoteProject[],
   }),
   saveConfig: (cfg: { hosts: Host[] }) => {
     fakeHosts = cfg.hosts
     saveConfigSpy(cfg)
   },
+}))
+
+vi.mock('./remote-project-registry', () => ({
+  hasRemoteProjectsBoundTo: vi.fn(() => false),
 }))
 
 const fsState = { sessionsJson: null as string | null }
@@ -46,11 +51,13 @@ import {
   listHosts,
   getHost,
 } from './host-registry'
+import { hasRemoteProjectsBoundTo } from './remote-project-registry'
 
 beforeEach(() => {
   fakeHosts = []
   fsState.sessionsJson = null
   saveConfigSpy.mockClear()
+  vi.mocked(hasRemoteProjectsBoundTo).mockReturnValue(false)
 })
 
 describe('validateAlias', () => {
@@ -179,5 +186,11 @@ describe('deleteHost', () => {
 
   it('throws on unknown hostId', () => {
     expect(() => deleteHost('nope')).toThrow(/Unknown/)
+  })
+
+  it('refuses delete when a remote project is bound to the host', () => {
+    const h = addHost({ alias: 'dev', label: 'x' })
+    vi.mocked(hasRemoteProjectsBoundTo).mockReturnValue(true)
+    expect(() => deleteHost(h.hostId)).toThrow(/remote projects/)
   })
 })

@@ -6,6 +6,7 @@ export interface Project {
   branches: string[]
   worktrees: Worktree[]
   setupState: 'unsetup' | 'ready'
+  hostId: string | null
 }
 
 export interface Worktree {
@@ -96,5 +97,26 @@ export type SshExitReason = 'auth-failed' | 'network' | 'dep-missing' | 'unknown
 export interface TestConnectionResult {
   ok: boolean
   reason?: SshExitReason
+  message?: string
+}
+
+export interface RemoteProject {
+  hostId: HostId
+  path: string
+  name: string
+  repoFingerprint?: string
+}
+
+export type ValidateRemoteRepoReason =
+  | 'not-a-git-repo'
+  | 'auth-failed'
+  | 'network'
+  | 'dep-missing'
+  | 'unknown'
+
+export interface ValidateRemoteRepoResult {
+  ok: boolean
+  fingerprint?: string
+  reason?: ValidateRemoteRepoReason
   message?: string
 }

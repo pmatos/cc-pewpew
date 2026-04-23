@@ -84,4 +84,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('hosts:update', hostId, alias, label),
   deleteHost: (hostId: string) => ipcRenderer.invoke('hosts:delete', hostId),
   testHostConnection: (hostId: string) => ipcRenderer.invoke('hosts:test-connection', hostId),
+  addRemoteProject: (input: { hostId: string; path: string }) =>
+    ipcRenderer.invoke('projects:add-remote', input),
+  removeRemoteProject: (hostId: string, path: string) =>
+    ipcRenderer.invoke('projects:remove-remote', hostId, path),
 })

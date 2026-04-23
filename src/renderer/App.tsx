@@ -5,12 +5,14 @@ import DetailPane from './components/DetailPane'
 import StatusBar from './components/StatusBar'
 import ManageHostsDialog from './components/ManageHostsDialog'
 import ZoomOpenMorph from './components/ZoomOpenMorph'
+import AddRemoteProjectDialog from './components/AddRemoteProjectDialog'
 import { useProjectsStore } from './stores/projects'
 import { useSessionsStore } from './stores/sessions'
 import { useHostsStore } from './stores/hosts'
 
 export default function App() {
   const { scanProjects, filterReady, toggleFilterReady } = useProjectsStore()
+  const openAddRemoteDialog = useProjectsStore((s) => s.openAddRemoteDialog)
   const { init: initSessions } = useSessionsStore()
   const hosts = useHostsStore((s) => s.hosts)
   const openHostsDialog = useHostsStore((s) => s.openDialog)
@@ -69,6 +71,7 @@ export default function App() {
         // one is open (avoids side-effect clearing of active session /
         // selection when dismissing a modal via Escape).
         if (useHostsStore.getState().dialogOpen) return
+        if (useProjectsStore.getState().addRemoteDialogOpen) return
         if (morphPayload && !activeSessionId) {
           // Cancel zoom-open mid-morph: abort the transition and stay on canvas.
           setMorphPayload(null)
@@ -196,6 +199,13 @@ export default function App() {
           >
             🌐 Hosts ({hosts.length})
           </button>
+          <button
+            className="new-project-btn"
+            onClick={openAddRemoteDialog}
+            title="Register a remote git project"
+          >
+            📡 Remote project
+          </button>
         </div>
       </aside>
 
@@ -221,6 +231,7 @@ export default function App() {
       </main>
 
       <ManageHostsDialog />
+      <AddRemoteProjectDialog />
       {morphPayload && (
         <ZoomOpenMorph
           startRect={morphPayload.startRect}

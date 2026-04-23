@@ -8,19 +8,16 @@
 import { execFile } from 'child_process'
 import { shellQuote } from './shell-quote'
 import { classifySshExit } from './ssh-exit-parser'
-import type { TestConnectionResult } from '../shared/types'
+import type { TestConnectionResult, ValidateRemoteRepoResult } from '../shared/types'
 
 interface ExecResult {
   stdout: string
   stderr: string
   code: number
-}
-
-interface SshRunResult extends ExecResult {
   timedOut: boolean
 }
 
-function runSsh(argv: string[], timeoutMs: number): Promise<SshRunResult> {
+function runSsh(argv: string[], timeoutMs: number): Promise<ExecResult> {
   return new Promise((resolve) => {
     const child = execFile(
       'ssh',
@@ -90,6 +87,61 @@ export async function exec(
   const timeoutMs = opts.timeoutMs ?? 30000
   const quoted = argv.map(shellQuote)
   const sshArgv = ['-o', 'BatchMode=yes', '--', alias, ...quoted]
-  const { stdout, stderr, code } = await runSsh(sshArgv, timeoutMs)
-  return { stdout, stderr, code }
+  return runSsh(sshArgv, timeoutMs)
+}
+
+// Validates that a remote path is a git repository ROOT (not a subdirectory)
+// and extracts its root-commit fingerprint in a single ssh round-trip. The
+// remote path is passed as a positional argument ($1) to `sh -c`, never
+// interpolated into the script text — this keeps the INVARIANT at the top of
+// this file intact even for paths containing shell metacharacters.
+//
+// The probe uses `git rev-parse --show-prefix`: it exits 0 with an empty
+// stdout at a repo root, 0 with a non-empty "subdir/" at a subdirectory, and
+// ~128 outside any repo. We reject non-empty prefixes with exit 2 and a
+// diagnostic on stderr so the caller can surface "must be the repository
+// root" instead of a generic error. Worktrees and submodules (where `.git` is
+// a file) are accepted because `rev-parse` resolves them natively.
+//
+// The fingerprint step is best-effort: an empty repo with no HEAD returns
+// an empty fingerprint, not a rejection.
+//
+// The probe deliberately does NOT swallow `rev-parse`'s stderr and propagates
+// the original exit code, so that a missing `git` binary on the remote
+// (shell-level exit 127 + "command not found") remains distinguishable from a
+// path that simply isn't a git repo — `classifySshExit` routes the former to
+// `dep-missing`.
+export async function validateRemoteRepo(
+  alias: string,
+  path: string,
+  opts: { timeoutMs?: number } = {}
+): Promise<ValidateRemoteRepoResult> {
+  const script =
+    'prefix=$(git -C "$1" rev-parse --show-prefix)\n' +
+    'rc=$?\n' +
+    'if [ $rc -ne 0 ]; then exit $rc; fi\n' +
+    'if [ -n "$prefix" ]; then\n' +
+    '  printf "Remote path must be the repository root (got subdirectory: %s)\\n" "$prefix" >&2\n' +
+    '  exit 2\n' +
+    'fi\n' +
+    'git -C "$1" rev-list --max-parents=0 HEAD 2>/dev/null || true'
+  const { stdout, stderr, code, timedOut } = await exec(alias, ['sh', '-c', script, '_', path], {
+    timeoutMs: opts.timeoutMs ?? 15000,
+  })
+  if (timedOut) {
+    return { ok: false, reason: 'network', message: 'ssh timed out' }
+  }
+  if (code === 0) {
+    const fingerprint = stdout.trim().split('\n')[0] || undefined
+    return { ok: true, fingerprint }
+  }
+  const { reason, message } = classifySshExit({ exitCode: code, stderr })
+  if (reason === 'auth-failed' || reason === 'network' || reason === 'dep-missing') {
+    return { ok: false, reason, message }
+  }
+  return {
+    ok: false,
+    reason: 'not-a-git-repo',
+    message: stderr.trim() ? message : 'Path is not a git repository',
+  }
 }
