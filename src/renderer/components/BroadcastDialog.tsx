@@ -5,16 +5,6 @@ export default function BroadcastDialog() {
   const open = useSessionsStore((s) => s.broadcastDialogOpen)
   const selectedIds = useSessionsStore((s) => s.selectedIds)
   const closeBroadcastDialog = useSessionsStore((s) => s.closeBroadcastDialog)
-  const clearSelection = useSessionsStore((s) => s.clearSelection)
-  const [command, setCommand] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (open) {
-      setCommand('')
-      setTimeout(() => inputRef.current?.focus(), 0)
-    }
-  }, [open])
 
   useEffect(() => {
     if (open && selectedIds.size === 0) {
@@ -23,6 +13,21 @@ export default function BroadcastDialog() {
   }, [open, selectedIds.size, closeBroadcastDialog])
 
   if (!open) return null
+
+  return <BroadcastDialogContent />
+}
+
+function BroadcastDialogContent() {
+  const selectedIds = useSessionsStore((s) => s.selectedIds)
+  const closeBroadcastDialog = useSessionsStore((s) => s.closeBroadcastDialog)
+  const clearSelection = useSessionsStore((s) => s.clearSelection)
+  const [command, setCommand] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const timeout = setTimeout(() => inputRef.current?.focus(), 0)
+    return () => clearTimeout(timeout)
+  }, [])
 
   const handleSend = async () => {
     if (!command.trim()) return

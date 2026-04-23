@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { Host } from '../../shared/types'
 import { useProjectsStore } from '../stores/projects'
 import { useHostsStore } from '../stores/hosts'
 
@@ -12,19 +13,6 @@ export default function AddRemoteProjectDialog() {
 
   const hosts = useHostsStore((s) => s.hosts)
   const openHostsDialog = useHostsStore((s) => s.openDialog)
-
-  const [selectedHostId, setSelectedHostId] = useState('')
-  const [remotePath, setRemotePath] = useState('')
-
-  // Reset form when the dialog opens, and pick a sensible default host.
-  useEffect(() => {
-    if (!dialogOpen) return
-    setRemotePath('')
-    setSelectedHostId((prev) => {
-      if (hosts.some((h) => h.hostId === prev)) return prev
-      return hosts[0]?.hostId ?? ''
-    })
-  }, [dialogOpen, hosts])
 
   // Escape handling mirrors ManageHostsDialog: bubble-phase listener with a
   // DOM-topology guard so the form's own input Escape wins.
@@ -42,11 +30,48 @@ export default function AddRemoteProjectDialog() {
 
   if (!dialogOpen) return null
 
-  const canSubmit = selectedHostId !== '' && remotePath.trim().length > 0 && !submitting
+  return (
+    <AddRemoteProjectDialogContent
+      hosts={hosts}
+      error={error}
+      submitting={submitting}
+      closeDialog={closeDialog}
+      addRemoteProject={addRemoteProject}
+      clearError={clearError}
+      openHostsDialog={openHostsDialog}
+    />
+  )
+}
+
+interface AddRemoteProjectDialogContentProps {
+  hosts: Host[]
+  error: string | null
+  submitting: boolean
+  closeDialog: () => void
+  addRemoteProject: (input: { hostId: string; path: string }) => Promise<void>
+  clearError: () => void
+  openHostsDialog: () => void
+}
+
+function AddRemoteProjectDialogContent({
+  hosts,
+  error,
+  submitting,
+  closeDialog,
+  addRemoteProject,
+  clearError,
+  openHostsDialog,
+}: AddRemoteProjectDialogContentProps) {
+  const [selectedHostId, setSelectedHostId] = useState(() => hosts[0]?.hostId ?? '')
+  const [remotePath, setRemotePath] = useState('')
+
+  const selectedHostAvailable = hosts.some((h) => h.hostId === selectedHostId)
+  const activeHostId = selectedHostAvailable ? selectedHostId : (hosts[0]?.hostId ?? '')
+  const canSubmit = activeHostId !== '' && remotePath.trim().length > 0 && !submitting
 
   const handleSubmit = async () => {
     if (!canSubmit) return
-    await addRemoteProject({ hostId: selectedHostId, path: remotePath.trim() })
+    await addRemoteProject({ hostId: activeHostId, path: remotePath.trim() })
   }
 
   const handleKey = (e: React.KeyboardEvent) => {
@@ -96,7 +121,7 @@ export default function AddRemoteProjectDialog() {
             <select
               autoFocus
               className="create-input"
-              value={selectedHostId}
+              value={activeHostId}
               onChange={(e) => setSelectedHostId(e.target.value)}
               onKeyDown={handleKey}
             >
