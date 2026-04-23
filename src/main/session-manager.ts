@@ -658,6 +658,13 @@ export function restoreSessions(): void {
             session.status = 'dead'
           }
         }
+      } else if (session.status === 'completed' || session.status === 'error') {
+        // Terminal states: if the tmux session is gone, the card shouldn't
+        // claim the session is still alive. Don't auto-recover — the
+        // conversation already ended.
+        if (!liveTmuxIds.has(session.id)) {
+          session.status = 'dead'
+        }
       }
       // Migrate legacy symlink-form paths to canonical so renderer matches work.
       session.worktreePath = canonicalPath(session.worktreePath)
@@ -677,7 +684,9 @@ export function restoreSessions(): void {
         const m = session.worktreeName.match(/^pr-(\d+)$/)
         if (m) session.prNumber = parseInt(m[1], 10)
       }
-      session.lastActivity = Date.now()
+      if (session.status !== 'dead') {
+        session.lastActivity = Date.now()
+      }
       sessions.set(session.id, { session })
     }
 
