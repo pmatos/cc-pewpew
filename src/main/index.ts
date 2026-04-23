@@ -41,7 +41,7 @@ import {
 } from './session-manager'
 import { parseDiff, synthesizeUntrackedFile } from './diff-parser'
 import { listHosts, addHost, updateHost, deleteHost, getHost } from './host-registry'
-import { testConnection, validateRemoteRepo } from './host-connection'
+import { testConnection, validateRemoteRepo, stopAllHostConnections } from './host-connection'
 import {
   listRemoteProjects,
   addRemoteProject as persistRemoteProject,
@@ -211,9 +211,12 @@ app.whenReady().then(async () => {
     await shell.openPath(path)
   })
 
-  ipcMain.handle('sessions:create', async (_event, projectPath: string, name?: string) => {
-    return createSession(projectPath, name)
-  })
+  ipcMain.handle(
+    'sessions:create',
+    async (_event, projectPath: string, name?: string, hostId?: string | null) => {
+      return createSession(projectPath, name, hostId ?? null)
+    }
+  )
 
   ipcMain.handle('sessions:create-pr', async (_event, projectPath: string, prNumber: number) => {
     return createPrSession(projectPath, prNumber)
@@ -255,12 +258,12 @@ app.whenReady().then(async () => {
     return getSessions()
   })
 
-  ipcMain.handle('sessions:kill', (_event, id: string) => {
-    killSession(id)
+  ipcMain.handle('sessions:kill', async (_event, id: string) => {
+    await killSession(id)
   })
 
-  ipcMain.handle('sessions:revive', (_event, id: string) => {
-    reviveSession(id)
+  ipcMain.handle('sessions:revive', async (_event, id: string) => {
+    await reviveSession(id)
   })
 
   ipcMain.handle('sessions:remove-worktree', async (_event, id: string) => {
@@ -271,14 +274,14 @@ app.whenReady().then(async () => {
     await removeSession(id)
   })
 
-  ipcMain.handle('sessions:kill-batch', (_event, ids: string[]) => {
-    for (const id of ids) killSession(id)
+  ipcMain.handle('sessions:kill-batch', async (_event, ids: string[]) => {
+    for (const id of ids) await killSession(id)
   })
 
-  ipcMain.handle('sessions:revive-batch', (_event, ids: string[]) => {
+  ipcMain.handle('sessions:revive-batch', async (_event, ids: string[]) => {
     for (const id of ids) {
       try {
-        reviveSession(id)
+        await reviveSession(id)
       } catch (err) {
         console.error(`Failed to revive session ${id}:`, err)
       }
@@ -500,6 +503,7 @@ app.whenReady().then(async () => {
     clearInterval(thumbInterval)
     stopPtyManager()
     stopHookServer()
+    void stopAllHostConnections()
   })
 })
 

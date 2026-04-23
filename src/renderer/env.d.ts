@@ -18,7 +18,11 @@ declare global {
       createProject: (name: string) => Promise<void>
       openInFileManager: (path: string) => Promise<void>
       onHookEvent: (callback: (event: { method: string; params: unknown }) => void) => () => void
-      createSession: (projectPath: string, name?: string) => Promise<Session>
+      createSession: (
+        projectPath: string,
+        name?: string,
+        hostId?: string | null
+      ) => Promise<Session>
       createPrSession: (projectPath: string, prNumber: number) => Promise<Session | string>
       mirrorWorktree: (
         projectPath: string,

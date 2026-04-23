@@ -5,8 +5,8 @@ import { broadcastToAll } from './window-registry'
 import { CONFIG_DIR } from './config'
 import { handleHookEvent } from './session-manager'
 
-const SOCKET_PATH = join(CONFIG_DIR, 'ipc.sock')
-const SOCKET_BREADCRUMB = join(CONFIG_DIR, 'socket-path')
+const LOCAL_SOCKET_PATH = join(CONFIG_DIR, 'ipc.sock')
+const LOCAL_SOCKET_BREADCRUMB = join(CONFIG_DIR, 'socket-path')
 
 const METHODS = new Set([
   'ping',
@@ -17,10 +17,28 @@ const METHODS = new Set([
   'session.notification',
 ])
 
-let server: Server | null = null
+const servers = new Map<string, { server: Server; socketPath: string }>()
+
+function originKey(originHostId: string | null): string {
+  return originHostId ?? 'local'
+}
+
+function socketPathForOrigin(originHostId: string | null): string {
+  return originHostId ? join(CONFIG_DIR, `ipc-${originHostId}.sock`) : LOCAL_SOCKET_PATH
+}
+
+function unlinkIfPresent(path: string): void {
+  if (!existsSync(path)) return
+  try {
+    unlinkSync(path)
+  } catch {
+    // ignore stale socket cleanup failures; listen() will surface real errors
+  }
+}
 
 function handleRequest(
-  raw: string
+  raw: string,
+  originHostId: string | null
 ): { jsonrpc: string; result?: unknown; error?: unknown; id: unknown } | null {
   let req: { jsonrpc?: string; method?: string; params?: unknown; id?: unknown }
   try {
@@ -49,18 +67,24 @@ function handleRequest(
     return { jsonrpc: '2.0', result: 'pong', id: req.id ?? null }
   }
 
-  // Update session state in session manager
-  handleHookEvent(req.method, (req.params as Record<string, unknown>) ?? {})
+  const accepted = handleHookEvent(
+    req.method,
+    (req.params as Record<string, unknown>) ?? {},
+    originHostId
+  )
 
-  broadcastToAll('hook:event', {
-    method: req.method,
-    params: req.params,
-  })
+  if (accepted) {
+    broadcastToAll('hook:event', {
+      method: req.method,
+      params: req.params,
+      originHostId,
+    })
+  }
 
   return { jsonrpc: '2.0', result: 'ok', id: req.id ?? null }
 }
 
-function handleConnection(socket: Socket): void {
+function handleConnection(socket: Socket, originHostId: string | null): void {
   let buffer = ''
 
   socket.on('data', (data) => {
@@ -73,18 +97,16 @@ function handleConnection(socket: Socket): void {
 
       if (!line) continue
 
-      const response = handleRequest(line)
+      const response = handleRequest(line, originHostId)
       if (response) {
         socket.write(JSON.stringify(response) + '\n')
       }
     }
-
-    // Handle single message without trailing newline (connection close flushes)
   })
 
   socket.on('end', () => {
     if (buffer.trim()) {
-      const response = handleRequest(buffer.trim())
+      const response = handleRequest(buffer.trim(), originHostId)
       if (response) {
         socket.write(JSON.stringify(response) + '\n')
       }
@@ -96,40 +118,55 @@ function handleConnection(socket: Socket): void {
   })
 }
 
-export function startHookServer(): void {
-  // Clean up stale socket
-  if (existsSync(SOCKET_PATH)) {
-    try {
-      unlinkSync(SOCKET_PATH)
-    } catch {
-      // ignore
+function listenOrigin(originHostId: string | null): string {
+  const key = originKey(originHostId)
+  const existing = servers.get(key)
+  if (existing) return existing.socketPath
+
+  const socketPath = socketPathForOrigin(originHostId)
+  unlinkIfPresent(socketPath)
+
+  const server = createServer((socket) => handleConnection(socket, originHostId))
+  server.listen(socketPath, () => {
+    if (originHostId === null) {
+      writeFileSync(LOCAL_SOCKET_BREADCRUMB, socketPath)
     }
-  }
-
-  server = createServer(handleConnection)
-
-  server.listen(SOCKET_PATH, () => {
-    writeFileSync(SOCKET_BREADCRUMB, SOCKET_PATH)
   })
 
   server.on('error', (err) => {
     console.error('Hook server error:', err)
   })
+
+  servers.set(key, { server, socketPath })
+  return socketPath
+}
+
+export function startHookServer(): void {
+  listenOrigin(null)
+}
+
+export function listenHookServerForHost(hostId: string): string {
+  return listenOrigin(hostId)
+}
+
+export function stopHookServerForHost(hostId: string): void {
+  const key = originKey(hostId)
+  const entry = servers.get(key)
+  if (!entry) return
+  entry.server.close()
+  servers.delete(key)
+  unlinkIfPresent(entry.socketPath)
 }
 
 export function stopHookServer(): void {
-  if (server) {
-    server.close()
-    server = null
+  for (const [key, entry] of servers) {
+    entry.server.close()
+    servers.delete(key)
+    unlinkIfPresent(entry.socketPath)
   }
 
   try {
-    if (existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH)
-  } catch {
-    // ignore
-  }
-  try {
-    if (existsSync(SOCKET_BREADCRUMB)) unlinkSync(SOCKET_BREADCRUMB)
+    if (existsSync(LOCAL_SOCKET_BREADCRUMB)) unlinkSync(LOCAL_SOCKET_BREADCRUMB)
   } catch {
     // ignore
   }

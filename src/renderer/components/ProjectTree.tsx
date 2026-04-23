@@ -24,6 +24,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(null)
+  const [pendingSessionHostId, setPendingSessionHostId] = useState<string | null>(null)
   const [sessionNameInput, setSessionNameInput] = useState('')
   const [creating, setCreating] = useState(false)
   const [pendingPrPath, setPendingPrPath] = useState<string | null>(null)
@@ -69,6 +70,15 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     if (menu.hostId !== null) {
       const hostId = menu.hostId
       items.push({
+        label: 'New session...',
+        onClick: () => {
+          setPendingSessionPath(menu.projectPath)
+          setPendingSessionHostId(hostId)
+          setSessionNameInput('')
+        },
+      })
+      items.push({ label: '', separator: true, onClick: () => {} })
+      items.push({
         label: 'Remove remote project',
         onClick: () => void removeRemoteProject(hostId, menu.projectPath),
       })
@@ -90,6 +100,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
         label: 'New session...',
         onClick: () => {
           setPendingSessionPath(menu.projectPath)
+          setPendingSessionHostId(null)
           setSessionNameInput('')
         },
       })
@@ -172,8 +183,9 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     setCreating(true)
     try {
       const name = sessionNameInput.trim() || undefined
-      await window.api.createSession(pendingSessionPath, name)
+      await window.api.createSession(pendingSessionPath, name, pendingSessionHostId)
       setPendingSessionPath(null)
+      setPendingSessionHostId(null)
       setSessionNameInput('')
     } finally {
       setCreating(false)
@@ -215,7 +227,10 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             onChange={(e) => setSessionNameInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleCreateSession()
-              if (e.key === 'Escape') setPendingSessionPath(null)
+              if (e.key === 'Escape') {
+                setPendingSessionPath(null)
+                setPendingSessionHostId(null)
+              }
             }}
             autoFocus
           />
@@ -223,7 +238,13 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             <button className="create-btn" onClick={handleCreateSession} disabled={creating}>
               {creating ? 'Creating...' : 'Create'}
             </button>
-            <button className="create-btn cancel" onClick={() => setPendingSessionPath(null)}>
+            <button
+              className="create-btn cancel"
+              onClick={() => {
+                setPendingSessionPath(null)
+                setPendingSessionHostId(null)
+              }}
+            >
               Cancel
             </button>
           </div>

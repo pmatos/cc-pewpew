@@ -5,16 +5,76 @@
 // `-` (e.g. from a hand-edited config.json) cannot be interpreted by ssh as an
 // option, even if upstream validation was bypassed.
 
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
+import { mkdirSync, unlinkSync } from 'fs'
+import { join } from 'path'
+import { homedir, userInfo } from 'os'
+import * as pty from 'node-pty'
+import type { IPty, IPtyForkOptions } from 'node-pty'
 import { shellQuote } from './shell-quote'
 import { classifySshExit } from './ssh-exit-parser'
-import type { TestConnectionResult, ValidateRemoteRepoResult } from '../shared/types'
+import { CONFIG_DIR } from './config'
+import type { Host, HostId, TestConnectionResult, ValidateRemoteRepoResult } from '../shared/types'
 
-interface ExecResult {
+export interface ExecResult {
   stdout: string
   stderr: string
   code: number
   timedOut: boolean
+}
+
+type HostConnectionState = 'offline' | 'connecting' | 'live' | 'auth-failed' | 'unreachable'
+
+interface HostRuntime {
+  host: Host
+  controlPath: string
+  localSocketPath: string
+  remoteSocketPath: string
+  child: ReturnType<typeof spawn> | null
+  state: HostConnectionState
+  refs: number
+  ready?: Promise<void>
+}
+
+const runtimes = new Map<HostId, HostRuntime>()
+
+function uidSegment(): string {
+  if (typeof process.getuid === 'function') return String(process.getuid())
+  try {
+    return String(userInfo().uid)
+  } catch {
+    return homedir().replace(/[^A-Za-z0-9_.-]/g, '_')
+  }
+}
+
+export function remoteSocketPathForHost(_hostId: HostId): string {
+  return `/tmp/cc-pewpew-${uidSegment()}.sock`
+}
+
+function controlPathForHost(hostId: HostId): string {
+  return join(CONFIG_DIR, `ssh-${hostId}.sock`)
+}
+
+function runtimeFor(host: Host, localSocketPath: string): HostRuntime {
+  const existing = runtimes.get(host.hostId)
+  if (existing) {
+    existing.host = host
+    existing.localSocketPath = localSocketPath
+    return existing
+  }
+
+  mkdirSync(CONFIG_DIR, { recursive: true })
+  const runtime: HostRuntime = {
+    host,
+    controlPath: controlPathForHost(host.hostId),
+    localSocketPath,
+    remoteSocketPath: remoteSocketPathForHost(host.hostId),
+    child: null,
+    state: 'offline',
+    refs: 0,
+  }
+  runtimes.set(host.hostId, runtime)
+  return runtime
 }
 
 function runSsh(argv: string[], timeoutMs: number): Promise<ExecResult> {
@@ -22,7 +82,7 @@ function runSsh(argv: string[], timeoutMs: number): Promise<ExecResult> {
     const child = execFile(
       'ssh',
       argv,
-      { timeout: timeoutMs, maxBuffer: 64 * 1024 },
+      { timeout: timeoutMs, maxBuffer: 256 * 1024 },
       (error, stdout, stderr) => {
         // execFile's `timeout` option kills the child with `killSignal` (default
         // SIGTERM) when it fires. Node sets `error.killed === true` in that
@@ -58,6 +118,174 @@ function runSsh(argv: string[], timeoutMs: number): Promise<ExecResult> {
   })
 }
 
+function controlArgs(runtime: HostRuntime): string[] {
+  return [
+    '-N',
+    '-o',
+    'BatchMode=yes',
+    '-o',
+    'ControlMaster=yes',
+    '-o',
+    `ControlPath=${runtime.controlPath}`,
+    '-o',
+    'ControlPersist=10m',
+    '-o',
+    'ExitOnForwardFailure=yes',
+    '-o',
+    'StreamLocalBindUnlink=yes',
+    '-o',
+    'ServerAliveInterval=15',
+    '-o',
+    'ServerAliveCountMax=3',
+    '-R',
+    `${runtime.remoteSocketPath}:${runtime.localSocketPath}`,
+    '--',
+    runtime.host.alias,
+  ]
+}
+
+async function controlCheck(runtime: HostRuntime): Promise<boolean> {
+  const result = await runSsh(
+    [
+      '-o',
+      'BatchMode=yes',
+      '-o',
+      `ControlPath=${runtime.controlPath}`,
+      '-O',
+      'check',
+      '--',
+      runtime.host.alias,
+    ],
+    1000
+  )
+  return result.code === 0
+}
+
+async function waitForControl(runtime: HostRuntime): Promise<void> {
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    if (!runtime.child || runtime.child.exitCode !== null) break
+    if (await controlCheck(runtime)) return
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error('ssh control connection did not become ready')
+}
+
+function classifyConnectionFailure(code: number | null, stderr: string): HostConnectionState {
+  const { reason } = classifySshExit({ exitCode: code, stderr })
+  if (reason === 'auth-failed') return 'auth-failed'
+  if (reason === 'network') return 'unreachable'
+  return 'offline'
+}
+
+async function startRuntime(runtime: HostRuntime): Promise<void> {
+  runtime.state = 'connecting'
+  let stderr = ''
+
+  const child = spawn('ssh', controlArgs(runtime), {
+    stdio: ['ignore', 'ignore', 'pipe'],
+  })
+  runtime.child = child
+
+  child.stderr?.on('data', (data) => {
+    stderr += data.toString()
+  })
+
+  const exitPromise = new Promise<never>((_, reject) => {
+    child.once('exit', (code) => {
+      runtime.child = null
+      runtime.state = classifyConnectionFailure(code, stderr)
+      reject(new Error(stderr.trim() || `ssh control connection exited: ${code ?? 'signal'}`))
+    })
+  })
+
+  try {
+    await Promise.race([waitForControl(runtime), exitPromise])
+    runtime.state = 'live'
+  } catch (err) {
+    const exitCode = child.exitCode
+    if (runtime.child) {
+      try {
+        runtime.child.kill()
+      } catch {
+        // Already gone.
+      }
+    }
+    runtime.child = null
+    runtime.state = classifyConnectionFailure(exitCode, stderr)
+    throw err
+  }
+}
+
+export async function ensureHostConnection(
+  host: Host,
+  localSocketPath: string
+): Promise<{ remoteSocketPath: string; controlPath: string }> {
+  const runtime = runtimeFor(host, localSocketPath)
+  if (runtime.state === 'live' && runtime.child) {
+    return { remoteSocketPath: runtime.remoteSocketPath, controlPath: runtime.controlPath }
+  }
+  if (!runtime.ready) {
+    runtime.ready = startRuntime(runtime).finally(() => {
+      runtime.ready = undefined
+    })
+  }
+  await runtime.ready
+  return { remoteSocketPath: runtime.remoteSocketPath, controlPath: runtime.controlPath }
+}
+
+export function retainHostConnection(hostId: HostId): void {
+  const runtime = runtimes.get(hostId)
+  if (runtime) runtime.refs++
+}
+
+export async function releaseHostConnection(hostId: HostId): Promise<void> {
+  const runtime = runtimes.get(hostId)
+  if (!runtime) return
+  runtime.refs = Math.max(0, runtime.refs - 1)
+  if (runtime.refs > 0) return
+  await stopHostConnection(hostId)
+}
+
+export async function stopHostConnection(hostId: HostId): Promise<void> {
+  const runtime = runtimes.get(hostId)
+  if (!runtime) return
+
+  if (runtime.child) {
+    await runSsh(
+      [
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        `ControlPath=${runtime.controlPath}`,
+        '-O',
+        'exit',
+        '--',
+        runtime.host.alias,
+      ],
+      2000
+    ).catch(() => undefined)
+    try {
+      runtime.child.kill()
+    } catch {
+      // Already gone.
+    }
+  }
+
+  runtime.child = null
+  runtime.state = 'offline'
+  runtimes.delete(hostId)
+  try {
+    unlinkSync(runtime.controlPath)
+  } catch {
+    // Control socket may already be gone.
+  }
+}
+
+export async function stopAllHostConnections(): Promise<void> {
+  await Promise.all(Array.from(runtimes.keys()).map((hostId) => stopHostConnection(hostId)))
+}
+
 export async function testConnection(
   alias: string,
   opts: { timeoutMs?: number } = {}
@@ -76,18 +304,52 @@ export async function testConnection(
   return { ok: false, reason, message }
 }
 
-// Forward-looking helper for slices 2+. Slice 1 has no caller, but the
-// shell-quote invariant is tested and shipped so later code inherits a correct
-// foundation.
+function aliasOf(aliasOrHost: string | Host): string {
+  return typeof aliasOrHost === 'string' ? aliasOrHost : aliasOrHost.alias
+}
+
+function runtimeForHostIfLive(host: Host): HostRuntime | undefined {
+  const runtime = runtimes.get(host.hostId)
+  return runtime?.state === 'live' ? runtime : undefined
+}
+
+// Forward-looking helper for remote project/session operations.
 export async function exec(
-  alias: string,
+  aliasOrHost: string | Host,
   argv: string[],
   opts: { timeoutMs?: number } = {}
 ): Promise<ExecResult> {
   const timeoutMs = opts.timeoutMs ?? 30000
   const quoted = argv.map(shellQuote)
-  const sshArgv = ['-o', 'BatchMode=yes', '--', alias, ...quoted]
+  const liveRuntime =
+    typeof aliasOrHost === 'string' ? undefined : runtimeForHostIfLive(aliasOrHost)
+  const sshArgv = liveRuntime
+    ? [
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        `ControlPath=${liveRuntime.controlPath}`,
+        '--',
+        aliasOf(aliasOrHost),
+        ...quoted,
+      ]
+    : ['-o', 'BatchMode=yes', '--', aliasOf(aliasOrHost), ...quoted]
   return runSsh(sshArgv, timeoutMs)
+}
+
+export function spawnAttach(host: Host, argv: string[], options: IPtyForkOptions): IPty {
+  const runtime = runtimeForHostIfLive(host)
+  const quoted = argv.map(shellQuote)
+  const sshArgv = [
+    '-tt',
+    '-o',
+    'BatchMode=yes',
+    ...(runtime ? ['-o', `ControlPath=${runtime.controlPath}`] : []),
+    '--',
+    host.alias,
+    ...quoted,
+  ]
+  return pty.spawn('ssh', sshArgv, options)
 }
 
 // Validates that a remote path is a git repository ROOT (not a subdirectory)

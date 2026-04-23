@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import type { Session } from '../../shared/types'
 import { useProjectsStore } from '../stores/projects'
 import { useSessionsStore } from '../stores/sessions'
+import { useHostsStore } from '../stores/hosts'
 import { STATUS_CONFIG } from '../utils/status-config'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 
@@ -28,6 +29,7 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
 
   const selectedIds = useSessionsStore((s) => s.selectedIds)
   const clearSelection = useSessionsStore((s) => s.clearSelection)
+  const hosts = useHostsStore((s) => s.hosts)
   const isSelected = selectedIds.has(session.id)
   const selectedCount = selectedIds.size
 
@@ -36,6 +38,8 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
     return () => clearInterval(interval)
   }, [])
   const { className: statusClass, label } = STATUS_CONFIG[session.status]
+  const host = session.hostId ? hosts.find((h) => h.hostId === session.hostId) : null
+  const connectionState = session.connectionState ?? (host ? 'offline' : undefined)
 
   const sessionName = `${session.projectName}/${session.worktreeName}`
 
@@ -145,6 +149,12 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
     >
       <div className="session-card-thumb">
         {thumbnail ? <pre className="session-card-text-thumb">{thumbnail}</pre> : null}
+        {host && (
+          <div className="session-card-host-overlay" title={`${host.label}: ${connectionState}`}>
+            <span className="host-pill">{host.label}</span>
+            <span className={`connection-dot connection-${connectionState}`} />
+          </div>
+        )}
       </div>
       <div className="session-card-body">
         <div className="session-card-header">{sessionName}</div>
@@ -167,6 +177,7 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
         <div className="session-card-status">
           <span className={`status-dot ${statusClass}`} />
           <span>{label}</span>
+          {host && connectionState && <span className="connection-label">{connectionState}</span>}
         </div>
         <div className="session-card-time">{timeAgo(session.lastActivity)}</div>
       </div>
