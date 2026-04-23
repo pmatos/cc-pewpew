@@ -8,6 +8,7 @@ export default defineConfig({
     build: {
       outDir: 'dist-electron/main',
       rollupOptions: {
+        external: ['electron', 'node-pty'],
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
         },
@@ -22,6 +23,7 @@ export default defineConfig({
         entry: resolve(__dirname, 'src/preload/index.ts'),
       },
       rollupOptions: {
+        external: ['electron'],
         output: {
           format: 'cjs',
           entryFileNames: 'index.js',
