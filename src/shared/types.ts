@@ -21,6 +21,9 @@ export interface Session {
   projectName: string
   worktreeName: string
   worktreePath: string
+  branch: string
+  prNumber?: number
+  issueNumber?: number
   pid: number
   tmuxSession: string
   status: SessionStatus

@@ -1,4 +1,4 @@
-import { execFile } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
 import { promisify } from 'util'
 import { readFileSync, writeFileSync, existsSync, realpathSync } from 'fs'
 import { join, basename, sep } from 'path'
@@ -25,11 +25,121 @@ import type { Session, SessionStatus } from '../shared/types'
 const execFileAsync = promisify(execFile)
 const SESSIONS_PATH = join(CONFIG_DIR, 'sessions.json')
 
+// Matches "issue37", "issue-37", "issue_37", "issue/37", "issue#37", "issue 37"
+// anywhere in a string. Case-insensitive. Captures the number.
+const ISSUE_REGEX = /issue[-_/#\s]?(\d+)/i
+
+function parseIssueNumber(...sources: (string | undefined)[]): number | undefined {
+  for (const src of sources) {
+    if (!src) continue
+    const m = src.match(ISSUE_REGEX)
+    if (m) return parseInt(m[1], 10)
+  }
+  return undefined
+}
+
+// Read the actual branch checked out in a worktree. Falls back to the
+// cc-pewpew-conventional name if the worktree is missing or git fails.
+function resolveBranchFromWorktree(worktreePath: string, worktreeName: string): string {
+  if (existsSync(worktreePath)) {
+    try {
+      const out = execFileSync('git', ['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'], {
+        encoding: 'utf-8',
+      }).trim()
+      if (out && out !== 'HEAD') return out
+    } catch {
+      // fall through to default
+    }
+  }
+  return `cc-pewpew/${worktreeName}`
+}
+
+// Extract the owner segment from a GitHub `origin` remote URL. Used to
+// disambiguate `gh pr list --head <branch>` results when a fork has opened a
+// PR whose head branch name collides with a local branch.
+function getOriginOwner(projectPath: string): string | undefined {
+  try {
+    const url = execFileSync('git', ['-C', projectPath, 'remote', 'get-url', 'origin'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim()
+    const m = url.match(/(?:[:/])([^/:]+)\/[^/]+?(?:\.git)?\/?$/)
+    return m?.[1]
+  } catch {
+    return undefined
+  }
+}
+
 interface SessionEntry {
   session: Session
 }
 
 const sessions = new Map<string, SessionEntry>()
+
+// Positive hits are cached forever; negative hits (no PR yet / gh transient
+// error) are retained only for NEGATIVE_CACHE_TTL_MS so a PR opened after the
+// session was created can be picked up without requiring an app restart.
+const NEGATIVE_CACHE_TTL_MS = 5 * 60 * 1000
+const prLookupCache = new Map<string, { value: number | null; checkedAt: number }>()
+
+async function lookupPrForBranch(projectPath: string, branch: string): Promise<number | undefined> {
+  const key = `${projectPath}::${branch}`
+  const cached = prLookupCache.get(key)
+  if (cached) {
+    if (cached.value !== null) return cached.value
+    if (Date.now() - cached.checkedAt < NEGATIVE_CACHE_TTL_MS) return undefined
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      'gh',
+      [
+        'pr',
+        'list',
+        '--head',
+        branch,
+        '--state',
+        'open',
+        '--json',
+        'number,headRepositoryOwner',
+        '--limit',
+        '10',
+      ],
+      { cwd: projectPath }
+    )
+    const parsed = JSON.parse(stdout) as {
+      number: number
+      headRepositoryOwner?: { login?: string } | null
+    }[]
+    // `gh pr list --head <branch>` filters by branch name only (owner:branch
+    // isn't supported), so in repos that accept fork PRs a common branch name
+    // like `main` or `fix` can return an unrelated PR. Prefer the entry whose
+    // head repo owner matches the local origin's owner; fall back to the top
+    // result so upstream clones tracking a contributor's branch (where the
+    // head owner differs from origin) still get a PR number.
+    const owner = getOriginOwner(projectPath)
+    const match = (owner && parsed.find((p) => p.headRepositoryOwner?.login === owner)) || parsed[0]
+    const num = match?.number
+    prLookupCache.set(key, { value: num ?? null, checkedAt: Date.now() })
+    return num
+  } catch {
+    // Don't cache transient gh failures — next call retries immediately.
+    return undefined
+  }
+}
+
+function resolvePrNumberAsync(sessionId: string): void {
+  const entry = sessions.get(sessionId)
+  if (!entry || entry.session.prNumber !== undefined) return
+  const { projectPath, branch } = entry.session
+  if (!branch) return
+  lookupPrForBranch(projectPath, branch).then((num) => {
+    if (num === undefined) return
+    const current = sessions.get(sessionId)
+    if (!current || current.session.prNumber !== undefined) return
+    current.session.prNumber = num
+    onSessionsChanged()
+  })
+}
 
 function persistSessions(): void {
   const data = Array.from(sessions.values()).map((e) => e.session)
@@ -55,8 +165,16 @@ function updateSession(id: string, status: SessionStatus): void {
   onSessionsChanged()
 }
 
+// Re-probe PR numbers for sessions that don't have one yet, so a PR opened
+// after session creation shows up without an app restart.
+const PR_REFRESH_INTERVAL_MS = 5 * 60 * 1000
+
 export function initSessionManager(): void {
-  // No-op — session manager now uses the window registry for IPC
+  setInterval(() => {
+    for (const entry of sessions.values()) {
+      if (entry.session.prNumber === undefined) resolvePrNumberAsync(entry.session.id)
+    }
+  }, PR_REFRESH_INTERVAL_MS).unref()
 }
 
 async function deriveLabel(worktreePath: string): Promise<string> {
@@ -139,6 +257,7 @@ async function adoptWorktree(
   const projectName = basename(projectPath)
   const worktreeName = label || (await deriveLabel(worktreePath))
   const tmuxSession = `cc-pewpew-${id}`
+  const branch = resolveBranchFromWorktree(worktreePath, worktreeName)
 
   await installHooks(worktreePath, { skipGitignore: true })
   createPty(id, worktreePath)
@@ -149,6 +268,8 @@ async function adoptWorktree(
     projectName,
     worktreeName,
     worktreePath: canonical,
+    branch,
+    issueNumber: parseIssueNumber(worktreeName, branch),
     pid: 0,
     tmuxSession,
     status: 'running',
@@ -164,6 +285,8 @@ async function adoptWorktree(
       onSessionsChanged()
     }
   })
+
+  resolvePrNumberAsync(id)
 
   onSessionsChanged()
 
@@ -410,7 +533,16 @@ export async function createPrSession(
     }
   }
 
-  return createSessionForWorktree(projectPath, worktreePath, worktreeName)
+  const session = await createSessionForWorktree(projectPath, worktreePath, worktreeName)
+  // We already know the PR number; set it directly so it shows immediately
+  // (the async lookup fired by adoptWorktree will no-op since prNumber is set).
+  session.prNumber = prNumber
+  // Prefer an issue number parsed from the PR title if the name/branch didn't yield one.
+  if (session.issueNumber === undefined) {
+    session.issueNumber = parseIssueNumber(prInfo.title)
+  }
+  onSessionsChanged()
+  return session
 }
 
 export function getSession(id: string): Session | undefined {
@@ -529,6 +661,22 @@ export function restoreSessions(): void {
       }
       // Migrate legacy symlink-form paths to canonical so renderer matches work.
       session.worktreePath = canonicalPath(session.worktreePath)
+      // Backfill / reconcile fields added in later versions. Read the real
+      // branch from git when the worktree exists — an earlier version of this
+      // code persisted an incorrect default that we self-heal. If the worktree
+      // is gone, keep whatever was persisted (or the default fallback).
+      if (existsSync(session.worktreePath)) {
+        session.branch = resolveBranchFromWorktree(session.worktreePath, session.worktreeName)
+      } else if (!session.branch) {
+        session.branch = `cc-pewpew/${session.worktreeName}`
+      }
+      if (session.issueNumber === undefined) {
+        session.issueNumber = parseIssueNumber(session.worktreeName, session.branch)
+      }
+      if (session.prNumber === undefined) {
+        const m = session.worktreeName.match(/^pr-(\d+)$/)
+        if (m) session.prNumber = parseInt(m[1], 10)
+      }
       session.lastActivity = Date.now()
       sessions.set(session.id, { session })
     }
@@ -557,6 +705,11 @@ export function restoreSessions(): void {
 
     if (recoveredCount > 0) {
       console.log(`Auto-recovered ${recoveredCount} session(s) after reboot`)
+    }
+
+    // Lazily resolve PR numbers for any restored session that doesn't have one
+    for (const session of data) {
+      if (session.prNumber === undefined) resolvePrNumberAsync(session.id)
     }
 
     onSessionsChanged()
