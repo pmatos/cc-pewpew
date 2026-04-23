@@ -42,7 +42,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout (full history for tagging)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -54,7 +54,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -138,7 +138,7 @@ jobs:
 
       - name: Upload build artifacts (for debugging / reruns)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-artifacts-${{ steps.bump.outputs.tag }}
           path: release-upload/
