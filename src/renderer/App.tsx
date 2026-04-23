@@ -18,6 +18,20 @@ export default function App() {
   const openHostsDialog = useHostsStore((s) => s.openDialog)
   const fetchHosts = useHostsStore((s) => s.fetchHosts)
 
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [sidebarWidth, setSidebarWidth] = useState(250)
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [activeSessionName, setActiveSessionName] = useState('')
+  const [morphPayload, setMorphPayload] = useState<ZoomOpenPayload | null>(null)
+
+  const handleZoomOpen = useCallback((payload: ZoomOpenPayload) => {
+    // Keep canvas rendered during the morph; mount DetailPane only on morph grown.
+    setMorphPayload(payload)
+  }, [])
+  const resizing = useRef(false)
+  const resizeStart = useRef({ x: 0, width: 0 })
+
   useEffect(() => {
     void fetchHosts()
   }, [fetchHosts])
@@ -37,20 +51,6 @@ export default function App() {
       }
     })
   }, [])
-
-  const [showCreateDialog, setShowCreateDialog] = useState(false)
-  const [newProjectName, setNewProjectName] = useState('')
-  const [sidebarWidth, setSidebarWidth] = useState(250)
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
-  const [activeSessionName, setActiveSessionName] = useState('')
-  const [morphPayload, setMorphPayload] = useState<ZoomOpenPayload | null>(null)
-
-  const handleZoomOpen = useCallback((payload: ZoomOpenPayload) => {
-    // Keep canvas rendered during the morph; mount DetailPane only on morph grown.
-    setMorphPayload(payload)
-  }, [])
-  const resizing = useRef(false)
-  const resizeStart = useRef({ x: 0, width: 0 })
 
   // Load sidebar width
   useEffect(() => {

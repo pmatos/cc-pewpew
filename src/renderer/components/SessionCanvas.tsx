@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, useLayoutEffect } from 'react'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
 import { useCanvasStore } from '../stores/canvas'
@@ -91,17 +91,18 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
   const panXRef = useRef(panX)
   const panYRef = useRef(panY)
   const zoomRef = useRef(zoom)
-  panXRef.current = panX
-  panYRef.current = panY
-  zoomRef.current = zoom
 
   // Zoom-to-open state
   const thresholdCrossedAtRef = useRef<number | null>(null)
   const isAnimatingPanRef = useRef(false)
   const zoomOpenFiredRef = useRef(false)
   const prevMorphActiveRef = useRef(false)
-  const broadcastDialogOpenRef = useRef(broadcastDialogOpen)
-  broadcastDialogOpenRef.current = broadcastDialogOpen
+
+  useLayoutEffect(() => {
+    panXRef.current = panX
+    panYRef.current = panY
+    zoomRef.current = zoom
+  }, [panX, panY, zoom])
 
   // Reset the zoom-open latch when a morph ends without the session opening
   // (cancel via Escape). If the session opens, SessionCanvas unmounts so this
@@ -126,6 +127,30 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
     return map
   }, [sessions])
 
+  const { positions: resolvedClusterPositions, hasDefaultedPositions } = useMemo(() => {
+    const positions = { ...clusterPositions }
+    let changed = false
+    let idx = Object.keys(positions).length
+
+    for (const projectPath of clusters.keys()) {
+      if (!positions[projectPath]) {
+        positions[projectPath] = {
+          x: (idx % 3) * (CLUSTER_WIDTH + CLUSTER_GAP) + CLUSTER_GAP,
+          y: Math.floor(idx / 3) * 400 + CLUSTER_GAP,
+        }
+        idx++
+        changed = true
+      }
+    }
+
+    return { positions, hasDefaultedPositions: changed }
+  }, [clusters, clusterPositions])
+  const clusterPositionsRef = useRef<Record<string, { x: number; y: number }>>({})
+
+  useLayoutEffect(() => {
+    clusterPositionsRef.current = resolvedClusterPositions
+  }, [resolvedClusterPositions])
+
   // Load persisted state
   useEffect(() => {
     Promise.all([window.api.getCanvasState(), window.api.getClusterPositions()]).then(
@@ -143,34 +168,16 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
     )
   }, [])
 
-  // Assign default positions to new clusters
+  // Persist default positions for new clusters.
   useEffect(() => {
-    if (!loaded) return
-    let changed = false
-    const updated = { ...clusterPositions }
-    let idx = Object.keys(updated).length
-
-    for (const projectPath of clusters.keys()) {
-      if (!updated[projectPath]) {
-        updated[projectPath] = {
-          x: (idx % 3) * (CLUSTER_WIDTH + CLUSTER_GAP) + CLUSTER_GAP,
-          y: Math.floor(idx / 3) * 400 + CLUSTER_GAP,
-        }
-        idx++
-        changed = true
-      }
-    }
-
-    if (changed) {
-      setClusterPositions(updated)
-      window.api.saveClusterPositions(updated)
-    }
-  }, [clusters, loaded, clusterPositions])
+    if (!loaded || !hasDefaultedPositions) return
+    window.api.saveClusterPositions(resolvedClusterPositions)
+  }, [hasDefaultedPositions, loaded, resolvedClusterPositions])
 
   // Register panToCluster in canvas store
   useEffect(() => {
     const panToClusterFn = (projectPath: string) => {
-      const pos = clusterPositions[projectPath]
+      const pos = resolvedClusterPositions[projectPath]
       if (!pos) return
       const viewport = viewportRef.current
       if (!viewport) return
@@ -215,7 +222,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
     }
 
     setPanToCluster(panToClusterFn)
-  }, [clusterPositions, setPanToCluster])
+  }, [resolvedClusterPositions, setPanToCluster])
 
   // Track viewport size. Depends on `loaded` because pre-load renders null (ref
   // is unattached); effect must re-run once the DOM mounts.
@@ -358,10 +365,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
       // Zoom-to-open detection (wheel-only path).
       // Guards: no modal, not mid-drag, no automated pan, not already fired.
       const armed =
-        !broadcastDialogOpenRef.current &&
-        !dragging &&
-        !isAnimatingPanRef.current &&
-        !zoomOpenFiredRef.current
+        !broadcastDialogOpen && !dragging && !isAnimatingPanRef.current && !zoomOpenFiredRef.current
       if (!armed) {
         thresholdCrossedAtRef.current = null
         return
@@ -413,7 +417,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
         thumbnail: thumbnails[sessionId],
       })
     },
-    [panX, panY, persistCanvas, dragging, sessions, thumbnails, onZoomOpen]
+    [panX, panY, persistCanvas, broadcastDialogOpen, dragging, sessions, thumbnails, onZoomOpen]
   )
 
   const handleSelect = useCallback(
@@ -465,12 +469,14 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
   }, [dragging, zoom, panX, panY, persistCanvas])
 
   const handleClusterDrag = useCallback((projectPath: string, pos: { x: number; y: number }) => {
-    setClusterPositions((prev) => ({ ...prev, [projectPath]: pos }))
+    const next = { ...clusterPositionsRef.current, [projectPath]: pos }
+    clusterPositionsRef.current = next
+    setClusterPositions(next)
   }, [])
 
   const handleClusterDragEnd = useCallback(() => {
-    window.api.saveClusterPositions(clusterPositions)
-  }, [clusterPositions])
+    window.api.saveClusterPositions(clusterPositionsRef.current)
+  }, [])
 
   if (!loaded) return null
 
@@ -505,7 +511,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
             sessions={clusterSessions}
             thumbnails={thumbnails}
             accentColor={hashColor(projectPath)}
-            position={clusterPositions[projectPath] || { x: 0, y: 0 }}
+            position={resolvedClusterPositions[projectPath] || { x: 0, y: 0 }}
             zoom={zoom}
             isOrphaned={!knownPaths.has(projectPath)}
             onDrag={handleClusterDrag}
@@ -519,7 +525,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
         clusters={Array.from(clusters.entries()).map(([projectPath, clusterSessions]) => ({
           projectPath,
           projectName: clusterSessions[0].projectName,
-          position: clusterPositions[projectPath] || { x: 0, y: 0 },
+          position: resolvedClusterPositions[projectPath] || { x: 0, y: 0 },
           color: hashColor(projectPath),
         }))}
         zoom={zoom}

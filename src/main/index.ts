@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { join, resolve } from 'path'
 import { copyFileSync, mkdirSync, chmodSync } from 'fs'
-import installExtension, { REACT_DEVELOPER_TOOLS } from 'electron-devtools-installer'
 import {
   getConfig,
   saveConfig,
@@ -126,6 +125,8 @@ function createWindow(): BrowserWindow {
 app.whenReady().then(async () => {
   if (process.env.ELECTRON_RENDERER_URL) {
     try {
+      const { default: installExtension, REACT_DEVELOPER_TOOLS } =
+        await import('electron-devtools-installer')
       await installExtension(REACT_DEVELOPER_TOOLS)
     } catch {
       // React DevTools install can fail in some environments
