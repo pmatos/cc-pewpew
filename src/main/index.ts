@@ -48,6 +48,7 @@ import {
   addRemoteProject as persistRemoteProject,
   removeRemoteProject,
   toProject as remoteToProject,
+  validateRemotePath,
 } from './remote-project-registry'
 import type { DiffMode, ValidateRemoteRepoReason } from '../shared/types'
 
@@ -164,7 +165,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('projects:add-remote', async (_event, input: { hostId: string; path: string }) => {
     const host = getHost(input.hostId)
     if (!host) throw new Error('Unknown host')
-    const result = await validateRemoteRepo(host.alias, input.path)
+    // Normalize the path before the SSH probe so the remote check, dedup,
+    // and persistence all see the same canonical form.
+    const path = validateRemotePath(input.path)
+    const result = await validateRemoteRepo(host.alias, path)
     if (!result.ok) {
       const labels: Record<ValidateRemoteRepoReason, string> = {
         'not-a-git-repo': 'Not a git repository',
@@ -178,7 +182,7 @@ app.whenReady().then(async () => {
     }
     return persistRemoteProject({
       hostId: input.hostId,
-      path: input.path,
+      path,
       repoFingerprint: result.fingerprint,
     })
   })

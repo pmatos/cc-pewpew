@@ -63,6 +63,20 @@ describe('validateRemoteRepo', () => {
     expect(result.message).toMatch(/git repository/)
   })
 
+  it('rejects subdirectories with the probe stderr message', async () => {
+    nextResult = {
+      stdout: '',
+      stderr: 'Remote path must be the repository root (got subdirectory: sub/)',
+      error: { name: 'Error', message: 'x', code: 2 } as unknown as NodeJS.ErrnoException,
+      exitCode: 2,
+    }
+    const result = await validateRemoteRepo('dev', '/srv/repo/sub')
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('not-a-git-repo')
+    expect(result.message).toMatch(/repository root/)
+    expect(result.message).toMatch(/sub\//)
+  })
+
   it('returns auth-failed on Permission denied stderr', async () => {
     nextResult = {
       stdout: '',

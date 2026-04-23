@@ -71,6 +71,17 @@ describe('validateRemotePath', () => {
   it('trims whitespace', () => {
     expect(validateRemotePath('  /repo  ')).toBe('/repo')
   })
+
+  it('strips a trailing slash but preserves the root "/"', () => {
+    expect(validateRemotePath('/srv/repo/')).toBe('/srv/repo')
+    expect(validateRemotePath('/')).toBe('/')
+  })
+
+  it('collapses duplicate slashes and resolves "." / ".."', () => {
+    expect(validateRemotePath('/srv//repo')).toBe('/srv/repo')
+    expect(validateRemotePath('/srv/./repo')).toBe('/srv/repo')
+    expect(validateRemotePath('/srv/a/../repo')).toBe('/srv/repo')
+  })
 })
 
 describe('addRemoteProject', () => {
@@ -106,6 +117,20 @@ describe('addRemoteProject', () => {
     const host = seedHost()
     addRemoteProject({ hostId: host.hostId, path: '/srv/repo' })
     expect(() => addRemoteProject({ hostId: host.hostId, path: '/srv/repo' })).toThrow(
+      /already registered/
+    )
+  })
+
+  it('rejects duplicates that differ only by trailing slash or "." segments', () => {
+    const host = seedHost()
+    addRemoteProject({ hostId: host.hostId, path: '/srv/repo' })
+    expect(() => addRemoteProject({ hostId: host.hostId, path: '/srv/repo/' })).toThrow(
+      /already registered/
+    )
+    expect(() => addRemoteProject({ hostId: host.hostId, path: '/srv/./repo' })).toThrow(
+      /already registered/
+    )
+    expect(() => addRemoteProject({ hostId: host.hostId, path: '/srv/a/../repo' })).toThrow(
       /already registered/
     )
   })

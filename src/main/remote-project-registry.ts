@@ -13,7 +13,11 @@ export function validateRemotePath(raw: string): string {
   if (!path.startsWith('/')) throw new Error('Path must be absolute (start with "/")')
   if (path.startsWith('-')) throw new Error('Path must not start with "-"')
   if (path.includes('\x00')) throw new Error('Path must not contain NUL')
-  return path
+  // Collapse `.`, `..`, and duplicate slashes, then strip any trailing slash
+  // (preserving the root `/`). Keeps duplicate-detection robust against
+  // equivalent forms like `/srv/repo` vs `/srv/repo/` vs `/srv/a/../repo`.
+  const normalized = posix.normalize(path)
+  return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized
 }
 
 export function listRemoteProjects(): RemoteProject[] {
