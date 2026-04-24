@@ -265,11 +265,19 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('sessions:kill', async (_event, id: string) => {
-    await killSession(id)
+    try {
+      await killSession(id)
+    } catch (err) {
+      console.error(`Failed to kill session ${id}:`, err)
+    }
   })
 
   ipcMain.handle('sessions:revive', async (_event, id: string) => {
-    await reviveSession(id)
+    try {
+      await reviveSession(id)
+    } catch (err) {
+      console.error(`Failed to revive session ${id}:`, err)
+    }
   })
 
   ipcMain.handle('sessions:remove-worktree', async (_event, id: string) => {
@@ -277,7 +285,11 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('sessions:remove', async (_event, id: string) => {
-    await removeSession(id)
+    try {
+      await removeSession(id)
+    } catch (err) {
+      console.error(`Failed to remove session ${id}:`, err)
+    }
   })
 
   ipcMain.handle('sessions:kill-batch', async (_event, ids: string[]) => {

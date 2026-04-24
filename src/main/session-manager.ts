@@ -103,17 +103,27 @@ function getRequiredHost(hostId: string): Host {
   return host
 }
 
+// Contract: on success the caller owns an incremented refcount on the host
+// SSH runtime and must call releaseHostConnection eventually. Retaining here
+// (after ensureHostConnection puts the runtime in the map) also covers
+// bootstrap failures, which previously left a live runtime with refs=0.
 async function prepareRemoteHost(host: Host): Promise<{ notifyScriptPath: string }> {
   const localSocketPath = listenHookServerForHost(host.hostId)
   const { remoteSocketPath } = await ensureHostConnection(host, localSocketPath)
-  const bootstrap = await bootstrapHost(
-    host.hostId,
-    {
-      exec: (argv, opts) => execRemote(host, argv, opts),
-    },
-    remoteSocketPath
-  )
-  return { notifyScriptPath: bootstrap.notifyScriptPath }
+  retainHostConnection(host.hostId)
+  try {
+    const bootstrap = await bootstrapHost(
+      host.hostId,
+      {
+        exec: (argv, opts) => execRemote(host, argv, opts),
+      },
+      remoteSocketPath
+    )
+    return { notifyScriptPath: bootstrap.notifyScriptPath }
+  } catch (err) {
+    await releaseHostConnection(host.hostId).catch(() => undefined)
+    throw err
+  }
 }
 
 async function expectRemoteOk(host: Host, argv: string[], message: string): Promise<string> {
@@ -383,11 +393,10 @@ async function createRemoteSession(
   const tmuxSession = `cc-pewpew-${id}`
   const branchName = `cc-pewpew/${worktreeName}`
 
+  // prepareRemoteHost retains the SSH runtime on success; we own the ref and
+  // release it at the end (or in catch). createRemotePty takes its own retain
+  // on success, which is what keeps the connection alive past this function.
   const { notifyScriptPath } = await prepareRemoteHost(host)
-  // Own the SSH runtime while we run the failure-prone setup. createRemotePty
-  // takes its own retain on success (paired with the PTY lifecycle); on
-  // failure our release drops the orphaned connection.
-  retainHostConnection(hostId)
   let branch: string
   try {
     const addWithBranch = await execRemote(host, [
@@ -574,8 +583,9 @@ export async function reviveSession(id: string): Promise<void> {
     const hostId = session.hostId
     session.connectionState = 'connecting'
     onSessionsChanged()
+    // prepareRemoteHost retains the SSH runtime on success; we release it at
+    // the end/in catch. createRemotePty/reattachRemotePty take over on success.
     await prepareRemoteHost(host)
-    retainHostConnection(hostId)
     try {
       if (await hasRemoteTmuxSession(id, host)) {
         await reattachRemotePty(id, host)
