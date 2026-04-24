@@ -623,8 +623,11 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
 
   const promise = doReconnectRemoteSession(id)
   inflightReconnects.set(id, promise)
+  let reconnectError: unknown = undefined
   try {
     await promise
+  } catch (err) {
+    reconnectError = err
   } finally {
     inflightReconnects.delete(id)
   }
@@ -632,17 +635,22 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
   // it. `probePendingSessionsOnHost` is idempotent so concurrent clicks on
   // multiple cards of the same host still collapse to a single batch.
   //
-  // Trigger whenever the host control connection is live, not when the clicked
-  // session is live: if the first click landed on a session whose remote tmux
-  // was already gone (session ends `dead`), the host itself is reachable, so
-  // we still want to reconcile the other pending sessions on it.
+  // Always attempt the batch probe, even when the clicked reconnect rejected:
+  // - on success (runtime `live`), we reconcile siblings over the now-live
+  //   ControlMaster
+  // - on auth-failed / unreachable, the batch's short-circuit cascades that
+  //   state to every pending sibling without any new SSH I/O (spec AC #8)
+  // Skip only when there's no host at all (orphaned hostId / missing registry
+  // entry): there is nothing to probe.
   const entry = sessions.get(id)
   const hostId = entry?.session.hostId
-  if (hostId && runtimeStateFor(hostId) === 'live') {
+  const runtimeState = hostId ? runtimeStateFor(hostId) : undefined
+  if (hostId && runtimeState) {
     probePendingSessionsOnHost(hostId).catch((err) => {
       console.error(`probePendingSessionsOnHost(${hostId}) failed:`, err)
     })
   }
+  if (reconnectError !== undefined) throw reconnectError
 }
 
 async function doReconnectRemoteSession(id: string): Promise<void> {

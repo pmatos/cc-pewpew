@@ -377,6 +377,32 @@ describe('reconnectRemoteSession', () => {
     expect(state.reattachRemotePtyCalls).toHaveLength(1)
   })
 
+  it('auth-failed reconnect cascades to sibling pending sessions without new SSH', async () => {
+    writeSessionsJson([
+      baseRemoteSession({ id: 'clicked', hostId: 'h1', status: 'idle' }),
+      baseRemoteSession({ id: 'sibling1', hostId: 'h1', status: 'idle' }),
+      baseRemoteSession({ id: 'sibling2', hostId: 'h1', status: 'idle' }),
+    ] as Session[])
+    state.ensureHostConnectionThrows = {
+      message: 'Permission denied',
+      runtimeStateAfter: 'auth-failed',
+    }
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    await expect(sm.reconnectRemoteSession('clicked')).rejects.toThrow(/Permission denied/)
+    // Let the fire-and-forget batch probe complete.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const byId = Object.fromEntries(sm.getSessions().map((s) => [s.id, s]))
+    expect(byId['clicked'].connectionState).toBe('auth-failed')
+    expect(byId['sibling1'].connectionState).toBe('auth-failed')
+    expect(byId['sibling2'].connectionState).toBe('auth-failed')
+    // Only one SSH attempt (the clicked one). No probe calls for siblings.
+    expect(state.ensureHostConnectionCalls).toEqual(['h1'])
+    expect(state.execRemoteCalls).toEqual([])
+  })
+
   it('SSH probe failure on reconnect → unreachable, NOT dead', async () => {
     writeSessionsJson([baseRemoteSession({ id: 'r1', status: 'idle' })])
     state.probeRemoteTmuxResult.set('r1', 'unreachable')
