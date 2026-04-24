@@ -642,14 +642,21 @@ export async function killSession(id: string): Promise<void> {
   updateSession(id, 'dead')
 }
 
+interface ReconnectOutcome {
+  state: HostConnectionState | undefined
+  // True when the caller inherits an outstanding retain on the host runtime —
+  // the sibling batch probe consumes it and releases at the end. This keeps
+  // the ControlMaster alive across the doReconnect → batch boundary so each
+  // sibling probe reuses the existing ControlPath instead of spawning a
+  // fresh SSH handshake (which would also fail independently on a flaky
+  // host).
+  retainedForBatch: boolean
+}
+
 // In-flight reconnect promises keyed by session id. Two concurrent clicks on
 // the same pending card (fast double-click, or a click that races the
-// auto-fired batch probe) coalesce into one SSH attempt. The resolved value
-// is the host's runtime state at the moment the reconnect finished (before
-// any refcount drop that might tear the runtime down) — the outer caller
-// uses it as a `stateHint` for `probePendingSessionsOnHost` so the sibling
-// cascade still works after the runtime entry has been released.
-const inflightReconnects = new Map<string, Promise<HostConnectionState | undefined>>()
+// auto-fired batch probe) coalesce into one SSH attempt.
+const inflightReconnects = new Map<string, Promise<ReconnectOutcome>>()
 
 // Probe-only reconnect for a remote session. If the remote tmux session is
 // present we reattach and mark `live`; if it is gone we mark the session
@@ -670,14 +677,16 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
   const promise = doReconnectRemoteSession(id)
   inflightReconnects.set(id, promise)
   let reconnectError: unknown = undefined
-  let successState: HostConnectionState | undefined
+  let outcome: ReconnectOutcome | undefined
   try {
-    successState = await promise
+    outcome = await promise
   } catch (err) {
     reconnectError = err
   } finally {
     inflightReconnects.delete(id)
   }
+  const successState = outcome?.state
+  const retainedForBatch = outcome?.retainedForBatch ?? false
   // Fire-and-forget the sibling batch probe — the caller should not block on
   // it. `probePendingSessionsOnHost` is idempotent so concurrent clicks on
   // multiple cards of the same host still collapse to a single batch.
@@ -692,27 +701,35 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
   // entry) or we couldn't determine any state — there's nothing to probe.
   const entry = sessions.get(id)
   const hostId = entry?.session.hostId
-  if (hostId) {
-    // Prefer the state captured inside doReconnectRemoteSession BEFORE the
-    // final `releaseHostConnection` ran. For `absent` / `unreachable`
-    // outcomes the PTY doesn't retain the runtime, so release drops refcount
-    // to zero and stopHostConnection deletes the runtime entry — a fresh
-    // runtimeStateFor lookup here would therefore return `undefined`.
-    // Similarly, prepareRemoteHost stashes the pre-teardown state on the
-    // error so the catch-path cascade still works.
-    const tagged = (reconnectError as { hostConnectionState?: HostConnectionState } | null)
-      ?.hostConnectionState
-    const stateHint = successState ?? tagged ?? runtimeStateFor(hostId)
-    if (stateHint) {
-      probePendingSessionsOnHost(hostId, stateHint).catch((err) => {
+  const tagged = (reconnectError as { hostConnectionState?: HostConnectionState } | null)
+    ?.hostConnectionState
+  const stateHint = successState ?? tagged ?? (hostId ? runtimeStateFor(hostId) : undefined)
+  if (hostId && stateHint) {
+    // Fire-and-forget: user's first click should not wait for sibling
+    // reconciliation. When doReconnect left us an outstanding retain, the
+    // batch consumes it and releases at the end — that keeps the
+    // ControlMaster alive across the probe so siblings reuse one SSH
+    // handshake instead of spawning one per card.
+    ;(async () => {
+      try {
+        await probePendingSessionsOnHost(hostId, stateHint)
+      } catch (err) {
         console.error(`probePendingSessionsOnHost(${hostId}) failed:`, err)
-      })
-    }
+      } finally {
+        if (retainedForBatch) {
+          await releaseHostConnection(hostId).catch(() => undefined)
+        }
+      }
+    })()
+  } else if (hostId && retainedForBatch) {
+    // No batch to run but doReconnect handed us an outstanding retain — must
+    // release or we leak the runtime.
+    await releaseHostConnection(hostId).catch(() => undefined)
   }
   if (reconnectError !== undefined) throw reconnectError
 }
 
-async function doReconnectRemoteSession(id: string): Promise<HostConnectionState | undefined> {
+async function doReconnectRemoteSession(id: string): Promise<ReconnectOutcome> {
   const entry = sessions.get(id)
   if (!entry) throw new Error(`Session ${id} not found`)
   const session = entry.session
@@ -779,14 +796,15 @@ async function doReconnectRemoteSession(id: string): Promise<HostConnectionState
   // leaves it false throws inside prepareRemoteHost and goes through the
   // catch block's `throw err`.
   //
-  // Snapshot the runtime state BEFORE the release: on `absent` or
-  // `unreachable` outcomes the PTY did not take a retain, so this release
-  // drops the refcount to zero and stopHostConnection deletes the entry. The
-  // outer reconnectRemoteSession uses the returned state as the sibling
-  // batch probe's stateHint.
+  // Do NOT release here: the caller (reconnectRemoteSession) owns the retain
+  // and transfers it to the sibling batch probe, which releases at the end.
+  // This keeps the ControlMaster alive across the boundary so per-sibling
+  // `tmux has-session` calls reuse the existing ControlPath instead of
+  // spawning fresh SSH handshakes (which would also fail independently on a
+  // flaky host). The snapshot of runtime state captured here is still
+  // accurate — the release hasn't happened yet.
   const finalState = runtimeStateFor(hostId)
-  await releaseHostConnection(hostId).catch(() => undefined)
-  return finalState
+  return { state: finalState, retainedForBatch: true }
 }
 
 // Eager batch probe for remaining `pending` sessions on a host that just

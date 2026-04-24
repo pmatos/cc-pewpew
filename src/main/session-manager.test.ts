@@ -444,12 +444,11 @@ describe('reconnectRemoteSession', () => {
     expect(state.reattachRemotePtyCalls).toEqual([])
   })
 
-  it('triggers sibling batch probe even when absent-outcome release tore down the runtime', async () => {
-    // Regression: on 'absent' path the PTY does not retain, so the final
-    // releaseHostConnection drops refcount to 0 → stopHostConnection deletes
-    // the runtime entry. A post-reconnect lookup via runtimeStateFor would
-    // therefore return undefined and skip the batch probe. We must capture
-    // the state BEFORE the release.
+  it('keeps host runtime alive through sibling batch probe on absent outcome', async () => {
+    // Regression guard for two issues in one: (a) sibling probe must still
+    // run when the clicked session's outcome is `absent` (no PTY retain), and
+    // (b) the ControlMaster must stay up through the batch so sibling probes
+    // reuse the existing ControlPath instead of spawning fresh SSH per card.
     writeSessionsJson([
       baseRemoteSession({ id: 'first', hostId: 'h1', status: 'idle' }),
       baseRemoteSession({ id: 'sibling', hostId: 'h1', status: 'idle' }),
@@ -462,12 +461,36 @@ describe('reconnectRemoteSession', () => {
     await sm.reconnectRemoteSession('first')
     await new Promise((resolve) => setTimeout(resolve, 20))
 
-    // Runtime should now be deleted (no PTY retained it on the absent path).
-    expect(state.runtimeStates.has('h1')).toBe(false)
-    // Sibling still got probed and transitioned to live.
     const byId = Object.fromEntries(sm.getSessions().map((s) => [s.id, s]))
     expect(byId['first'].status).toBe('dead')
     expect(byId['sibling'].connectionState).toBe('live')
+    // Only one ensureHostConnection call — siblings reused the ControlMaster
+    // from the clicked session's reconnect (one SSH handshake, not N).
+    expect(state.ensureHostConnectionCalls).toEqual(['h1'])
+    // Sibling's reattach kept the runtime alive (refs=1 from sibling PTY).
+    // The test would have failed if doReconnect released before the batch
+    // probed siblings, because execRemote would then fall off the ControlPath
+    // fast path and classifySshExit… actually, a more direct check: only one
+    // SSH connection was opened total.
+    expect(state.runtimeRefs.get('h1')).toBe(1)
+  })
+
+  it('releases retain when absent outcome has no sibling to retain the runtime', async () => {
+    // Only one session on the host; clicked reconnect ends `absent`. After
+    // the batch completes with no live siblings, the retain chain unwinds to
+    // zero and the runtime is torn down.
+    writeSessionsJson([
+      baseRemoteSession({ id: 'lonely', hostId: 'h1', status: 'idle' }),
+    ] as Session[])
+    state.probeRemoteTmuxResult.set('lonely', 'absent')
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    await sm.reconnectRemoteSession('lonely')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(state.runtimeStates.has('h1')).toBe(false)
+    expect(state.runtimeRefs.has('h1')).toBe(false)
   })
 
   it('triggers sibling batch probe even when first session ends dead (host is live)', async () => {
