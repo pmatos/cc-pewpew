@@ -139,7 +139,11 @@ vi.mock('./host-connection', () => ({
   },
   retainHostConnection: vi.fn(),
   releaseHostConnection: vi.fn(async () => undefined),
-  stopHostConnection: vi.fn(async () => undefined),
+  // Match production: stopHostConnection deletes the runtime entry, so any
+  // caller reading runtimeStateFor(hostId) AFTER stop sees `undefined`.
+  stopHostConnection: vi.fn(async (hostId: string) => {
+    state.runtimeStates.delete(hostId)
+  }),
   runtimeStateFor: (hostId: string) => state.runtimeStates.get(hostId),
   classifyConnectionFailure: (_code: number | null, _stderr: string) => 'offline',
 }))

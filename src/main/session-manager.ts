@@ -36,6 +36,7 @@ import {
   releaseHostConnection,
   stopHostConnection,
   runtimeStateFor,
+  type HostConnectionState,
 } from './host-connection'
 import { bootstrapHost } from './host-bootstrap'
 import type { Host, RemoteProject, Session, SessionStatus } from '../shared/types'
@@ -118,10 +119,21 @@ async function prepareRemoteHost(host: Host): Promise<{ notifyScriptPath: string
   try {
     ;({ remoteSocketPath } = await ensureHostConnection(host, localSocketPath))
   } catch (err) {
-    // SSH couldn't start. Tear down the host runtime (which runtimeFor already
-    // registered) so the hook-server teardown callback fires and we don't leak
-    // the per-host listener across repeated failed startups.
+    // SSH couldn't start. Capture the runtime state BEFORE the teardown wipes
+    // the entry so callers can still classify auth-failed / unreachable —
+    // stopHostConnection does `runtimes.delete(hostId)` and a later
+    // `runtimeStateFor` would otherwise return `undefined`.
+    const capturedState = runtimeStateFor(host.hostId)
+    // Tear down the host runtime (which runtimeFor already registered) so the
+    // hook-server teardown callback fires and we don't leak the per-host
+    // listener across repeated failed startups.
     await stopHostConnection(host.hostId).catch(() => undefined)
+    if (capturedState === 'auth-failed' || capturedState === 'unreachable') {
+      const wrapped = err instanceof Error ? err : new Error(String(err))
+      ;(wrapped as Error & { hostConnectionState?: HostConnectionState }).hostConnectionState =
+        capturedState
+      throw wrapped
+    }
     throw err
   }
   retainHostConnection(host.hostId)
@@ -644,11 +656,19 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
   // entry): there is nothing to probe.
   const entry = sessions.get(id)
   const hostId = entry?.session.hostId
-  const runtimeState = hostId ? runtimeStateFor(hostId) : undefined
-  if (hostId && runtimeState) {
-    probePendingSessionsOnHost(hostId).catch((err) => {
-      console.error(`probePendingSessionsOnHost(${hostId}) failed:`, err)
-    })
+  if (hostId) {
+    // Prefer the state tagged onto the error by prepareRemoteHost — the
+    // runtime may have been deleted by stopHostConnection, so a direct
+    // runtimeStateFor lookup here would be `undefined` for the very cases
+    // (auth-failed / unreachable) the batch's short-circuit needs to catch.
+    const tagged = (reconnectError as { hostConnectionState?: HostConnectionState } | null)
+      ?.hostConnectionState
+    const stateHint = tagged ?? runtimeStateFor(hostId)
+    if (stateHint) {
+      probePendingSessionsOnHost(hostId, stateHint).catch((err) => {
+        console.error(`probePendingSessionsOnHost(${hostId}) failed:`, err)
+      })
+    }
   }
   if (reconnectError !== undefined) throw reconnectError
 }
@@ -696,7 +716,13 @@ async function doReconnectRemoteSession(id: string): Promise<void> {
       onSessionsChanged()
     }
   } catch (err) {
-    const runtimeState = runtimeStateFor(hostId)
+    // Prefer the state captured by prepareRemoteHost (attached to the error
+    // before stopHostConnection wipes the runtime entry). Fall back to the
+    // live runtime when the failure happened after prepareRemoteHost returned
+    // (e.g. bootstrap / PTY attach step).
+    const tagged = (err as { hostConnectionState?: HostConnectionState } | null)
+      ?.hostConnectionState
+    const runtimeState = tagged ?? runtimeStateFor(hostId)
     if (runtimeState === 'auth-failed') {
       session.connectionState = 'auth-failed'
     } else if (runtimeState === 'unreachable') {
@@ -724,10 +750,13 @@ async function doReconnectRemoteSession(id: string): Promise<void> {
 // host-auth-failed with no further attempts".
 const inflightBatchProbes = new Map<string, Promise<void>>()
 
-export async function probePendingSessionsOnHost(hostId: string): Promise<void> {
+export async function probePendingSessionsOnHost(
+  hostId: string,
+  stateHint?: HostConnectionState
+): Promise<void> {
   const existing = inflightBatchProbes.get(hostId)
   if (existing) return existing
-  const promise = doProbePendingSessionsOnHost(hostId)
+  const promise = doProbePendingSessionsOnHost(hostId, stateHint)
   inflightBatchProbes.set(hostId, promise)
   try {
     await promise
@@ -736,7 +765,10 @@ export async function probePendingSessionsOnHost(hostId: string): Promise<void> 
   }
 }
 
-async function doProbePendingSessionsOnHost(hostId: string): Promise<void> {
+async function doProbePendingSessionsOnHost(
+  hostId: string,
+  stateHint?: HostConnectionState
+): Promise<void> {
   const host = getHost(hostId)
   if (!host) return
 
@@ -748,8 +780,12 @@ async function doProbePendingSessionsOnHost(hostId: string): Promise<void> {
   }
   if (pending.length === 0) return
 
-  // Short-circuit the cascade if the runtime is known-failed.
-  const runtime = runtimeStateFor(hostId)
+  // Short-circuit the cascade if the runtime is known-failed. Prefer
+  // stateHint: on an ensureHostConnection failure the runtime entry has been
+  // deleted by stopHostConnection, so runtimeStateFor would return undefined
+  // and we'd fall through to the probe loop — defeating the "no further
+  // attempts" contract on auth-failed cascades.
+  const runtime = stateHint ?? runtimeStateFor(hostId)
   if (runtime === 'auth-failed' || runtime === 'unreachable') {
     for (const s of pending) s.connectionState = runtime
     onSessionsChanged()
