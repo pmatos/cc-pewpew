@@ -41,7 +41,15 @@ import {
 } from './session-manager'
 import { parseDiff, synthesizeUntrackedFile } from './diff-parser'
 import { listHosts, addHost, updateHost, deleteHost, getHost } from './host-registry'
-import { testConnection, validateRemoteRepo } from './host-connection'
+import {
+  testConnection,
+  validateRemoteRepo,
+  stopAllHostConnections,
+  stopHostConnection,
+  setOnHostConnectionStopped,
+} from './host-connection'
+import { invalidateBootstrap } from './host-bootstrap'
+import { stopHookServerForHost } from './hook-server'
 import {
   listRemoteProjects,
   addRemoteProject as persistRemoteProject,
@@ -211,9 +219,12 @@ app.whenReady().then(async () => {
     await shell.openPath(path)
   })
 
-  ipcMain.handle('sessions:create', async (_event, projectPath: string, name?: string) => {
-    return createSession(projectPath, name)
-  })
+  ipcMain.handle(
+    'sessions:create',
+    async (_event, projectPath: string, name?: string, hostId?: string | null) => {
+      return createSession(projectPath, name, hostId ?? null)
+    }
+  )
 
   ipcMain.handle('sessions:create-pr', async (_event, projectPath: string, prNumber: number) => {
     return createPrSession(projectPath, prNumber)
@@ -255,12 +266,26 @@ app.whenReady().then(async () => {
     return getSessions()
   })
 
-  ipcMain.handle('sessions:kill', (_event, id: string) => {
-    killSession(id)
+  // Single-session handlers log and re-throw so the renderer can react (e.g.
+  // DetailPane.handleRevive clears its "Reviving..." state on rejection).
+  // Batch handlers below swallow per-session errors so one failure doesn't
+  // abort a multi-select operation.
+  ipcMain.handle('sessions:kill', async (_event, id: string) => {
+    try {
+      await killSession(id)
+    } catch (err) {
+      console.error(`Failed to kill session ${id}:`, err)
+      throw err
+    }
   })
 
-  ipcMain.handle('sessions:revive', (_event, id: string) => {
-    reviveSession(id)
+  ipcMain.handle('sessions:revive', async (_event, id: string) => {
+    try {
+      await reviveSession(id)
+    } catch (err) {
+      console.error(`Failed to revive session ${id}:`, err)
+      throw err
+    }
   })
 
   ipcMain.handle('sessions:remove-worktree', async (_event, id: string) => {
@@ -268,17 +293,28 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('sessions:remove', async (_event, id: string) => {
-    await removeSession(id)
+    try {
+      await removeSession(id)
+    } catch (err) {
+      console.error(`Failed to remove session ${id}:`, err)
+      throw err
+    }
   })
 
-  ipcMain.handle('sessions:kill-batch', (_event, ids: string[]) => {
-    for (const id of ids) killSession(id)
-  })
-
-  ipcMain.handle('sessions:revive-batch', (_event, ids: string[]) => {
+  ipcMain.handle('sessions:kill-batch', async (_event, ids: string[]) => {
     for (const id of ids) {
       try {
-        reviveSession(id)
+        await killSession(id)
+      } catch (err) {
+        console.error(`Failed to kill session ${id}:`, err)
+      }
+    }
+  })
+
+  ipcMain.handle('sessions:revive-batch', async (_event, ids: string[]) => {
+    for (const id of ids) {
+      try {
+        await reviveSession(id)
       } catch (err) {
         console.error(`Failed to revive session ${id}:`, err)
       }
@@ -286,7 +322,13 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('sessions:remove-batch', async (_event, ids: string[]) => {
-    for (const id of ids) await removeSession(id)
+    for (const id of ids) {
+      try {
+        await removeSession(id)
+      } catch (err) {
+        console.error(`Failed to remove session ${id}:`, err)
+      }
+    }
   })
 
   ipcMain.handle('pty:write', (_event, sessionId: string, data: string) => {
@@ -463,9 +505,15 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('hosts:list', () => listHosts())
   ipcMain.handle('hosts:add', (_event, alias: string, label: string) => addHost({ alias, label }))
-  ipcMain.handle('hosts:update', (_event, hostId: string, alias: string, label: string) =>
-    updateHost(hostId, { alias, label })
-  )
+  ipcMain.handle('hosts:update', async (_event, hostId: string, alias: string, label: string) => {
+    const previous = getHost(hostId)
+    const updated = updateHost(hostId, { alias, label })
+    if (previous && previous.alias !== alias) {
+      invalidateBootstrap(hostId)
+      await stopHostConnection(hostId).catch(() => undefined)
+    }
+    return updated
+  })
   ipcMain.handle('hosts:delete', (_event, hostId: string) => deleteHost(hostId))
   ipcMain.handle('hosts:test-connection', async (_event, hostId: string) => {
     const host = getHost(hostId)
@@ -476,6 +524,10 @@ app.whenReady().then(async () => {
   const mainWindow = createWindow()
   registerWindow(mainWindow, true)
   startHookServer()
+  // Tear down the per-host hook listener whenever its SSH control connection
+  // goes away, so long-running apps that cycle through many hosts don't
+  // accumulate idle Unix-socket servers and ipc-<hostId>.sock files.
+  setOnHostConnectionStopped((hostId) => stopHookServerForHost(hostId))
   initSessionManager()
   createTray()
   initPtyManager()
@@ -496,10 +548,25 @@ app.whenReady().then(async () => {
     }
   })
 
-  app.on('before-quit', () => {
+  // before-quit fires synchronously; Electron won't wait for async work unless
+  // we preventDefault. Pattern: first fire → preventDefault, run teardown,
+  // app.quit() re-enters and we let it through.
+  let teardownStarted = false
+  app.on('before-quit', (event) => {
+    if (teardownStarted) return
+    teardownStarted = true
+    event.preventDefault()
     clearInterval(thumbInterval)
     stopPtyManager()
     stopHookServer()
+    void (async () => {
+      // Bound teardown so an unreachable host can't wedge shutdown.
+      await Promise.race([
+        stopAllHostConnections().catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 5000)),
+      ])
+      app.quit()
+    })()
   })
 })
 

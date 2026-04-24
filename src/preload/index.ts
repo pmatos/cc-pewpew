@@ -13,8 +13,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('hook:event', handler)
     return () => ipcRenderer.removeListener('hook:event', handler)
   },
-  createSession: (projectPath: string, name?: string) =>
-    ipcRenderer.invoke('sessions:create', projectPath, name),
+  createSession: (projectPath: string, name?: string, hostId?: string | null) =>
+    ipcRenderer.invoke('sessions:create', projectPath, name, hostId ?? null),
   createPrSession: (projectPath: string, prNumber: number) =>
     ipcRenderer.invoke('sessions:create-pr', projectPath, prNumber),
   mirrorWorktree: (projectPath: string, worktreePath: string) =>

@@ -1,4 +1,5 @@
 export type SessionStatus = 'running' | 'needs_input' | 'idle' | 'completed' | 'error' | 'dead'
+export type ConnectionState = 'connecting' | 'live' | 'offline' | 'auth-failed' | 'unreachable'
 
 export interface Project {
   name: string
@@ -18,6 +19,7 @@ export interface Worktree {
 
 export interface Session {
   id: string
+  hostId: string | null
   projectPath: string
   projectName: string
   worktreeName: string
@@ -28,6 +30,7 @@ export interface Session {
   pid: number
   tmuxSession: string
   status: SessionStatus
+  connectionState?: ConnectionState
   lastActivity: number
   hookEvents: HookEvent[]
   repoFingerprint?: string
@@ -37,6 +40,7 @@ export interface HookEvent {
   method: string
   sessionId: string
   timestamp: number
+  originHostId?: string | null
   data: Record<string, unknown>
 }
 

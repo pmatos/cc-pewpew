@@ -4,11 +4,21 @@ import { execFileSync } from 'child_process'
 import { existsSync } from 'fs'
 import { dialog } from 'electron'
 import { broadcastToAll } from './window-registry'
+import {
+  exec as execRemote,
+  retainHostConnection,
+  releaseHostConnection,
+  spawnAttach,
+} from './host-connection'
+import { classifySshExit } from './ssh-exit-parser'
+import type { Host } from '../shared/types'
 
 interface PtyEntry {
   pty: IPty
   tmuxSession: string
   buffer: string
+  host?: Host
+  released?: boolean
 }
 
 const ptys = new Map<string, PtyEntry>()
@@ -109,6 +119,72 @@ export function createPty(
   ptys.set(sessionId, entry)
 }
 
+function releaseRemoteEntry(entry: PtyEntry): void {
+  if (!entry.host || entry.released) return
+  entry.released = true
+  void releaseHostConnection(entry.host.hostId)
+}
+
+export async function createRemotePty(
+  sessionId: string,
+  cwd: string,
+  host: Host,
+  options?: { continueSession?: boolean }
+): Promise<void> {
+  const tmuxSession = `cc-pewpew-${sessionId}`
+
+  const claudeArgs = ['claude', '--dangerously-skip-permissions']
+  if (options?.continueSession) {
+    claudeArgs.push('--continue')
+  }
+
+  const create = await execRemote(host, [
+    'tmux',
+    'new-session',
+    '-d',
+    '-s',
+    tmuxSession,
+    '-c',
+    cwd,
+    '-x',
+    '120',
+    '-y',
+    '30',
+    ...claudeArgs,
+  ])
+  if (create.timedOut || create.code !== 0) {
+    const detail = create.stderr.trim() || create.stdout.trim() || `exit ${create.code}`
+    throw new Error(`Failed to create remote tmux session: ${detail}`)
+  }
+
+  const ptyProcess = spawnAttach(host, ['tmux', 'attach-session', '-t', tmuxSession], {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 30,
+    env: process.env as Record<string, string>,
+  })
+
+  retainHostConnection(host.hostId)
+
+  const entry: PtyEntry = {
+    pty: ptyProcess,
+    tmuxSession,
+    buffer: '',
+    host,
+  }
+
+  ptyProcess.onData((data) => {
+    entry.buffer += data
+  })
+
+  ptyProcess.onExit(() => {
+    ptys.delete(sessionId)
+    releaseRemoteEntry(entry)
+  })
+
+  ptys.set(sessionId, entry)
+}
+
 export function writePty(sessionId: string, data: string): void {
   const entry = ptys.get(sessionId)
   if (entry) {
@@ -129,6 +205,7 @@ export function detachPty(sessionId: string): void {
   if (!entry) return
 
   ptys.delete(sessionId)
+  releaseRemoteEntry(entry)
 
   try {
     entry.pty.kill()
@@ -144,6 +221,7 @@ export function destroyPty(sessionId: string): void {
 
   if (entry) {
     ptys.delete(sessionId)
+    releaseRemoteEntry(entry)
 
     try {
       entry.pty.kill()
@@ -158,6 +236,40 @@ export function destroyPty(sessionId: string): void {
     execFileSync('tmux', ['kill-session', '-t', tmuxSession])
   } catch {
     // Session may already be dead
+  }
+}
+
+export async function destroyRemotePty(sessionId: string, host: Host): Promise<void> {
+  const entry = ptys.get(sessionId)
+  const tmuxSession = entry?.tmuxSession ?? `cc-pewpew-${sessionId}`
+
+  const result = await execRemote(host, ['tmux', 'kill-session', '-t', tmuxSession], {
+    timeoutMs: 5000,
+  })
+  // tmux returns nonzero when the session doesn't exist — that's fine, the
+  // remote process is already gone. But SSH-level failures (auth, network,
+  // timeout) mean the kill never ran on the remote; surface so killSession
+  // doesn't dishonestly flip the UI to 'dead' while the remote Claude lives on.
+  // Keep `entry` registered in `ptys` until we know the kill succeeded so
+  // input/output stay routable if the caller retries.
+  if (result.timedOut) {
+    throw new Error(`Remote tmux kill-session timed out on host ${host.alias}`)
+  }
+  if (result.code !== 0) {
+    const { reason, message } = classifySshExit({ exitCode: result.code, stderr: result.stderr })
+    if (reason === 'auth-failed' || reason === 'network' || reason === 'dep-missing') {
+      throw new Error(`Remote tmux kill-session failed on host ${host.alias}: ${message}`)
+    }
+  }
+
+  if (entry) {
+    ptys.delete(sessionId)
+    try {
+      entry.pty.kill()
+    } catch {
+      // Pty may already be dead from ssh/tmux exit
+    }
+    releaseRemoteEntry(entry)
   }
 }
 
@@ -181,6 +293,8 @@ export function hasTmuxSession(sessionId: string): boolean {
 export function captureThumbnails(): Record<string, string> {
   const result: Record<string, string> = {}
   for (const [sessionId, entry] of ptys) {
+    // Remote thumbnail capture is slice #13; issue #11 only needs the live PTY stream.
+    if (entry.host) continue
     try {
       const text = execFileSync('tmux', ['capture-pane', '-t', entry.tmuxSession, '-p'], {
         encoding: 'utf-8',
@@ -194,7 +308,24 @@ export function captureThumbnails(): Record<string, string> {
   return result
 }
 
-export function getScrollback(sessionId: string): string {
+export async function hasRemoteTmuxSession(sessionId: string, host: Host): Promise<boolean> {
+  const result = await execRemote(host, ['tmux', 'has-session', '-t', `cc-pewpew-${sessionId}`], {
+    timeoutMs: 3000,
+  })
+  return result.code === 0 && !result.timedOut
+}
+
+export async function getScrollback(sessionId: string): Promise<string> {
+  const entry = ptys.get(sessionId)
+  if (entry?.host) {
+    const result = await execRemote(
+      entry.host,
+      ['tmux', 'capture-pane', '-t', entry.tmuxSession, '-p', '-e', '-S', '-5000'],
+      { timeoutMs: 5000 }
+    )
+    return result.code === 0 && !result.timedOut ? result.stdout : ''
+  }
+
   const tmuxSession = `cc-pewpew-${sessionId}`
   try {
     return execFileSync('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-e', '-S', '-5000'], {
@@ -260,5 +391,41 @@ export function reattachPty(sessionId: string): void {
     }
   } catch {
     // Scrollback capture may fail — not critical
+  }
+}
+
+export async function reattachRemotePty(sessionId: string, host: Host): Promise<void> {
+  const tmuxSession = `cc-pewpew-${sessionId}`
+
+  const ptyProcess = spawnAttach(host, ['tmux', 'attach-session', '-t', tmuxSession], {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 30,
+    env: process.env as Record<string, string>,
+  })
+
+  retainHostConnection(host.hostId)
+
+  const entry: PtyEntry = {
+    pty: ptyProcess,
+    tmuxSession,
+    buffer: '',
+    host,
+  }
+
+  ptyProcess.onData((data) => {
+    entry.buffer += data
+  })
+
+  ptyProcess.onExit(() => {
+    ptys.delete(sessionId)
+    releaseRemoteEntry(entry)
+  })
+
+  ptys.set(sessionId, entry)
+
+  const scrollback = await getScrollback(sessionId)
+  if (scrollback) {
+    entry.buffer += scrollback
   }
 }

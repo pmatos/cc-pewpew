@@ -3,13 +3,14 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { join } from 'path'
 import { CONFIG_DIR } from './config'
+import type { ExecResult } from './host-connection'
 
 const execFileAsync = promisify(execFile)
 
 const NOTIFY_SCRIPT = join(CONFIG_DIR, 'hooks', 'notify.sh')
 
-function buildHooks(): Record<string, unknown[]> {
-  const hook = { type: 'command', command: NOTIFY_SCRIPT }
+function buildHooks(notifyScript: string): Record<string, unknown[]> {
+  const hook = { type: 'command', command: notifyScript }
   return {
     SessionStart: [{ hooks: [hook] }],
     Stop: [{ hooks: [hook] }],
@@ -17,6 +18,10 @@ function buildHooks(): Record<string, unknown[]> {
     SessionEnd: [{ hooks: [hook] }],
     Notification: [{ hooks: [hook] }],
   }
+}
+
+function ccPewpewHookJson(notifyScript: string): string {
+  return JSON.stringify(buildHooks(notifyScript))
 }
 
 export async function installHooks(
@@ -37,7 +42,7 @@ export async function installHooks(
     }
   }
 
-  const newHooks = buildHooks()
+  const newHooks = buildHooks(NOTIFY_SCRIPT)
   const existingHooks = (existing.hooks || {}) as Record<string, unknown[]>
   const merged: Record<string, unknown[]> = { ...existingHooks }
 
@@ -54,6 +59,34 @@ export async function installHooks(
 
   if (!skipGitignore) {
     ensureGitignore(projectPath, '.claude/settings.local.json')
+  }
+}
+
+export async function installRemoteHooks(
+  execRemote: (argv: string[], opts?: { timeoutMs?: number }) => Promise<ExecResult>,
+  worktreePath: string,
+  notifyScriptPath: string
+): Promise<void> {
+  const hooksJson = ccPewpewHookJson(notifyScriptPath)
+  const script =
+    'set -e\n' +
+    'claude_dir="$1/.claude"\n' +
+    'settings="$claude_dir/settings.local.json"\n' +
+    'mkdir -p "$claude_dir"\n' +
+    'if [ -s "$settings" ]; then cat "$settings"; else printf "{}"; fi |\n' +
+    'jq --argjson newHooks "$2" \'\n' +
+    '  .hooks = (.hooks // {}) |\n' +
+    '  reduce ($newHooks | keys[]) as $k (.;\n' +
+    '    .hooks[$k] = (((.hooks[$k] // []) | map(select(((. | tostring) | contains("cc-pewpew")) | not))) + $newHooks[$k])\n' +
+    '  )\n' +
+    '\' > "$settings.tmp"\n' +
+    'mv "$settings.tmp" "$settings"\n'
+  const result = await execRemote(['sh', '-c', script, '_', worktreePath, hooksJson], {
+    timeoutMs: 15000,
+  })
+  if (result.timedOut || result.code !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`
+    throw new Error(`Failed to install remote hooks: ${detail}`)
   }
 }
 

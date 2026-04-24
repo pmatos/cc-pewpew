@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import Terminal from './Terminal'
 import ReviewOverlay from './ReviewOverlay'
 import { useSessionsStore } from '../stores/sessions'
+import { useHostsStore } from '../stores/hosts'
 
 interface Props {
   sessionId: string
@@ -11,6 +12,8 @@ interface Props {
 
 export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
   const session = useSessionsStore((s) => s.sessions.find((s) => s.id === sessionId))
+  const hosts = useHostsStore((s) => s.hosts)
+  const host = session?.hostId ? hosts.find((h) => h.hostId === session.hostId) : null
   const isDead = session?.status === 'dead'
   const [reviving, setReviving] = useState(false)
   // Monotonic flip count — each toggle increments by 1, rotating +180deg.
@@ -89,6 +92,11 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
           ←
         </button>
         <span className="detail-pane-title">{sessionName}</span>
+        {host && (
+          <span className="detail-pane-host">
+            {host.label} - {session?.connectionState ?? 'offline'}
+          </span>
+        )}
       </div>
       <div className="detail-pane-terminal">
         {isDead ? (

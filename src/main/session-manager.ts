@@ -2,6 +2,7 @@ import { execFile, execFileSync } from 'child_process'
 import { promisify } from 'util'
 import { readFileSync, writeFileSync, existsSync, realpathSync } from 'fs'
 import { join, basename, sep } from 'path'
+import { posix } from 'path'
 import { randomUUID } from 'crypto'
 import { dialog, shell } from 'electron'
 import { broadcastToAll, getMainWindow } from './window-registry'
@@ -12,15 +13,30 @@ import {
   createPty,
   detachPty,
   destroyPty,
+  destroyRemotePty,
   hasPty,
   hasTmuxSession,
+  hasRemoteTmuxSession,
   isTmuxAvailable,
   discoverTmuxSessions,
   reattachPty,
+  reattachRemotePty,
+  createRemotePty,
 } from './pty-manager'
 import { getRepoFingerprint, gitWorktrees } from './project-scanner'
-import { installHooks } from './hook-installer'
-import type { Session, SessionStatus } from '../shared/types'
+import { installHooks, installRemoteHooks } from './hook-installer'
+import { getHost } from './host-registry'
+import { listRemoteProjects } from './remote-project-registry'
+import { listenHookServerForHost } from './hook-server'
+import {
+  ensureHostConnection,
+  exec as execRemote,
+  retainHostConnection,
+  releaseHostConnection,
+  stopHostConnection,
+} from './host-connection'
+import { bootstrapHost } from './host-bootstrap'
+import type { Host, RemoteProject, Session, SessionStatus } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
 const SESSIONS_PATH = join(CONFIG_DIR, 'sessions.json')
@@ -76,6 +92,61 @@ interface SessionEntry {
 
 const sessions = new Map<string, SessionEntry>()
 
+function getRemoteProject(hostId: string, projectPath: string): RemoteProject {
+  const project = listRemoteProjects().find((p) => p.hostId === hostId && p.path === projectPath)
+  if (!project) throw new Error('Remote project is not registered')
+  return project
+}
+
+function getRequiredHost(hostId: string): Host {
+  const host = getHost(hostId)
+  if (!host) throw new Error('Unknown host')
+  return host
+}
+
+// Contract: on success the caller owns an incremented refcount on the host
+// SSH runtime and must call releaseHostConnection eventually. Retaining after
+// ensureHostConnection also covers bootstrap failures. An ensureHostConnection
+// failure still has to tear down the hook listener we started first (the
+// reverse-forward target); stopHostConnection triggers the
+// setOnHostConnectionStopped callback to do that.
+async function prepareRemoteHost(host: Host): Promise<{ notifyScriptPath: string }> {
+  const localSocketPath = listenHookServerForHost(host.hostId)
+  let remoteSocketPath: string
+  try {
+    ;({ remoteSocketPath } = await ensureHostConnection(host, localSocketPath))
+  } catch (err) {
+    // SSH couldn't start. Tear down the host runtime (which runtimeFor already
+    // registered) so the hook-server teardown callback fires and we don't leak
+    // the per-host listener across repeated failed startups.
+    await stopHostConnection(host.hostId).catch(() => undefined)
+    throw err
+  }
+  retainHostConnection(host.hostId)
+  try {
+    const bootstrap = await bootstrapHost(
+      host.hostId,
+      {
+        exec: (argv, opts) => execRemote(host, argv, opts),
+      },
+      remoteSocketPath
+    )
+    return { notifyScriptPath: bootstrap.notifyScriptPath }
+  } catch (err) {
+    await releaseHostConnection(host.hostId).catch(() => undefined)
+    throw err
+  }
+}
+
+async function expectRemoteOk(host: Host, argv: string[], message: string): Promise<string> {
+  const result = await execRemote(host, argv)
+  if (result.timedOut || result.code !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`
+    throw new Error(`${message}: ${detail}`)
+  }
+  return result.stdout
+}
+
 // Positive hits are cached forever; negative hits (no PR yet / gh transient
 // error) are retained only for NEGATIVE_CACHE_TTL_MS so a PR opened after the
 // session was created can be picked up without requiring an app restart.
@@ -130,6 +201,7 @@ async function lookupPrForBranch(projectPath: string, branch: string): Promise<n
 function resolvePrNumberAsync(sessionId: string): void {
   const entry = sessions.get(sessionId)
   if (!entry || entry.session.prNumber !== undefined) return
+  if (entry.session.hostId) return
   const { projectPath, branch } = entry.session
   if (!branch) return
   lookupPrForBranch(projectPath, branch).then((num) => {
@@ -264,6 +336,7 @@ async function adoptWorktree(
 
   const session: Session = {
     id,
+    hostId: null,
     projectPath,
     projectName,
     worktreeName,
@@ -319,7 +392,94 @@ export async function mirrorAllWorktrees(projectPath: string): Promise<MirrorAll
   return { mirrored, failed }
 }
 
-export async function createSession(projectPath: string, name?: string): Promise<Session> {
+async function createRemoteSession(
+  hostId: string,
+  projectPath: string,
+  name?: string
+): Promise<Session> {
+  const host = getRequiredHost(hostId)
+  const remoteProject = getRemoteProject(hostId, projectPath)
+  const worktreeName = name || `session-${randomUUID().slice(0, 8)}`
+  const worktreePath = posix.join(projectPath, '.claude', 'worktrees', worktreeName)
+  const id = randomUUID().slice(0, 8)
+  const tmuxSession = `cc-pewpew-${id}`
+  const branchName = `cc-pewpew/${worktreeName}`
+
+  // prepareRemoteHost retains the SSH runtime on success; we own the ref and
+  // release it at the end (or in catch). createRemotePty takes its own retain
+  // on success, which is what keeps the connection alive past this function.
+  const { notifyScriptPath } = await prepareRemoteHost(host)
+  let branch: string
+  try {
+    const addWithBranch = await execRemote(host, [
+      'git',
+      '-C',
+      projectPath,
+      'worktree',
+      'add',
+      worktreePath,
+      '-b',
+      branchName,
+    ])
+    if (addWithBranch.timedOut || addWithBranch.code !== 0) {
+      await expectRemoteOk(
+        host,
+        ['git', '-C', projectPath, 'worktree', 'add', worktreePath],
+        'Failed to create remote worktree'
+      )
+    }
+
+    branch =
+      (
+        await expectRemoteOk(
+          host,
+          ['git', '-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+          'Failed to resolve remote branch'
+        )
+      ).trim() || branchName
+
+    await installRemoteHooks(
+      (argv, opts) => execRemote(host, argv, opts),
+      worktreePath,
+      notifyScriptPath
+    )
+    await createRemotePty(id, worktreePath, host)
+  } catch (err) {
+    await releaseHostConnection(hostId).catch(() => undefined)
+    throw err
+  }
+  await releaseHostConnection(hostId).catch(() => undefined)
+
+  const session: Session = {
+    id,
+    hostId,
+    projectPath,
+    projectName: remoteProject.name,
+    worktreeName,
+    worktreePath,
+    branch,
+    issueNumber: parseIssueNumber(worktreeName, branch),
+    pid: 0,
+    tmuxSession,
+    status: 'running',
+    connectionState: 'live',
+    lastActivity: Date.now(),
+    hookEvents: [],
+    ...(remoteProject.repoFingerprint ? { repoFingerprint: remoteProject.repoFingerprint } : {}),
+  }
+
+  sessions.set(id, { session })
+  onSessionsChanged()
+  return session
+}
+
+export async function createSession(
+  projectPath: string,
+  name?: string,
+  hostId: string | null = null
+): Promise<Session> {
+  if (hostId) return createRemoteSession(hostId, projectPath, name)
+
   const worktreeName = name || `session-${randomUUID().slice(0, 8)}`
   const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
 
@@ -341,14 +501,21 @@ export async function createSession(projectPath: string, name?: string): Promise
   return createSessionForWorktree(projectPath, worktreePath, worktreeName)
 }
 
-export function handleHookEvent(method: string, params: Record<string, unknown>): void {
+export function handleHookEvent(
+  method: string,
+  params: Record<string, unknown>,
+  originHostId: string | null = null
+): boolean {
   // Match hook event to our session. CC's session_id differs from our internal id,
   // so match by cwd (worktree path) which is unique per session.
   const cwd = params.cwd as string | undefined
-  const ccSessionId = params.session_id as string | undefined
+  const ccSessionId = (params.session_id ?? params.sessionId) as string | undefined
 
+  // Filter by origin first so local and remote sessions with the same worktree
+  // path don't shadow each other — picking the wrong one would drop the event.
   let entry: SessionEntry | undefined
   for (const e of sessions.values()) {
+    if ((e.session.hostId ?? null) !== originHostId) continue
     // Primary match: cwd matches our worktreePath
     if (cwd && e.session.worktreePath && cwd.startsWith(e.session.worktreePath)) {
       entry = e
@@ -360,50 +527,100 @@ export function handleHookEvent(method: string, params: Record<string, unknown>)
       break
     }
   }
-  if (!entry) return
+  if (!entry) return false
 
   switch (method) {
     case 'session.start':
       entry.session.status = 'running'
+      entry.session.connectionState = originHostId ? 'live' : entry.session.connectionState
       break
     case 'session.stop':
       entry.session.status = 'needs_input'
+      entry.session.connectionState = originHostId ? 'live' : entry.session.connectionState
       notifyNeedsInput(entry.session)
       break
     case 'session.activity':
       entry.session.status = 'running'
+      entry.session.connectionState = originHostId ? 'live' : entry.session.connectionState
       break
     case 'session.end':
-      promptCleanup(entry.session.id)
-      return
+      // Fire-and-forget, but attach a catch so a remote removeSession failure
+      // doesn't become an unhandled rejection in the main process.
+      promptCleanup(entry.session.id).catch((err) => {
+        console.error(`promptCleanup(${entry.session.id}) failed:`, err)
+      })
+      return true
     case 'session.notification':
       entry.session.hookEvents.push({
         method,
         sessionId: ccSessionId || entry.session.id,
         timestamp: Date.now(),
+        originHostId,
         data: params,
       })
       break
     default:
-      return
+      return false
   }
 
   entry.session.lastActivity = Date.now()
   onSessionsChanged()
+  return true
 }
 
-export function killSession(id: string): void {
+export async function killSession(id: string): Promise<void> {
+  const entry = sessions.get(id)
+  if (!entry) return
+  if (entry.session.hostId) {
+    const host = getRequiredHost(entry.session.hostId)
+    await destroyRemotePty(id, host)
+    entry.session.connectionState = 'offline'
+    updateSession(id, 'dead')
+    return
+  }
   detachPty(id)
   updateSession(id, 'dead')
 }
 
-export function reviveSession(id: string): void {
+export async function reviveSession(id: string): Promise<void> {
   const entry = sessions.get(id)
   if (!entry) throw new Error(`Session ${id} not found`)
 
   const session = entry.session
   if (session.status !== 'dead')
     throw new Error(`Session ${id} is not dead (status: ${session.status})`)
+
+  if (session.hostId) {
+    const host = getRequiredHost(session.hostId)
+    const hostId = session.hostId
+    session.connectionState = 'connecting'
+    onSessionsChanged()
+    // prepareRemoteHost retains the SSH runtime on success; we release it at
+    // the end/in catch. createRemotePty/reattachRemotePty take over on success.
+    // The prepareRemoteHost await is inside the try so a bootstrap failure
+    // also resets connectionState instead of leaving it pinned at connecting.
+    let retained = false
+    try {
+      await prepareRemoteHost(host)
+      retained = true
+      if (await hasRemoteTmuxSession(id, host)) {
+        await reattachRemotePty(id, host)
+      } else {
+        await createRemotePty(id, session.worktreePath, host, { continueSession: true })
+      }
+    } catch (err) {
+      session.connectionState = 'offline'
+      onSessionsChanged()
+      if (retained) {
+        await releaseHostConnection(hostId).catch(() => undefined)
+      }
+      throw err
+    }
+    await releaseHostConnection(hostId).catch(() => undefined)
+    session.connectionState = 'live'
+    updateSession(id, 'idle')
+    return
+  }
 
   if (hasTmuxSession(id)) {
     reattachPty(id)
@@ -416,6 +633,24 @@ export function reviveSession(id: string): void {
 export async function removeWorktree(id: string): Promise<void> {
   const entry = sessions.get(id)
   if (!entry) return
+
+  if (entry.session.hostId) {
+    const host = getRequiredHost(entry.session.hostId)
+    try {
+      await execRemote(host, [
+        'git',
+        '-C',
+        entry.session.projectPath,
+        'worktree',
+        'remove',
+        entry.session.worktreePath,
+        '--force',
+      ])
+    } catch {
+      // Remote worktree may already be removed or host unavailable.
+    }
+    return
+  }
 
   try {
     await execFileAsync('git', [
@@ -432,7 +667,13 @@ export async function removeWorktree(id: string): Promise<void> {
 }
 
 export async function removeSession(id: string): Promise<void> {
-  destroyPty(id)
+  const entry = sessions.get(id)
+  if (entry?.session.hostId) {
+    const host = getRequiredHost(entry.session.hostId)
+    await destroyRemotePty(id, host)
+  } else {
+    destroyPty(id)
+  }
   await removeWorktree(id)
   sessions.delete(id)
   onSessionsChanged()
@@ -443,41 +684,37 @@ const cleanupInProgress = new Set<string>()
 async function promptCleanup(id: string): Promise<void> {
   if (cleanupInProgress.has(id)) return
   cleanupInProgress.add(id)
+  try {
+    const entry = sessions.get(id)
+    if (!entry) return
 
-  const entry = sessions.get(id)
-  if (!entry) {
+    const session = entry.session
+    const parentWindow = getMainWindow()
+
+    const options = {
+      type: 'question' as const,
+      title: 'Session ended',
+      message: `Session "${session.projectName}/${session.worktreeName}" ended.\nClean up worktree?`,
+      buttons: ['Delete worktree', 'Keep worktree', 'Keep and open in file manager'],
+      defaultId: 1,
+      cancelId: 1,
+    }
+
+    const { response } = parentWindow
+      ? await dialog.showMessageBox(parentWindow, options)
+      : await dialog.showMessageBox(options)
+
+    if (response === 0) {
+      await removeSession(id)
+    } else if (response === 1) {
+      updateSession(id, 'completed')
+    } else if (response === 2) {
+      updateSession(id, 'completed')
+      shell.openPath(session.worktreePath)
+    }
+  } finally {
     cleanupInProgress.delete(id)
-    return
   }
-
-  const session = entry.session
-  const parentWindow = getMainWindow()
-
-  const options = {
-    type: 'question' as const,
-    title: 'Session ended',
-    message: `Session "${session.projectName}/${session.worktreeName}" ended.\nClean up worktree?`,
-    buttons: ['Delete worktree', 'Keep worktree', 'Keep and open in file manager'],
-    defaultId: 1,
-    cancelId: 1,
-  }
-
-  const { response } = parentWindow
-    ? await dialog.showMessageBox(parentWindow, options)
-    : await dialog.showMessageBox(options)
-
-  if (response === 0) {
-    destroyPty(id)
-    await removeWorktree(id)
-    removeSession(id)
-  } else if (response === 1) {
-    updateSession(id, 'completed')
-  } else if (response === 2) {
-    updateSession(id, 'completed')
-    shell.openPath(session.worktreePath)
-  }
-
-  cleanupInProgress.delete(id)
 }
 
 export async function createPrSession(
@@ -563,7 +800,7 @@ export async function relocateProject(
 
   const toMigrate: SessionEntry[] = []
   for (const entry of sessions.values()) {
-    if (entry.session.projectPath === oldProjectPath) {
+    if (entry.session.hostId === null && entry.session.projectPath === oldProjectPath) {
       toMigrate.push(entry)
     }
   }
@@ -629,6 +866,26 @@ export function restoreSessions(): void {
     let skippedForNoTmux = 0
 
     for (const session of data) {
+      session.hostId = session.hostId ?? null
+      if (session.hostId) {
+        if (
+          session.status === 'running' ||
+          session.status === 'idle' ||
+          session.status === 'needs_input'
+        ) {
+          session.status = 'dead'
+        }
+        session.connectionState = 'offline'
+        if (!session.branch) {
+          session.branch = `cc-pewpew/${session.worktreeName}`
+        }
+        if (session.issueNumber === undefined) {
+          session.issueNumber = parseIssueNumber(session.worktreeName, session.branch)
+        }
+        sessions.set(session.id, { session })
+        continue
+      }
+
       if (
         session.status === 'running' ||
         session.status === 'idle' ||

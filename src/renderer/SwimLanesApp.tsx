@@ -64,7 +64,12 @@ export default function SwimLanesApp() {
   }, [focusedLane, toggleReview])
 
   const handleRevive = async (id: string) => {
-    await window.api.reviveSession(id)
+    try {
+      await window.api.reviveSession(id)
+    } catch {
+      // Error already logged in main; the swim-lane UI has no toast yet,
+      // but we swallow the rejection here to avoid an unhandled promise.
+    }
   }
 
   return (
