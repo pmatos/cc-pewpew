@@ -475,8 +475,11 @@ export function handleHookEvent(
   const cwd = params.cwd as string | undefined
   const ccSessionId = (params.session_id ?? params.sessionId) as string | undefined
 
+  // Filter by origin first so local and remote sessions with the same worktree
+  // path don't shadow each other — picking the wrong one would drop the event.
   let entry: SessionEntry | undefined
   for (const e of sessions.values()) {
+    if ((e.session.hostId ?? null) !== originHostId) continue
     // Primary match: cwd matches our worktreePath
     if (cwd && e.session.worktreePath && cwd.startsWith(e.session.worktreePath)) {
       entry = e
@@ -489,14 +492,6 @@ export function handleHookEvent(
     }
   }
   if (!entry) return false
-
-  const expectedHostId = entry.session.hostId ?? null
-  if (expectedHostId !== originHostId) {
-    console.warn(
-      `Dropping hook event for host mismatch: session=${entry.session.id} expected=${expectedHostId ?? 'local'} origin=${originHostId ?? 'local'}`
-    )
-    return false
-  }
 
   switch (method) {
     case 'session.start':

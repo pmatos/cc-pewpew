@@ -47,8 +47,13 @@ function uidSegment(): string {
   }
 }
 
-export function remoteSocketPathForHost(_hostId: HostId): string {
-  return `/tmp/cc-pewpew-${uidSegment()}.sock`
+export function remoteSocketPathForHost(hostId: HostId): string {
+  // Include hostId so two configured hosts that resolve to the same remote
+  // account don't collide on the reverse-forwarded socket (StreamLocalBindUnlink
+  // would otherwise let the later connection steal the earlier one's socket).
+  // hostId is UUID-shaped but sanitize defensively against hand-edited configs.
+  const safeId = hostId.replace(/[^A-Za-z0-9_.-]/g, '_')
+  return `/tmp/cc-pewpew-${uidSegment()}-${safeId}.sock`
 }
 
 function controlPathForHost(hostId: HostId): string {
