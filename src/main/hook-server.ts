@@ -21,7 +21,10 @@ const METHODS = new Set([
 const servers = new Map<string, { server: Server; socketPath: string }>()
 
 function originKey(originHostId: string | null): string {
-  return originHostId ?? 'local'
+  // Namespace local vs host keys so a hand-edited config with
+  // hostId === "local" can't collide with the real local listener and tear
+  // down (or reuse) the wrong server.
+  return originHostId === null ? 'local' : `host:${originHostId}`
 }
 
 function socketPathForOrigin(originHostId: string | null): string {
