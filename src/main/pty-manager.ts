@@ -10,6 +10,7 @@ import {
   releaseHostConnection,
   spawnAttach,
 } from './host-connection'
+import { classifySshExit } from './ssh-exit-parser'
 import type { Host } from '../shared/types'
 
 interface PtyEntry {
@@ -246,10 +247,21 @@ export async function destroyRemotePty(sessionId: string, host: Host): Promise<v
     ptys.delete(sessionId)
   }
 
-  try {
-    await execRemote(host, ['tmux', 'kill-session', '-t', tmuxSession], { timeoutMs: 5000 })
-  } catch {
-    // Session may already be dead or host unreachable; caller updates session state.
+  const result = await execRemote(host, ['tmux', 'kill-session', '-t', tmuxSession], {
+    timeoutMs: 5000,
+  })
+  // tmux returns nonzero when the session doesn't exist — that's fine, the
+  // remote process is already gone. But SSH-level failures (auth, network,
+  // timeout) mean the kill never ran on the remote; surface so killSession
+  // doesn't dishonestly flip the UI to 'dead' while the remote Claude lives on.
+  if (result.timedOut) {
+    throw new Error(`Remote tmux kill-session timed out on host ${host.alias}`)
+  }
+  if (result.code !== 0) {
+    const { reason, message } = classifySshExit({ exitCode: result.code, stderr: result.stderr })
+    if (reason === 'auth-failed' || reason === 'network' || reason === 'dep-missing') {
+      throw new Error(`Remote tmux kill-session failed on host ${host.alias}: ${message}`)
+    }
   }
 
   if (entry) {

@@ -511,11 +511,25 @@ app.whenReady().then(async () => {
     }
   })
 
-  app.on('before-quit', () => {
+  // before-quit fires synchronously; Electron won't wait for async work unless
+  // we preventDefault. Pattern: first fire → preventDefault, run teardown,
+  // app.quit() re-enters and we let it through.
+  let teardownStarted = false
+  app.on('before-quit', (event) => {
+    if (teardownStarted) return
+    teardownStarted = true
+    event.preventDefault()
     clearInterval(thumbInterval)
     stopPtyManager()
     stopHookServer()
-    void stopAllHostConnections()
+    void (async () => {
+      // Bound teardown so an unreachable host can't wedge shutdown.
+      await Promise.race([
+        stopAllHostConnections().catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 5000)),
+      ])
+      app.quit()
+    })()
   })
 })
 
