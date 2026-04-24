@@ -82,12 +82,21 @@ function runtimeFor(host: Host, localSocketPath: string): HostRuntime {
   return runtime
 }
 
-function runSsh(argv: string[], timeoutMs: number): Promise<ExecResult> {
+// 16 MiB lets `tmux capture-pane -S -5000` (up to 5000 lines with ANSI escapes)
+// fit even for wide terminals with heavy color output, which would otherwise
+// overflow execFile's default and return empty scrollback on reattach.
+const DEFAULT_MAX_BUFFER = 16 * 1024 * 1024
+
+function runSsh(
+  argv: string[],
+  timeoutMs: number,
+  maxBuffer = DEFAULT_MAX_BUFFER
+): Promise<ExecResult> {
   return new Promise((resolve) => {
     const child = execFile(
       'ssh',
       argv,
-      { timeout: timeoutMs, maxBuffer: 256 * 1024 },
+      { timeout: timeoutMs, maxBuffer },
       (error, stdout, stderr) => {
         // execFile's `timeout` option kills the child with `killSignal` (default
         // SIGTERM) when it fires. Node sets `error.killed === true` in that

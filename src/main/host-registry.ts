@@ -59,6 +59,20 @@ export function updateHost(hostId: HostId, input: { alias: string; label: string
   if (config.hosts.some((h) => h.hostId !== hostId && h.alias === alias)) {
     throw new Error('Alias already exists')
   }
+  // Refuse alias retargeting while sessions/projects are bound to this host.
+  // Lifecycle actions (kill/revive/remove) re-resolve the host by hostId at
+  // runtime, so pointing at a different SSH endpoint would dispatch commands
+  // to the new machine while the original tmux/Claude keeps running on the
+  // old one. Label-only edits are safe. Same rule deleteHost already enforces.
+  const previous = config.hosts[idx]
+  if (previous.alias !== alias) {
+    if (hasRemoteProjectsBoundTo(hostId)) {
+      throw new Error('Cannot retarget host: remote projects are registered on it')
+    }
+    if (hasSessionsBoundTo(hostId)) {
+      throw new Error('Cannot retarget host: sessions are still bound to it')
+    }
+  }
   const updated: Host = { hostId, alias, label }
   config.hosts = [...config.hosts.slice(0, idx), updated, ...config.hosts.slice(idx + 1)]
   saveConfig(config)
