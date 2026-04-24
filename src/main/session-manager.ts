@@ -559,11 +559,17 @@ export async function reviveSession(id: string): Promise<void> {
     const host = getRequiredHost(session.hostId)
     session.connectionState = 'connecting'
     onSessionsChanged()
-    await prepareRemoteHost(host)
-    if (await hasRemoteTmuxSession(id, host)) {
-      await reattachRemotePty(id, host)
-    } else {
-      await createRemotePty(id, session.worktreePath, host, { continueSession: true })
+    try {
+      await prepareRemoteHost(host)
+      if (await hasRemoteTmuxSession(id, host)) {
+        await reattachRemotePty(id, host)
+      } else {
+        await createRemotePty(id, session.worktreePath, host, { continueSession: true })
+      }
+    } catch (err) {
+      session.connectionState = 'offline'
+      onSessionsChanged()
+      throw err
     }
     session.connectionState = 'live'
     updateSession(id, 'idle')

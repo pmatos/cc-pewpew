@@ -41,7 +41,13 @@ import {
 } from './session-manager'
 import { parseDiff, synthesizeUntrackedFile } from './diff-parser'
 import { listHosts, addHost, updateHost, deleteHost, getHost } from './host-registry'
-import { testConnection, validateRemoteRepo, stopAllHostConnections } from './host-connection'
+import {
+  testConnection,
+  validateRemoteRepo,
+  stopAllHostConnections,
+  stopHostConnection,
+} from './host-connection'
+import { invalidateBootstrap } from './host-bootstrap'
 import {
   listRemoteProjects,
   addRemoteProject as persistRemoteProject,
@@ -466,9 +472,15 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('hosts:list', () => listHosts())
   ipcMain.handle('hosts:add', (_event, alias: string, label: string) => addHost({ alias, label }))
-  ipcMain.handle('hosts:update', (_event, hostId: string, alias: string, label: string) =>
-    updateHost(hostId, { alias, label })
-  )
+  ipcMain.handle('hosts:update', async (_event, hostId: string, alias: string, label: string) => {
+    const previous = getHost(hostId)
+    const updated = updateHost(hostId, { alias, label })
+    if (previous && previous.alias !== alias) {
+      invalidateBootstrap(hostId)
+      await stopHostConnection(hostId).catch(() => undefined)
+    }
+    return updated
+  })
   ipcMain.handle('hosts:delete', (_event, hostId: string) => deleteHost(hostId))
   ipcMain.handle('hosts:test-connection', async (_event, hostId: string) => {
     const host = getHost(hostId)

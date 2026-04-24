@@ -199,8 +199,25 @@ async function startRuntime(runtime: HostRuntime): Promise<void> {
     })
   })
 
+  // Attach before any await so spawn failures (ENOENT, EACCES) don't
+  // bubble up as unhandled EventEmitter errors and crash the main process.
+  const errorPromise = new Promise<never>((_, reject) => {
+    child.once('error', (err) => {
+      runtime.child = null
+      runtime.state = 'offline'
+      const errno = err as NodeJS.ErrnoException
+      reject(
+        new Error(
+          errno.code === 'ENOENT'
+            ? 'ssh: command not found'
+            : `ssh failed to spawn: ${errno.message || errno.code || 'unknown'}`
+        )
+      )
+    })
+  })
+
   try {
-    await Promise.race([waitForControl(runtime), exitPromise])
+    await Promise.race([waitForControl(runtime), exitPromise, errorPromise])
     runtime.state = 'live'
   } catch (err) {
     const exitCode = child.exitCode

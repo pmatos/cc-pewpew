@@ -60,6 +60,13 @@ export interface HostBootstrapResult {
 
 const bootstrapped = new Map<string, HostBootstrapResult>()
 
+// Called when the SSH target for a host changes (alias edit). Drops the cached
+// bootstrap result so the next session re-probes dependencies and reinstalls
+// notify hooks on the new endpoint.
+export function invalidateBootstrap(hostId: string): void {
+  bootstrapped.delete(hostId)
+}
+
 async function expectOk(
   result: ExecResult,
   kind: HostBootstrapErrorKind,
