@@ -860,6 +860,11 @@ async function doProbePendingSessionsOnHost(
   let bailed = false
   for (const s of pending) {
     if (bailed) break
+    // The snapshot was taken once at batch entry; by the time we get here
+    // another concurrent reconnect (e.g. user clicking a sibling card) may
+    // have already advanced this session out of `pending`. Skip — otherwise
+    // we'd duplicate the remote reattach and leak the earlier runtime retain.
+    if (s.connectionState !== 'pending') continue
     try {
       const probe = await probeRemoteTmuxSession(s.id, host)
       if (probe === 'present') {

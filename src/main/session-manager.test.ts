@@ -21,6 +21,10 @@ const state = vi.hoisted(() => ({
   reattachPtyCalls: [] as string[],
   hasRemoteTmuxResult: new Map<string, boolean>(),
   probeRemoteTmuxResult: new Map<string, 'present' | 'absent' | 'unreachable'>(),
+  // Per-session side effect fired before the probe resolves. Lets tests
+  // simulate a concurrent reconnect advancing another session's state while
+  // the batch is in flight.
+  probeSideEffect: new Map<string, () => void>(),
   runtimeRefs: new Map<string, number>(),
   sessionsUpdatedBroadcasts: 0,
   execRemoteCalls: [] as { hostId: string; argv: string[] }[],
@@ -104,6 +108,8 @@ vi.mock('./pty-manager', () => ({
     return state.hasRemoteTmuxResult.get(sessionId) ?? false
   }),
   probeRemoteTmuxSession: vi.fn(async (sessionId: string) => {
+    const effect = state.probeSideEffect.get(sessionId)
+    if (effect) effect()
     const explicit = state.probeRemoteTmuxResult.get(sessionId)
     if (explicit) return explicit
     // Back-compat for tests written against hasRemoteTmuxResult: true →
@@ -231,6 +237,7 @@ beforeEach(() => {
   state.probeRemoteTmuxResult = new Map()
   state.runtimeRefs = new Map()
   state.sessionsUpdatedBroadcasts = 0
+  state.probeSideEffect = new Map()
   state.execRemoteCalls = []
   state.ensureHostConnectionThrows = null
   state.ensureHostConnectionGate = null
@@ -610,6 +617,39 @@ describe('probePendingSessionsOnHost', () => {
     expect(byId['b'].connectionState).toBe('unreachable')
     // c remains pending — we bail to avoid a flood of SSH calls on a bad host
     expect(byId['c'].connectionState).toBe('pending')
+  })
+
+  it('skips a sibling whose state advanced out of pending during the batch', async () => {
+    // If a concurrent reconnect moves a sibling out of `pending` while the
+    // batch is iterating, the batch must not re-probe/reattach it (doing so
+    // would duplicate the remote attach and leak refs).
+    writeSessionsJson(threePendingOnH1())
+    state.probeRemoteTmuxResult.set('a', 'present')
+    state.probeRemoteTmuxResult.set('b', 'present')
+    state.probeRemoteTmuxResult.set('c', 'present')
+    state.runtimeStates.set('h1', 'live')
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    // When the batch probes 'a' (first sibling in the snapshot), flip 'b'
+    // out of pending — simulating a concurrent reconnect on 'b' completing
+    // mid-batch.
+    state.probeSideEffect.set('a', () => {
+      const bSession = sm.getSessions().find((s) => s.id === 'b')!
+      bSession.connectionState = 'live'
+      bSession.status = 'idle'
+    })
+
+    await sm.probePendingSessionsOnHost('h1')
+
+    // 'b' must not have been reattached by the batch (state ≠ pending).
+    const bReattaches = state.reattachRemotePtyCalls.filter((c) => c.sessionId === 'b').length
+    expect(bReattaches).toBe(0)
+    // 'a' and 'c' still got reattached.
+    const aReattaches = state.reattachRemotePtyCalls.filter((c) => c.sessionId === 'a').length
+    const cReattaches = state.reattachRemotePtyCalls.filter((c) => c.sessionId === 'c').length
+    expect(aReattaches).toBe(1)
+    expect(cReattaches).toBe(1)
   })
 
   it('idempotency: concurrent batch probes coalesce', async () => {
