@@ -28,7 +28,12 @@ import { installHooks, installRemoteHooks } from './hook-installer'
 import { getHost } from './host-registry'
 import { listRemoteProjects } from './remote-project-registry'
 import { listenHookServerForHost } from './hook-server'
-import { ensureHostConnection, exec as execRemote } from './host-connection'
+import {
+  ensureHostConnection,
+  exec as execRemote,
+  retainHostConnection,
+  releaseHostConnection,
+} from './host-connection'
 import { bootstrapHost } from './host-bootstrap'
 import type { Host, RemoteProject, Session, SessionStatus } from '../shared/types'
 
@@ -379,40 +384,50 @@ async function createRemoteSession(
   const branchName = `cc-pewpew/${worktreeName}`
 
   const { notifyScriptPath } = await prepareRemoteHost(host)
-
-  const addWithBranch = await execRemote(host, [
-    'git',
-    '-C',
-    projectPath,
-    'worktree',
-    'add',
-    worktreePath,
-    '-b',
-    branchName,
-  ])
-  if (addWithBranch.timedOut || addWithBranch.code !== 0) {
-    await expectRemoteOk(
-      host,
-      ['git', '-C', projectPath, 'worktree', 'add', worktreePath],
-      'Failed to create remote worktree'
-    )
-  }
-
-  const branch =
-    (
+  // Own the SSH runtime while we run the failure-prone setup. createRemotePty
+  // takes its own retain on success (paired with the PTY lifecycle); on
+  // failure our release drops the orphaned connection.
+  retainHostConnection(hostId)
+  let branch: string
+  try {
+    const addWithBranch = await execRemote(host, [
+      'git',
+      '-C',
+      projectPath,
+      'worktree',
+      'add',
+      worktreePath,
+      '-b',
+      branchName,
+    ])
+    if (addWithBranch.timedOut || addWithBranch.code !== 0) {
       await expectRemoteOk(
         host,
-        ['git', '-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
-        'Failed to resolve remote branch'
+        ['git', '-C', projectPath, 'worktree', 'add', worktreePath],
+        'Failed to create remote worktree'
       )
-    ).trim() || branchName
+    }
 
-  await installRemoteHooks(
-    (argv, opts) => execRemote(host, argv, opts),
-    worktreePath,
-    notifyScriptPath
-  )
-  await createRemotePty(id, worktreePath, host)
+    branch =
+      (
+        await expectRemoteOk(
+          host,
+          ['git', '-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+          'Failed to resolve remote branch'
+        )
+      ).trim() || branchName
+
+    await installRemoteHooks(
+      (argv, opts) => execRemote(host, argv, opts),
+      worktreePath,
+      notifyScriptPath
+    )
+    await createRemotePty(id, worktreePath, host)
+  } catch (err) {
+    await releaseHostConnection(hostId).catch(() => undefined)
+    throw err
+  }
+  await releaseHostConnection(hostId).catch(() => undefined)
 
   const session: Session = {
     id,
@@ -552,10 +567,12 @@ export async function reviveSession(id: string): Promise<void> {
 
   if (session.hostId) {
     const host = getRequiredHost(session.hostId)
+    const hostId = session.hostId
     session.connectionState = 'connecting'
     onSessionsChanged()
+    await prepareRemoteHost(host)
+    retainHostConnection(hostId)
     try {
-      await prepareRemoteHost(host)
       if (await hasRemoteTmuxSession(id, host)) {
         await reattachRemotePty(id, host)
       } else {
@@ -564,8 +581,10 @@ export async function reviveSession(id: string): Promise<void> {
     } catch (err) {
       session.connectionState = 'offline'
       onSessionsChanged()
+      await releaseHostConnection(hostId).catch(() => undefined)
       throw err
     }
+    await releaseHostConnection(hostId).catch(() => undefined)
     session.connectionState = 'live'
     updateSession(id, 'idle')
     return
