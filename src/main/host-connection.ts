@@ -56,17 +56,23 @@ function uidSegment(): string {
   }
 }
 
+// Strip any character that could let a hand-edited/corrupted hostId traverse
+// out of the intended directory when used in a filesystem path. UUIDs pass
+// through unchanged. Shared with hook-server.ts and any other module that
+// uses hostId as a path segment.
+export function sanitizeHostIdForPath(hostId: HostId): string {
+  return hostId.replace(/[^A-Za-z0-9_.-]/g, '_')
+}
+
 export function remoteSocketPathForHost(hostId: HostId): string {
   // Include hostId so two configured hosts that resolve to the same remote
   // account don't collide on the reverse-forwarded socket (StreamLocalBindUnlink
   // would otherwise let the later connection steal the earlier one's socket).
-  // hostId is UUID-shaped but sanitize defensively against hand-edited configs.
-  const safeId = hostId.replace(/[^A-Za-z0-9_.-]/g, '_')
-  return `/tmp/cc-pewpew-${uidSegment()}-${safeId}.sock`
+  return `/tmp/cc-pewpew-${uidSegment()}-${sanitizeHostIdForPath(hostId)}.sock`
 }
 
 function controlPathForHost(hostId: HostId): string {
-  return join(CONFIG_DIR, `ssh-${hostId}.sock`)
+  return join(CONFIG_DIR, `ssh-${sanitizeHostIdForPath(hostId)}.sock`)
 }
 
 function runtimeFor(host: Host, localSocketPath: string): HostRuntime {

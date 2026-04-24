@@ -3,6 +3,7 @@ import { writeFileSync, unlinkSync, existsSync } from 'fs'
 import { join } from 'path'
 import { broadcastToAll } from './window-registry'
 import { CONFIG_DIR } from './config'
+import { sanitizeHostIdForPath } from './host-connection'
 import { handleHookEvent } from './session-manager'
 
 const LOCAL_SOCKET_PATH = join(CONFIG_DIR, 'ipc.sock')
@@ -24,7 +25,11 @@ function originKey(originHostId: string | null): string {
 }
 
 function socketPathForOrigin(originHostId: string | null): string {
-  return originHostId ? join(CONFIG_DIR, `ipc-${originHostId}.sock`) : LOCAL_SOCKET_PATH
+  // Sanitize hostId so a malformed/hand-edited value can't escape CONFIG_DIR
+  // through path traversal segments.
+  return originHostId
+    ? join(CONFIG_DIR, `ipc-${sanitizeHostIdForPath(originHostId)}.sock`)
+    : LOCAL_SOCKET_PATH
 }
 
 function unlinkIfPresent(path: string): void {
