@@ -112,14 +112,21 @@ export async function bootstrapHost(
     )
   }
 
-  const home = await connection.exec(['sh', '-c', 'printf "%s" "$HOME"'], { timeoutMs: 5000 })
-  await expectOk(home, 'install-failed', 'Unable to resolve remote HOME')
-  const remoteHome = home.stdout.trim()
-  if (!remoteHome.startsWith('/')) {
-    throw new HostBootstrapError('install-failed', 'Remote HOME is not an absolute path')
+  // Resolve the remote config root the same way notifyScript does
+  // (`${XDG_CONFIG_HOME:-$HOME/.config}`), so the breadcrumb we write here is
+  // the one the script reads at hook time. Hardcoding $HOME/.config would
+  // silently drop events on remotes with XDG_CONFIG_HOME set.
+  const configRootProbe = await connection.exec(
+    ['sh', '-c', 'printf "%s" "${XDG_CONFIG_HOME:-$HOME/.config}"'],
+    { timeoutMs: 5000 }
+  )
+  await expectOk(configRootProbe, 'install-failed', 'Unable to resolve remote config root')
+  const configRoot = configRootProbe.stdout.trim()
+  if (!configRoot.startsWith('/')) {
+    throw new HostBootstrapError('install-failed', 'Remote config root is not an absolute path')
   }
 
-  const hooksDir = posix.join(remoteHome, '.config', 'cc-pewpew', 'hooks')
+  const hooksDir = posix.join(configRoot, 'cc-pewpew', 'hooks')
   const notifyScriptPath = posix.join(hooksDir, `notify-v${NOTIFY_SCRIPT_VERSION}.sh`)
   const breadcrumbPath = posix.join(hooksDir, 'socket-path')
   const installScript =

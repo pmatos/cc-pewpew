@@ -18,7 +18,7 @@ function fakeConnection(calls: string[][], depsStdout = '\n'): HostBootstrapConn
       const script = argv[2]
       if (script.includes('command -v')) return ok(depsStdout)
       if (script === 'test -S "$1"') return ok()
-      if (script.includes('printf "%s" "$HOME"')) return ok('/home/dev')
+      if (script.includes('XDG_CONFIG_HOME')) return ok('/home/dev/.config')
       if (script.includes('notify-v')) return ok()
       return ok()
     },
