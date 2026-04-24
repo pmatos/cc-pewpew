@@ -257,17 +257,44 @@ const LAST_KNOWN_STATE_MIN_INTERVAL_MS = 10_000
 const LAST_KNOWN_STATE_MAX_BYTES = 3 * 1024
 const lastKnownStateWrites = new Map<string, number>()
 
-export function updateLastKnownState(id: string, text: string): void {
+// Mutate a single session's `lastKnownState` in memory, respecting the 10s
+// per-session rate limit and 3 KiB cap. Returns `true` when the entry was
+// actually mutated so the caller can decide whether to flush; callers that
+// update many sessions in one tick should prefer `updateLastKnownStatesBatch`
+// to collapse the disk write + broadcast into one call (avoids an O(N) write
+// storm from a tight timer loop).
+function applyLastKnownState(id: string, text: string, now: number): boolean {
   const entry = sessions.get(id)
-  if (!entry) return
-  const now = Date.now()
+  if (!entry) return false
   const last = lastKnownStateWrites.get(id) ?? 0
-  if (now - last < LAST_KNOWN_STATE_MIN_INTERVAL_MS) return
+  if (now - last < LAST_KNOWN_STATE_MIN_INTERVAL_MS) return false
   const trimmed =
     text.length > LAST_KNOWN_STATE_MAX_BYTES ? text.slice(-LAST_KNOWN_STATE_MAX_BYTES) : text
   entry.session.lastKnownState = { text: trimmed, timestamp: now }
   lastKnownStateWrites.set(id, now)
-  onSessionsChanged()
+  return true
+}
+
+export function updateLastKnownState(id: string, text: string): void {
+  const now = Date.now()
+  if (applyLastKnownState(id, text, now)) {
+    onSessionsChanged()
+  }
+}
+
+// Batch variant for the periodic thumbnail tick: collects all (id, text)
+// pairs for one tick and emits a single persist + broadcast when at least
+// one session was updated. Prevents an O(N) burst of JSON writes when many
+// session snapshots unlock the 10s window simultaneously.
+export function updateLastKnownStatesBatch(
+  updates: ReadonlyArray<{ id: string; text: string }>
+): void {
+  const now = Date.now()
+  let any = false
+  for (const { id, text } of updates) {
+    if (applyLastKnownState(id, text, now)) any = true
+  }
+  if (any) onSessionsChanged()
 }
 
 // Re-probe PR numbers for sessions that don't have one yet, so a PR opened
@@ -617,8 +644,12 @@ export async function killSession(id: string): Promise<void> {
 
 // In-flight reconnect promises keyed by session id. Two concurrent clicks on
 // the same pending card (fast double-click, or a click that races the
-// auto-fired batch probe) coalesce into one SSH attempt.
-const inflightReconnects = new Map<string, Promise<void>>()
+// auto-fired batch probe) coalesce into one SSH attempt. The resolved value
+// is the host's runtime state at the moment the reconnect finished (before
+// any refcount drop that might tear the runtime down) — the outer caller
+// uses it as a `stateHint` for `probePendingSessionsOnHost` so the sibling
+// cascade still works after the runtime entry has been released.
+const inflightReconnects = new Map<string, Promise<HostConnectionState | undefined>>()
 
 // Probe-only reconnect for a remote session. If the remote tmux session is
 // present we reattach and mark `live`; if it is gone we mark the session
@@ -631,13 +662,17 @@ const inflightReconnects = new Map<string, Promise<void>>()
 // network-unreachable get distinct UI states without re-parsing stderr.
 export async function reconnectRemoteSession(id: string): Promise<void> {
   const existing = inflightReconnects.get(id)
-  if (existing) return existing
+  if (existing) {
+    await existing
+    return
+  }
 
   const promise = doReconnectRemoteSession(id)
   inflightReconnects.set(id, promise)
   let reconnectError: unknown = undefined
+  let successState: HostConnectionState | undefined
   try {
-    await promise
+    successState = await promise
   } catch (err) {
     reconnectError = err
   } finally {
@@ -648,22 +683,26 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
   // multiple cards of the same host still collapse to a single batch.
   //
   // Always attempt the batch probe, even when the clicked reconnect rejected:
-  // - on success (runtime `live`), we reconcile siblings over the now-live
-  //   ControlMaster
+  // - on success (runtime was `live`), we reconcile siblings over the
+  //   now-live ControlMaster
   // - on auth-failed / unreachable, the batch's short-circuit cascades that
   //   state to every pending sibling without any new SSH I/O (spec AC #8)
+  //
   // Skip only when there's no host at all (orphaned hostId / missing registry
-  // entry): there is nothing to probe.
+  // entry) or we couldn't determine any state — there's nothing to probe.
   const entry = sessions.get(id)
   const hostId = entry?.session.hostId
   if (hostId) {
-    // Prefer the state tagged onto the error by prepareRemoteHost — the
-    // runtime may have been deleted by stopHostConnection, so a direct
-    // runtimeStateFor lookup here would be `undefined` for the very cases
-    // (auth-failed / unreachable) the batch's short-circuit needs to catch.
+    // Prefer the state captured inside doReconnectRemoteSession BEFORE the
+    // final `releaseHostConnection` ran. For `absent` / `unreachable`
+    // outcomes the PTY doesn't retain the runtime, so release drops refcount
+    // to zero and stopHostConnection deletes the runtime entry — a fresh
+    // runtimeStateFor lookup here would therefore return `undefined`.
+    // Similarly, prepareRemoteHost stashes the pre-teardown state on the
+    // error so the catch-path cascade still works.
     const tagged = (reconnectError as { hostConnectionState?: HostConnectionState } | null)
       ?.hostConnectionState
-    const stateHint = tagged ?? runtimeStateFor(hostId)
+    const stateHint = successState ?? tagged ?? runtimeStateFor(hostId)
     if (stateHint) {
       probePendingSessionsOnHost(hostId, stateHint).catch((err) => {
         console.error(`probePendingSessionsOnHost(${hostId}) failed:`, err)
@@ -673,7 +712,7 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
   if (reconnectError !== undefined) throw reconnectError
 }
 
-async function doReconnectRemoteSession(id: string): Promise<void> {
+async function doReconnectRemoteSession(id: string): Promise<HostConnectionState | undefined> {
   const entry = sessions.get(id)
   if (!entry) throw new Error(`Session ${id} not found`)
   const session = entry.session
@@ -739,7 +778,15 @@ async function doReconnectRemoteSession(id: string): Promise<void> {
   // `retained` is unconditionally true at this point — the only path that
   // leaves it false throws inside prepareRemoteHost and goes through the
   // catch block's `throw err`.
+  //
+  // Snapshot the runtime state BEFORE the release: on `absent` or
+  // `unreachable` outcomes the PTY did not take a retain, so this release
+  // drops the refcount to zero and stopHostConnection deletes the entry. The
+  // outer reconnectRemoteSession uses the returned state as the sibling
+  // batch probe's stateHint.
+  const finalState = runtimeStateFor(hostId)
   await releaseHostConnection(hostId).catch(() => undefined)
+  return finalState
 }
 
 // Eager batch probe for remaining `pending` sessions on a host that just

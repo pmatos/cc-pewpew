@@ -21,6 +21,8 @@ const state = vi.hoisted(() => ({
   reattachPtyCalls: [] as string[],
   hasRemoteTmuxResult: new Map<string, boolean>(),
   probeRemoteTmuxResult: new Map<string, 'present' | 'absent' | 'unreachable'>(),
+  runtimeRefs: new Map<string, number>(),
+  sessionsUpdatedBroadcasts: 0,
   execRemoteCalls: [] as { hostId: string; argv: string[] }[],
   // Toggle to simulate ensureHostConnection throwing.
   ensureHostConnectionThrows: null as null | { message: string; runtimeStateAfter: string },
@@ -48,7 +50,9 @@ vi.mock('./config', () => ({
 }))
 
 vi.mock('./window-registry', () => ({
-  broadcastToAll: vi.fn(),
+  broadcastToAll: (channel: string) => {
+    if (channel === 'sessions:updated') state.sessionsUpdatedBroadcasts++
+  },
   getMainWindow: () => null,
 }))
 
@@ -114,9 +118,13 @@ vi.mock('./pty-manager', () => ({
   },
   reattachRemotePty: async (sessionId: string, host: Host) => {
     state.reattachRemotePtyCalls.push({ sessionId, hostId: host.hostId })
+    // Match production: reattachRemotePty retains the host runtime for the
+    // PTY's lifetime so the runtime survives the caller's release.
+    state.runtimeRefs.set(host.hostId, (state.runtimeRefs.get(host.hostId) ?? 0) + 1)
   },
   createRemotePty: async (sessionId: string, cwd: string, host: Host) => {
     state.createRemotePtyCalls.push({ sessionId, cwd, hostId: host.hostId })
+    state.runtimeRefs.set(host.hostId, (state.runtimeRefs.get(host.hostId) ?? 0) + 1)
   },
 }))
 
@@ -137,11 +145,24 @@ vi.mock('./host-connection', () => ({
     state.execRemoteCalls.push({ hostId, argv })
     return { stdout: '', stderr: '', code: 0, timedOut: false }
   },
-  retainHostConnection: vi.fn(),
-  releaseHostConnection: vi.fn(async () => undefined),
-  // Match production: stopHostConnection deletes the runtime entry, so any
-  // caller reading runtimeStateFor(hostId) AFTER stop sees `undefined`.
+  retainHostConnection: vi.fn((hostId: string) => {
+    state.runtimeRefs.set(hostId, (state.runtimeRefs.get(hostId) ?? 0) + 1)
+  }),
+  // Match production: releaseHostConnection decrements refcount; on zero it
+  // delegates to stopHostConnection which wipes the runtime entry. That delete
+  // is what makes the sibling-batch cascade dependent on a state hint
+  // captured BEFORE the release.
+  releaseHostConnection: vi.fn(async (hostId: string) => {
+    const refs = (state.runtimeRefs.get(hostId) ?? 0) - 1
+    if (refs <= 0) {
+      state.runtimeRefs.delete(hostId)
+      state.runtimeStates.delete(hostId)
+    } else {
+      state.runtimeRefs.set(hostId, refs)
+    }
+  }),
   stopHostConnection: vi.fn(async (hostId: string) => {
+    state.runtimeRefs.delete(hostId)
     state.runtimeStates.delete(hostId)
   }),
   runtimeStateFor: (hostId: string) => state.runtimeStates.get(hostId),
@@ -208,6 +229,8 @@ beforeEach(() => {
   state.reattachPtyCalls = []
   state.hasRemoteTmuxResult = new Map()
   state.probeRemoteTmuxResult = new Map()
+  state.runtimeRefs = new Map()
+  state.sessionsUpdatedBroadcasts = 0
   state.execRemoteCalls = []
   state.ensureHostConnectionThrows = null
   state.ensureHostConnectionGate = null
@@ -421,6 +444,32 @@ describe('reconnectRemoteSession', () => {
     expect(state.reattachRemotePtyCalls).toEqual([])
   })
 
+  it('triggers sibling batch probe even when absent-outcome release tore down the runtime', async () => {
+    // Regression: on 'absent' path the PTY does not retain, so the final
+    // releaseHostConnection drops refcount to 0 → stopHostConnection deletes
+    // the runtime entry. A post-reconnect lookup via runtimeStateFor would
+    // therefore return undefined and skip the batch probe. We must capture
+    // the state BEFORE the release.
+    writeSessionsJson([
+      baseRemoteSession({ id: 'first', hostId: 'h1', status: 'idle' }),
+      baseRemoteSession({ id: 'sibling', hostId: 'h1', status: 'idle' }),
+    ] as Session[])
+    state.probeRemoteTmuxResult.set('first', 'absent')
+    state.probeRemoteTmuxResult.set('sibling', 'present')
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    await sm.reconnectRemoteSession('first')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    // Runtime should now be deleted (no PTY retained it on the absent path).
+    expect(state.runtimeStates.has('h1')).toBe(false)
+    // Sibling still got probed and transitioned to live.
+    const byId = Object.fromEntries(sm.getSessions().map((s) => [s.id, s]))
+    expect(byId['first'].status).toBe('dead')
+    expect(byId['sibling'].connectionState).toBe('live')
+  })
+
   it('triggers sibling batch probe even when first session ends dead (host is live)', async () => {
     writeSessionsJson([
       baseRemoteSession({ id: 'first', hostId: 'h1', status: 'idle' }),
@@ -552,6 +601,45 @@ describe('probePendingSessionsOnHost', () => {
     await Promise.all([sm.probePendingSessionsOnHost('h1'), sm.probePendingSessionsOnHost('h1')])
 
     expect(state.reattachRemotePtyCalls).toHaveLength(3)
+  })
+})
+
+describe('updateLastKnownStatesBatch', () => {
+  it('persists once per batch regardless of session count', async () => {
+    writeSessionsJson([
+      baseRemoteSession({ id: 'a', hostId: 'h1' }),
+      baseRemoteSession({ id: 'b', hostId: 'h1' }),
+      baseRemoteSession({ id: 'c', hostId: 'h1' }),
+    ] as Session[])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    const before = state.sessionsUpdatedBroadcasts
+
+    sm.updateLastKnownStatesBatch([
+      { id: 'a', text: 'aaa' },
+      { id: 'b', text: 'bbb' },
+      { id: 'c', text: 'ccc' },
+    ])
+
+    expect(state.sessionsUpdatedBroadcasts - before).toBe(1)
+    const byId = Object.fromEntries(sm.getSessions().map((s) => [s.id, s]))
+    expect(byId['a'].lastKnownState?.text).toBe('aaa')
+    expect(byId['b'].lastKnownState?.text).toBe('bbb')
+    expect(byId['c'].lastKnownState?.text).toBe('ccc')
+  })
+
+  it('does not persist when every update is rate-limited', async () => {
+    writeSessionsJson([baseRemoteSession({ id: 'a' })])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    sm.updateLastKnownStatesBatch([{ id: 'a', text: 'first' }])
+    const afterFirst = state.sessionsUpdatedBroadcasts
+
+    // Immediate second call: rate-limited, must not trigger another broadcast.
+    sm.updateLastKnownStatesBatch([{ id: 'a', text: 'second' }])
+
+    expect(state.sessionsUpdatedBroadcasts - afterFirst).toBe(0)
   })
 })
 
