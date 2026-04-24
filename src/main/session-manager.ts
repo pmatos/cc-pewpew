@@ -33,6 +33,7 @@ import {
   exec as execRemote,
   retainHostConnection,
   releaseHostConnection,
+  stopHostConnection,
 } from './host-connection'
 import { bootstrapHost } from './host-bootstrap'
 import type { Host, RemoteProject, Session, SessionStatus } from '../shared/types'
@@ -104,12 +105,23 @@ function getRequiredHost(hostId: string): Host {
 }
 
 // Contract: on success the caller owns an incremented refcount on the host
-// SSH runtime and must call releaseHostConnection eventually. Retaining here
-// (after ensureHostConnection puts the runtime in the map) also covers
-// bootstrap failures, which previously left a live runtime with refs=0.
+// SSH runtime and must call releaseHostConnection eventually. Retaining after
+// ensureHostConnection also covers bootstrap failures. An ensureHostConnection
+// failure still has to tear down the hook listener we started first (the
+// reverse-forward target); stopHostConnection triggers the
+// setOnHostConnectionStopped callback to do that.
 async function prepareRemoteHost(host: Host): Promise<{ notifyScriptPath: string }> {
   const localSocketPath = listenHookServerForHost(host.hostId)
-  const { remoteSocketPath } = await ensureHostConnection(host, localSocketPath)
+  let remoteSocketPath: string
+  try {
+    ;({ remoteSocketPath } = await ensureHostConnection(host, localSocketPath))
+  } catch (err) {
+    // SSH couldn't start. Tear down the host runtime (which runtimeFor already
+    // registered) so the hook-server teardown callback fires and we don't leak
+    // the per-host listener across repeated failed startups.
+    await stopHostConnection(host.hostId).catch(() => undefined)
+    throw err
+  }
   retainHostConnection(host.hostId)
   try {
     const bootstrap = await bootstrapHost(
