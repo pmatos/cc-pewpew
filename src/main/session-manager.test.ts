@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
   createPtyCalls: [] as { sessionId: string; cwd: string }[],
   reattachPtyCalls: [] as string[],
   hasRemoteTmuxResult: new Map<string, boolean>(),
+  probeRemoteTmuxResult: new Map<string, 'present' | 'absent' | 'unreachable'>(),
   execRemoteCalls: [] as { hostId: string; argv: string[] }[],
   // Toggle to simulate ensureHostConnection throwing.
   ensureHostConnectionThrows: null as null | { message: string; runtimeStateAfter: string },
@@ -97,6 +98,14 @@ vi.mock('./pty-manager', () => ({
   hasTmuxSession: vi.fn(() => false),
   hasRemoteTmuxSession: vi.fn(async (sessionId: string) => {
     return state.hasRemoteTmuxResult.get(sessionId) ?? false
+  }),
+  probeRemoteTmuxSession: vi.fn(async (sessionId: string) => {
+    const explicit = state.probeRemoteTmuxResult.get(sessionId)
+    if (explicit) return explicit
+    // Back-compat for tests written against hasRemoteTmuxResult: true →
+    // present, false → absent. Tests that need 'unreachable' set it via
+    // probeRemoteTmuxResult directly.
+    return state.hasRemoteTmuxResult.get(sessionId) ? 'present' : 'absent'
   }),
   isTmuxAvailable: () => state.tmuxAvailable,
   discoverTmuxSessions: () => [...state.liveTmuxIds],
@@ -194,6 +203,7 @@ beforeEach(() => {
   state.createPtyCalls = []
   state.reattachPtyCalls = []
   state.hasRemoteTmuxResult = new Map()
+  state.probeRemoteTmuxResult = new Map()
   state.execRemoteCalls = []
   state.ensureHostConnectionThrows = null
   state.ensureHostConnectionGate = null
@@ -367,6 +377,43 @@ describe('reconnectRemoteSession', () => {
     expect(state.reattachRemotePtyCalls).toHaveLength(1)
   })
 
+  it('SSH probe failure on reconnect → unreachable, NOT dead', async () => {
+    writeSessionsJson([baseRemoteSession({ id: 'r1', status: 'idle' })])
+    state.probeRemoteTmuxResult.set('r1', 'unreachable')
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    await sm.reconnectRemoteSession('r1')
+
+    const got = sm.getSessions()[0]
+    expect(got.connectionState).toBe('unreachable')
+    expect(got.status).toBe('idle')
+    expect(state.reattachRemotePtyCalls).toEqual([])
+  })
+
+  it('triggers sibling batch probe even when first session ends dead (host is live)', async () => {
+    writeSessionsJson([
+      baseRemoteSession({ id: 'first', hostId: 'h1', status: 'idle' }),
+      baseRemoteSession({ id: 'sibling', hostId: 'h1', status: 'idle' }),
+    ] as Session[])
+    // First session: tmux gone, but host is live → dead outcome
+    state.probeRemoteTmuxResult.set('first', 'absent')
+    // Sibling: tmux alive
+    state.probeRemoteTmuxResult.set('sibling', 'present')
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    await sm.reconnectRemoteSession('first')
+    // Allow the fire-and-forget batch probe to complete.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const byId = Object.fromEntries(sm.getSessions().map((s) => [s.id, s]))
+    expect(byId['first'].status).toBe('dead')
+    expect(byId['first'].connectionState).toBe('offline')
+    // Critical: sibling was probed via the now-live host connection
+    expect(byId['sibling'].connectionState).toBe('live')
+  })
+
   it('retry succeeds after an auth-failed attempt (no app restart needed)', async () => {
     writeSessionsJson([baseRemoteSession({ id: 'r1', status: 'idle' })])
     state.ensureHostConnectionThrows = {
@@ -443,6 +490,24 @@ describe('probePendingSessionsOnHost', () => {
     expect(sm.getSessions().every((s) => s.connectionState === 'auth-failed')).toBe(true)
     expect(state.execRemoteCalls).toEqual([])
     expect(state.reattachRemotePtyCalls).toEqual([])
+  })
+
+  it('SSH probe failure on a sibling → mark it unreachable and bail, do NOT downgrade rest to dead', async () => {
+    writeSessionsJson(threePendingOnH1())
+    state.probeRemoteTmuxResult.set('a', 'present')
+    state.probeRemoteTmuxResult.set('b', 'unreachable')
+    state.probeRemoteTmuxResult.set('c', 'present')
+    state.runtimeStates.set('h1', 'live')
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    await sm.probePendingSessionsOnHost('h1')
+
+    const byId = Object.fromEntries(sm.getSessions().map((s) => [s.id, s]))
+    expect(byId['a'].connectionState).toBe('live')
+    expect(byId['b'].connectionState).toBe('unreachable')
+    // c remains pending — we bail to avoid a flood of SSH calls on a bad host
+    expect(byId['c'].connectionState).toBe('pending')
   })
 
   it('idempotency: concurrent batch probes coalesce', async () => {

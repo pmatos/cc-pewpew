@@ -19,6 +19,7 @@ import {
   hasRemoteTmuxSession,
   isTmuxAvailable,
   discoverTmuxSessions,
+  probeRemoteTmuxSession,
   reattachPty,
   reattachRemotePty,
   createRemotePty,
@@ -630,10 +631,16 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
   // Fire-and-forget the sibling batch probe — the caller should not block on
   // it. `probePendingSessionsOnHost` is idempotent so concurrent clicks on
   // multiple cards of the same host still collapse to a single batch.
+  //
+  // Trigger whenever the host control connection is live, not when the clicked
+  // session is live: if the first click landed on a session whose remote tmux
+  // was already gone (session ends `dead`), the host itself is reachable, so
+  // we still want to reconcile the other pending sessions on it.
   const entry = sessions.get(id)
-  if (entry?.session.hostId && entry.session.connectionState === 'live') {
-    probePendingSessionsOnHost(entry.session.hostId).catch((err) => {
-      console.error(`probePendingSessionsOnHost(${entry.session.hostId}) failed:`, err)
+  const hostId = entry?.session.hostId
+  if (hostId && runtimeStateFor(hostId) === 'live') {
+    probePendingSessionsOnHost(hostId).catch((err) => {
+      console.error(`probePendingSessionsOnHost(${hostId}) failed:`, err)
     })
   }
 }
@@ -659,18 +666,25 @@ async function doReconnectRemoteSession(id: string): Promise<void> {
   try {
     await prepareRemoteHost(host)
     retained = true
-    if (await hasRemoteTmuxSession(id, host)) {
+    const probe = await probeRemoteTmuxSession(id, host)
+    if (probe === 'present') {
       await reattachRemotePty(id, host)
       session.connectionState = 'live'
       if (session.status === 'running') session.status = 'idle'
       session.lastActivity = Date.now()
       onSessionsChanged()
-    } else {
-      // Remote tmux session is gone — session is dead. The user can invoke
-      // "Restart terminal" (reviveSession) to spawn a fresh remote session.
+    } else if (probe === 'absent') {
+      // Remote confirmed the tmux session is gone — mark dead. The user can
+      // invoke "Restart terminal" (reviveSession) to spawn a fresh one.
       session.connectionState = 'offline'
       session.status = 'dead'
       session.lastActivity = Date.now()
+      onSessionsChanged()
+    } else {
+      // SSH-level failure probing an otherwise-live control connection. Treat
+      // as unreachable and let the user retry; do NOT mark dead because the
+      // remote Claude may still be running.
+      session.connectionState = 'unreachable'
       onSessionsChanged()
     }
   } catch (err) {
@@ -688,9 +702,10 @@ async function doReconnectRemoteSession(id: string): Promise<void> {
     }
     throw err
   }
-  if (retained) {
-    await releaseHostConnection(hostId).catch(() => undefined)
-  }
+  // `retained` is unconditionally true at this point — the only path that
+  // leaves it false throws inside prepareRemoteHost and goes through the
+  // catch block's `throw err`.
+  await releaseHostConnection(hostId).catch(() => undefined)
 }
 
 // Eager batch probe for remaining `pending` sessions on a host that just
@@ -737,16 +752,22 @@ async function doProbePendingSessionsOnHost(hostId: string): Promise<void> {
   for (const s of pending) {
     if (bailed) break
     try {
-      const alive = await hasRemoteTmuxSession(s.id, host)
-      if (alive) {
+      const probe = await probeRemoteTmuxSession(s.id, host)
+      if (probe === 'present') {
         await reattachRemotePty(s.id, host)
         s.connectionState = 'live'
         if (s.status === 'running') s.status = 'idle'
         s.lastActivity = Date.now()
-      } else {
+      } else if (probe === 'absent') {
         s.connectionState = 'offline'
         s.status = 'dead'
         s.lastActivity = Date.now()
+      } else {
+        // SSH probe failed (timeout / auth / network) — the remote may still be
+        // running. Mark unreachable and bail so we don't mis-classify the rest
+        // of the batch as dead on a transient failure.
+        s.connectionState = 'unreachable'
+        bailed = true
       }
     } catch (err) {
       // A mid-batch SSH failure means the host dropped. Mark this sibling

@@ -331,6 +331,31 @@ export async function hasRemoteTmuxSession(sessionId: string, host: Host): Promi
   return result.code === 0 && !result.timedOut
 }
 
+// Discriminated probe: distinguishes "tmux session is absent on the remote"
+// from "we couldn't reach the remote to ask". The boolean `hasRemoteTmuxSession`
+// collapses both into `false`, which reconnect/batch-probe paths would otherwise
+// treat as a dead session and incorrectly downgrade a still-running remote
+// terminal.
+export type RemoteTmuxProbeResult = 'present' | 'absent' | 'unreachable'
+
+export async function probeRemoteTmuxSession(
+  sessionId: string,
+  host: Host
+): Promise<RemoteTmuxProbeResult> {
+  const result = await execRemote(host, ['tmux', 'has-session', '-t', `cc-pewpew-${sessionId}`], {
+    timeoutMs: 3000,
+  })
+  if (result.timedOut) return 'unreachable'
+  if (result.code === 0) return 'present'
+  const { reason } = classifySshExit({ exitCode: result.code, stderr: result.stderr })
+  if (reason === 'auth-failed' || reason === 'network' || reason === 'dep-missing') {
+    return 'unreachable'
+  }
+  // Non-zero exit with no SSH-level failure marker is tmux's own "can't find
+  // session" exit. The remote is reachable; the session is simply gone.
+  return 'absent'
+}
+
 export async function getScrollback(sessionId: string): Promise<string> {
   const entry = ptys.get(sessionId)
   if (entry?.host) {
