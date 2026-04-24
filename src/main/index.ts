@@ -264,11 +264,16 @@ app.whenReady().then(async () => {
     return getSessions()
   })
 
+  // Single-session handlers log and re-throw so the renderer can react (e.g.
+  // DetailPane.handleRevive clears its "Reviving..." state on rejection).
+  // Batch handlers below swallow per-session errors so one failure doesn't
+  // abort a multi-select operation.
   ipcMain.handle('sessions:kill', async (_event, id: string) => {
     try {
       await killSession(id)
     } catch (err) {
       console.error(`Failed to kill session ${id}:`, err)
+      throw err
     }
   })
 
@@ -277,6 +282,7 @@ app.whenReady().then(async () => {
       await reviveSession(id)
     } catch (err) {
       console.error(`Failed to revive session ${id}:`, err)
+      throw err
     }
   })
 
@@ -289,6 +295,7 @@ app.whenReady().then(async () => {
       await removeSession(id)
     } catch (err) {
       console.error(`Failed to remove session ${id}:`, err)
+      throw err
     }
   })
 

@@ -119,7 +119,11 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
       },
       {
         label: 'Kill session',
-        onClick: () => window.api.killSession(session.id),
+        onClick: () => {
+          // Don't let a rejected IPC (e.g. remote SSH failure) become an
+          // unhandled promise. The main-side error is already logged.
+          void window.api.killSession(session.id).catch(() => undefined)
+        },
       },
       {
         label: 'Remove from canvas',
