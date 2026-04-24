@@ -128,7 +128,13 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
       {
         label: 'Remove from canvas',
         onClick: async () => {
-          await window.api.removeSession(session.id)
+          try {
+            await window.api.removeSession(session.id)
+          } catch {
+            // Error already logged in main. Fall through to re-scan so the UI
+            // reflects whatever actually survived (e.g. a failed remote remove
+            // leaves the worktree, which scanProjects will still show).
+          }
           useProjectsStore.getState().scanProjects()
         },
       },

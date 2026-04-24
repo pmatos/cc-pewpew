@@ -585,8 +585,12 @@ export async function reviveSession(id: string): Promise<void> {
     onSessionsChanged()
     // prepareRemoteHost retains the SSH runtime on success; we release it at
     // the end/in catch. createRemotePty/reattachRemotePty take over on success.
-    await prepareRemoteHost(host)
+    // The prepareRemoteHost await is inside the try so a bootstrap failure
+    // also resets connectionState instead of leaving it pinned at connecting.
+    let retained = false
     try {
+      await prepareRemoteHost(host)
+      retained = true
       if (await hasRemoteTmuxSession(id, host)) {
         await reattachRemotePty(id, host)
       } else {
@@ -595,7 +599,9 @@ export async function reviveSession(id: string): Promise<void> {
     } catch (err) {
       session.connectionState = 'offline'
       onSessionsChanged()
-      await releaseHostConnection(hostId).catch(() => undefined)
+      if (retained) {
+        await releaseHostConnection(hostId).catch(() => undefined)
+      }
       throw err
     }
     await releaseHostConnection(hostId).catch(() => undefined)
