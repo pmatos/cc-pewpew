@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
   getSessions: () => ipcRenderer.invoke('sessions:list'),
   killSession: (id: string) => ipcRenderer.invoke('sessions:kill', id),
   reviveSession: (id: string) => ipcRenderer.invoke('sessions:revive', id),
+  reconnectSession: (id: string) => ipcRenderer.invoke('sessions:reconnect', id),
   removeWorktree: (id: string) => ipcRenderer.invoke('sessions:remove-worktree', id),
   removeSession: (id: string) => ipcRenderer.invoke('sessions:remove', id),
   killSessionBatch: (ids: string[]) => ipcRenderer.invoke('sessions:kill-batch', ids),

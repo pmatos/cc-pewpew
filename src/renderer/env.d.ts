@@ -35,6 +35,7 @@ declare global {
       getSessions: () => Promise<Session[]>
       killSession: (id: string) => Promise<void>
       reviveSession: (id: string) => Promise<void>
+      reconnectSession: (id: string) => Promise<void>
       removeWorktree: (id: string) => Promise<void>
       removeSession: (id: string) => Promise<void>
       killSessionBatch: (ids: string[]) => Promise<void>

@@ -23,7 +23,7 @@ export interface ExecResult {
   timedOut: boolean
 }
 
-type HostConnectionState = 'offline' | 'connecting' | 'live' | 'auth-failed' | 'unreachable'
+export type HostConnectionState = 'offline' | 'connecting' | 'live' | 'auth-failed' | 'unreachable'
 
 interface HostRuntime {
   host: Host
@@ -200,11 +200,18 @@ async function waitForControl(runtime: HostRuntime): Promise<void> {
   throw new Error('ssh control connection did not become ready')
 }
 
-function classifyConnectionFailure(code: number | null, stderr: string): HostConnectionState {
+export function classifyConnectionFailure(
+  code: number | null,
+  stderr: string
+): HostConnectionState {
   const { reason } = classifySshExit({ exitCode: code, stderr })
   if (reason === 'auth-failed') return 'auth-failed'
   if (reason === 'network') return 'unreachable'
   return 'offline'
+}
+
+export function runtimeStateFor(hostId: HostId): HostConnectionState | undefined {
+  return runtimes.get(hostId)?.state
 }
 
 async function startRuntime(runtime: HostRuntime): Promise<void> {
