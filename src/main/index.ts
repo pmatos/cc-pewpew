@@ -281,7 +281,13 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('sessions:kill-batch', async (_event, ids: string[]) => {
-    for (const id of ids) await killSession(id)
+    for (const id of ids) {
+      try {
+        await killSession(id)
+      } catch (err) {
+        console.error(`Failed to kill session ${id}:`, err)
+      }
+    }
   })
 
   ipcMain.handle('sessions:revive-batch', async (_event, ids: string[]) => {
@@ -295,7 +301,13 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('sessions:remove-batch', async (_event, ids: string[]) => {
-    for (const id of ids) await removeSession(id)
+    for (const id of ids) {
+      try {
+        await removeSession(id)
+      } catch (err) {
+        console.error(`Failed to remove session ${id}:`, err)
+      }
+    }
   })
 
   ipcMain.handle('pty:write', (_event, sessionId: string, data: string) => {

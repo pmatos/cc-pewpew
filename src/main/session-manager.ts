@@ -523,7 +523,11 @@ export function handleHookEvent(
       entry.session.connectionState = originHostId ? 'live' : entry.session.connectionState
       break
     case 'session.end':
-      promptCleanup(entry.session.id)
+      // Fire-and-forget, but attach a catch so a remote removeSession failure
+      // doesn't become an unhandled rejection in the main process.
+      promptCleanup(entry.session.id).catch((err) => {
+        console.error(`promptCleanup(${entry.session.id}) failed:`, err)
+      })
       return true
     case 'session.notification':
       entry.session.hookEvents.push({
@@ -652,39 +656,37 @@ const cleanupInProgress = new Set<string>()
 async function promptCleanup(id: string): Promise<void> {
   if (cleanupInProgress.has(id)) return
   cleanupInProgress.add(id)
+  try {
+    const entry = sessions.get(id)
+    if (!entry) return
 
-  const entry = sessions.get(id)
-  if (!entry) {
+    const session = entry.session
+    const parentWindow = getMainWindow()
+
+    const options = {
+      type: 'question' as const,
+      title: 'Session ended',
+      message: `Session "${session.projectName}/${session.worktreeName}" ended.\nClean up worktree?`,
+      buttons: ['Delete worktree', 'Keep worktree', 'Keep and open in file manager'],
+      defaultId: 1,
+      cancelId: 1,
+    }
+
+    const { response } = parentWindow
+      ? await dialog.showMessageBox(parentWindow, options)
+      : await dialog.showMessageBox(options)
+
+    if (response === 0) {
+      await removeSession(id)
+    } else if (response === 1) {
+      updateSession(id, 'completed')
+    } else if (response === 2) {
+      updateSession(id, 'completed')
+      shell.openPath(session.worktreePath)
+    }
+  } finally {
     cleanupInProgress.delete(id)
-    return
   }
-
-  const session = entry.session
-  const parentWindow = getMainWindow()
-
-  const options = {
-    type: 'question' as const,
-    title: 'Session ended',
-    message: `Session "${session.projectName}/${session.worktreeName}" ended.\nClean up worktree?`,
-    buttons: ['Delete worktree', 'Keep worktree', 'Keep and open in file manager'],
-    defaultId: 1,
-    cancelId: 1,
-  }
-
-  const { response } = parentWindow
-    ? await dialog.showMessageBox(parentWindow, options)
-    : await dialog.showMessageBox(options)
-
-  if (response === 0) {
-    await removeSession(id)
-  } else if (response === 1) {
-    updateSession(id, 'completed')
-  } else if (response === 2) {
-    updateSession(id, 'completed')
-    shell.openPath(session.worktreePath)
-  }
-
-  cleanupInProgress.delete(id)
 }
 
 export async function createPrSession(

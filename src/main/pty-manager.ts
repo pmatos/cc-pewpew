@@ -243,10 +243,6 @@ export async function destroyRemotePty(sessionId: string, host: Host): Promise<v
   const entry = ptys.get(sessionId)
   const tmuxSession = entry?.tmuxSession ?? `cc-pewpew-${sessionId}`
 
-  if (entry) {
-    ptys.delete(sessionId)
-  }
-
   const result = await execRemote(host, ['tmux', 'kill-session', '-t', tmuxSession], {
     timeoutMs: 5000,
   })
@@ -254,6 +250,8 @@ export async function destroyRemotePty(sessionId: string, host: Host): Promise<v
   // remote process is already gone. But SSH-level failures (auth, network,
   // timeout) mean the kill never ran on the remote; surface so killSession
   // doesn't dishonestly flip the UI to 'dead' while the remote Claude lives on.
+  // Keep `entry` registered in `ptys` until we know the kill succeeded so
+  // input/output stay routable if the caller retries.
   if (result.timedOut) {
     throw new Error(`Remote tmux kill-session timed out on host ${host.alias}`)
   }
@@ -265,6 +263,7 @@ export async function destroyRemotePty(sessionId: string, host: Host): Promise<v
   }
 
   if (entry) {
+    ptys.delete(sessionId)
     try {
       entry.pty.kill()
     } catch {
