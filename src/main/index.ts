@@ -46,8 +46,10 @@ import {
   validateRemoteRepo,
   stopAllHostConnections,
   stopHostConnection,
+  setOnHostConnectionStopped,
 } from './host-connection'
 import { invalidateBootstrap } from './host-bootstrap'
+import { stopHookServerForHost } from './hook-server'
 import {
   listRemoteProjects,
   addRemoteProject as persistRemoteProject,
@@ -522,6 +524,10 @@ app.whenReady().then(async () => {
   const mainWindow = createWindow()
   registerWindow(mainWindow, true)
   startHookServer()
+  // Tear down the per-host hook listener whenever its SSH control connection
+  // goes away, so long-running apps that cycle through many hosts don't
+  // accumulate idle Unix-socket servers and ipc-<hostId>.sock files.
+  setOnHostConnectionStopped((hostId) => stopHookServerForHost(hostId))
   initSessionManager()
   createTray()
   initPtyManager()

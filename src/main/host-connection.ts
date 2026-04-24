@@ -38,6 +38,15 @@ interface HostRuntime {
 
 const runtimes = new Map<HostId, HostRuntime>()
 
+// Fired after the SSH control connection is fully torn down. Lets higher-level
+// modules (index.ts wires hook-server here) release resources that were
+// allocated alongside the SSH runtime without host-connection taking on a
+// cross-module dependency.
+let onConnectionStopped: ((hostId: HostId) => void) | null = null
+export function setOnHostConnectionStopped(fn: ((hostId: HostId) => void) | null): void {
+  onConnectionStopped = fn
+}
+
 function uidSegment(): string {
   if (typeof process.getuid === 'function') return String(process.getuid())
   try {
@@ -311,6 +320,7 @@ export async function stopHostConnection(hostId: HostId): Promise<void> {
   } catch {
     // Control socket may already be gone.
   }
+  onConnectionStopped?.(hostId)
 }
 
 export async function stopAllHostConnections(): Promise<void> {
