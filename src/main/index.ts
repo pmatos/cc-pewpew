@@ -139,7 +139,7 @@ app.whenReady().then(async () => {
     const config = getConfig()
     const dirs = config.scanDirs.map(resolvePath)
     const pinned = (config.pinnedPaths || []).map(resolvePath)
-    const local = await scanProjects(dirs, pinned, config.followSymlinks)
+    const local = await scanProjects(dirs, pinned, config.followSymlinks, config.scanDepth)
     const remote = listRemoteProjects().map(remoteToProject)
     return [...local, ...remote].sort((a, b) => a.name.localeCompare(b.name))
   })

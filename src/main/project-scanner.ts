@@ -76,42 +76,68 @@ function detectSetupState(repoPath: string): 'ready' | 'unsetup' {
   }
 }
 
-function discoverRepos(
+const EXCLUDED_DIR_NAMES = new Set(['node_modules'])
+
+function safeRealpath(p: string): string | null {
+  try {
+    return realpathSync(p)
+  } catch {
+    return null
+  }
+}
+
+export function discoverRepos(
   scanDirs: string[],
   pinnedPaths: string[],
-  followSymlinks: boolean
+  followSymlinks: boolean,
+  maxDepth: number
 ): { name: string; path: string }[] {
+  const depth = Math.max(1, Math.min(6, maxDepth))
   const repos: { name: string; path: string }[] = []
   const seen = new Set<string>()
 
-  for (const dir of scanDirs) {
-    if (!existsSync(dir)) continue
-
+  function walk(dir: string, currentDepth: number): void {
     let entries: string[]
     try {
       entries = readdirSync(dir)
     } catch {
-      continue
+      return
     }
 
     for (const entry of entries) {
       const entryPath = join(dir, entry)
+
       try {
         if (!followSymlinks && lstatSync(entryPath).isSymbolicLink()) continue
         if (!statSync(entryPath).isDirectory()) continue
       } catch {
         continue
       }
-      if (!existsSync(join(entryPath, '.git'))) continue
-      const realPath = followSymlinks ? realpathSync(entryPath) : entryPath
+
+      const realPath = followSymlinks ? safeRealpath(entryPath) : entryPath
+      if (realPath === null) continue
       if (seen.has(realPath)) continue
-      repos.push({ name: entry, path: entryPath })
       seen.add(realPath)
+
+      if (existsSync(join(entryPath, '.git'))) {
+        repos.push({ name: entry, path: entryPath })
+        continue
+      }
+
+      if (currentDepth < depth && !entry.startsWith('.') && !EXCLUDED_DIR_NAMES.has(entry)) {
+        walk(entryPath, currentDepth + 1)
+      }
     }
   }
 
+  for (const dir of scanDirs) {
+    if (!existsSync(dir)) continue
+    walk(dir, 1)
+  }
+
   for (const pinned of pinnedPaths) {
-    const realPinned = followSymlinks ? realpathSync(pinned) : pinned
+    const realPinned = followSymlinks ? safeRealpath(pinned) : pinned
+    if (realPinned === null) continue
     if (seen.has(realPinned)) continue
     try {
       if (!followSymlinks && lstatSync(pinned).isSymbolicLink()) continue
@@ -159,9 +185,10 @@ export async function getRepoFingerprint(repoPath: string): Promise<string | und
 export async function scanProjects(
   scanDirs: string[],
   pinnedPaths?: string[],
-  followSymlinks?: boolean
+  followSymlinks?: boolean,
+  scanDepth?: number
 ): Promise<Project[]> {
-  const repos = discoverRepos(scanDirs, pinnedPaths || [], followSymlinks ?? true)
+  const repos = discoverRepos(scanDirs, pinnedPaths || [], followSymlinks ?? true, scanDepth ?? 3)
   const projects: Project[] = []
 
   // Process in batches to avoid spawning hundreds of git processes
