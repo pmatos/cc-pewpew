@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest'
-import { parseWorktreeList } from './project-scanner'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, mkdirSync, symlinkSync, rmSync, chmodSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { discoverRepos, parseWorktreeList } from './project-scanner'
 
 describe('parseWorktreeList', () => {
   it('returns empty array for empty input', () => {
@@ -62,5 +65,173 @@ describe('parseWorktreeList', () => {
     const result = parseWorktreeList(stdout)
     expect(result).toHaveLength(1)
     expect(result[0].isMain).toBe(true)
+  })
+})
+
+describe('discoverRepos', () => {
+  let root: string
+
+  function makeRepo(path: string): void {
+    mkdirSync(join(path, '.git'), { recursive: true })
+  }
+
+  function makeDir(path: string): void {
+    mkdirSync(path, { recursive: true })
+  }
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'discoverRepos-'))
+  })
+
+  afterEach(() => {
+    try {
+      chmodSync(root, 0o755)
+    } catch {
+      // ignore
+    }
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('depth=1 matches current behavior (direct children only)', () => {
+    makeRepo(join(root, 'alpha'))
+    makeRepo(join(root, 'beta', 'sub'))
+    makeDir(join(root, 'gamma'))
+
+    const result = discoverRepos([root], [], true, 1)
+
+    expect(result.map((r) => r.name)).toEqual(['alpha'])
+  })
+
+  it('depth=1 still includes a dotdir child with .git (regression guard)', () => {
+    makeRepo(join(root, '.config-repo'))
+
+    const result = discoverRepos([root], [], true, 1)
+
+    expect(result.map((r) => r.name)).toEqual(['.config-repo'])
+  })
+
+  it('depth=2 discovers nested repos', () => {
+    makeRepo(join(root, 'alpha'))
+    makeRepo(join(root, 'beta', 'sub'))
+
+    const result = discoverRepos([root], [], true, 2)
+
+    expect(result.map((r) => r.name).sort()).toEqual(['alpha', 'sub'])
+  })
+
+  it('stops descending once a .git is found', () => {
+    makeRepo(join(root, 'alpha'))
+    makeRepo(join(root, 'alpha', '.claude', 'worktrees', 'wt'))
+
+    const result = discoverRepos([root], [], true, 5)
+
+    expect(result.map((r) => r.name)).toEqual(['alpha'])
+  })
+
+  it('skips node_modules during recursion', () => {
+    makeRepo(join(root, 'pkg'))
+    makeRepo(join(root, 'pkg-consumer', 'node_modules', 'nested'))
+
+    const result = discoverRepos([root], [], true, 5)
+
+    expect(result.map((r) => r.name)).toEqual(['pkg'])
+  })
+
+  it('skips dotdirs during recursion (past depth 1)', () => {
+    makeRepo(join(root, 'container', '.hidden', 'repo'))
+
+    const result = discoverRepos([root], [], true, 5)
+
+    expect(result).toEqual([])
+  })
+
+  it('dedupes across scanDirs via symlink', () => {
+    makeRepo(join(root, 'real', 'alpha'))
+    symlinkSync(join(root, 'real'), join(root, 'mirror'))
+
+    const result = discoverRepos([join(root, 'real'), join(root, 'mirror')], [], true, 2)
+
+    expect(result.map((r) => r.name)).toEqual(['alpha'])
+  })
+
+  it('terminates on symlink cycles', () => {
+    makeDir(join(root, 'a'))
+    symlinkSync(root, join(root, 'a', 'loop'))
+    makeRepo(join(root, 'a', 'real-repo'))
+
+    const result = discoverRepos([root], [], true, 6)
+
+    expect(result.map((r) => r.name)).toEqual(['real-repo'])
+  })
+
+  it('skips broken symlinks silently', () => {
+    symlinkSync(join(root, 'does-not-exist'), join(root, 'dangling'))
+    makeRepo(join(root, 'alpha'))
+
+    const result = discoverRepos([root], [], true, 3)
+
+    expect(result.map((r) => r.name)).toEqual(['alpha'])
+  })
+
+  it('includes and dedupes pinned paths', () => {
+    makeRepo(join(root, 'alpha'))
+    const pinned = join(root, 'pinned', 'repo')
+    makeRepo(pinned)
+
+    const result = discoverRepos([root], [pinned], true, 1)
+
+    // root yields alpha (pinned not reached at depth 1); pinned adds 'repo'.
+    expect(result.map((r) => r.name).sort()).toEqual(['alpha', 'repo'])
+  })
+
+  it('dedupes pinned path against scanDir discovery', () => {
+    const repoPath = join(root, 'alpha')
+    makeRepo(repoPath)
+
+    const result = discoverRepos([root], [repoPath], true, 1)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].path).toBe(repoPath)
+  })
+
+  it('silently skips non-existent scanDir', () => {
+    makeRepo(join(root, 'alpha'))
+
+    const result = discoverRepos([join(root, 'missing'), root], [], true, 1)
+
+    expect(result.map((r) => r.name)).toEqual(['alpha'])
+  })
+
+  it('does not abort the walk when a subdir is unreadable', () => {
+    makeRepo(join(root, 'alpha'))
+    const locked = join(root, 'locked')
+    makeDir(locked)
+    makeRepo(join(root, 'beta'))
+    chmodSync(locked, 0o000)
+    try {
+      const result = discoverRepos([root], [], true, 3)
+      expect(result.map((r) => r.name).sort()).toEqual(['alpha', 'beta'])
+    } finally {
+      chmodSync(locked, 0o755)
+    }
+  })
+
+  it('clamps maxDepth=0 up to 1', () => {
+    makeRepo(join(root, 'alpha'))
+    makeRepo(join(root, 'beta', 'sub'))
+
+    const result = discoverRepos([root], [], true, 0)
+
+    expect(result.map((r) => r.name)).toEqual(['alpha'])
+  })
+
+  it('clamps large maxDepth down to 6', () => {
+    // Build a chain 7 levels deep: root/a/b/c/d/e/f/repo/.git
+    makeRepo(join(root, 'a', 'b', 'c', 'd', 'e', 'f', 'repo'))
+
+    const result = discoverRepos([root], [], true, 99)
+
+    // Depth 6 means the walk visits depth 1..6; 'repo' at level 7 is out of reach.
+    expect(result).toEqual([])
   })
 })

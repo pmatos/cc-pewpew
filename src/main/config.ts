@@ -21,6 +21,7 @@ export interface AppConfig {
   scanDirs: string[]
   pinnedPaths: string[]
   followSymlinks: boolean
+  scanDepth: number
   canvas: CanvasState
   clusterPositions: Record<string, { x: number; y: number }>
   windowState?: WindowState
@@ -41,6 +42,7 @@ const DEFAULT_CONFIG: AppConfig = {
   scanDirs: ['~/dev'],
   pinnedPaths: [],
   followSymlinks: true,
+  scanDepth: 3,
   canvas: { zoom: 0.7, panX: 0, panY: 0 },
   clusterPositions: {},
   sidebarWidth: 250,
