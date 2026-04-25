@@ -543,6 +543,35 @@ describe('reconnectRemoteSession', () => {
     expect(sm.getSessions()[0].connectionState).toBe('live')
     expect(state.ensureHostConnectionCalls).toEqual(['h1', 'h1'])
   })
+
+  it('releases host retain when session is removed mid-reconnect', async () => {
+    // doReconnectRemoteSession returns retainedForBatch=true; the outer caller
+    // owns releasing it. If `sessions.get(id)` is read after the await without
+    // a fallback, a concurrent removeSession() would leave hostId undefined
+    // and neither the batch nor the direct release path would run — the
+    // ControlMaster would leak for the lifetime of the app.
+    writeSessionsJson([baseRemoteSession({ id: 'r1', status: 'idle' })] as Session[])
+    state.probeRemoteTmuxResult.set('r1', 'absent')
+    let gateResolve!: () => void
+    state.ensureHostConnectionGate = new Promise<void>((res) => {
+      gateResolve = res
+    })
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    const reconnectPromise = sm.reconnectRemoteSession('r1')
+    // Allow doReconnectRemoteSession's synchronous prelude to run and park at
+    // the gated `await ensureHostConnection`.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await sm.removeSession('r1')
+    gateResolve()
+    await reconnectPromise
+    // Allow the fire-and-forget batch + release to complete.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(state.runtimeRefs.has('h1')).toBe(false)
+    expect(state.runtimeStates.has('h1')).toBe(false)
+  })
 })
 
 describe('probePendingSessionsOnHost', () => {

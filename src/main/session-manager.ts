@@ -674,6 +674,12 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
     return
   }
 
+  // Capture hostId BEFORE the await: if `removeSession(id)` runs while this
+  // reconnect is in flight, `sessions.get(id)` would return undefined after
+  // the await and we'd neither release the host retain nor run the sibling
+  // batch — leaking the ControlMaster for the lifetime of the app.
+  const initialHostId = sessions.get(id)?.session.hostId ?? null
+
   const promise = doReconnectRemoteSession(id)
   inflightReconnects.set(id, promise)
   let reconnectError: unknown = undefined
@@ -699,8 +705,7 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
   //
   // Skip only when there's no host at all (orphaned hostId / missing registry
   // entry) or we couldn't determine any state — there's nothing to probe.
-  const entry = sessions.get(id)
-  const hostId = entry?.session.hostId
+  const hostId = sessions.get(id)?.session.hostId ?? initialHostId
   const tagged = (reconnectError as { hostConnectionState?: HostConnectionState } | null)
     ?.hostConnectionState
   const stateHint = successState ?? tagged ?? (hostId ? runtimeStateFor(hostId) : undefined)
