@@ -9,6 +9,14 @@ interface SessionsState {
   broadcastDialogOpen: boolean
   fetchSessions: () => Promise<void>
   init: () => () => void
+  // Merge a partial thumbnail update into the existing map. The main process
+  // emits one entry at a time so a slow remote capture can't gate healthy
+  // siblings, so this MUST merge, not replace — otherwise each event would
+  // wipe every other live session's thumbnail.
+  applyThumbnailPatch: (patch: Record<string, string>) => void
+  // Replace the sessions list and prune any thumbnail entries whose session
+  // no longer exists, so dead sessions don't leak stale entries forever.
+  syncSessions: (sessions: Session[]) => void
   toggleSelect: (id: string, multi: boolean) => void
   rangeSelect: (id: string, orderedIds: string[]) => void
   selectAll: (projectPath: string) => void
@@ -30,24 +38,29 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   init: () => {
     window.api.getSessions().then((sessions) => set({ sessions }))
 
-    const cleanupSessions = window.api.onSessionsUpdated((sessions) => {
-      const { selectedIds } = get()
-      const validIds = new Set(sessions.map((s) => s.id))
-      const pruned = new Set([...selectedIds].filter((id) => validIds.has(id)))
-      set({
-        sessions,
-        selectedIds: pruned.size !== selectedIds.size ? pruned : selectedIds,
-      })
-    })
-
-    const cleanupThumbnails = window.api.onTextThumbnails((thumbnails) => {
-      set({ thumbnails })
-    })
+    const cleanupSessions = window.api.onSessionsUpdated(get().syncSessions)
+    const cleanupThumbnails = window.api.onTextThumbnails(get().applyThumbnailPatch)
 
     return () => {
       cleanupSessions()
       cleanupThumbnails()
     }
+  },
+  applyThumbnailPatch: (patch) => {
+    set((s) => ({ thumbnails: { ...s.thumbnails, ...patch } }))
+  },
+  syncSessions: (sessions) => {
+    const { selectedIds, thumbnails } = get()
+    const validIds = new Set(sessions.map((s) => s.id))
+    const prunedSel = new Set([...selectedIds].filter((id) => validIds.has(id)))
+    const hasStaleThumb = Object.keys(thumbnails).some((id) => !validIds.has(id))
+    set({
+      sessions,
+      selectedIds: prunedSel.size !== selectedIds.size ? prunedSel : selectedIds,
+      thumbnails: hasStaleThumb
+        ? Object.fromEntries(Object.entries(thumbnails).filter(([id]) => validIds.has(id)))
+        : thumbnails,
+    })
   },
   toggleSelect: (id, multi) => {
     if (multi) {

@@ -23,7 +23,6 @@ import {
   destroyPty,
   getScrollback,
   captureThumbnails,
-  getLastSnapshot,
 } from './pty-manager'
 import {
   initSessionManager,
@@ -552,17 +551,32 @@ app.whenReady().then(async () => {
   // 10s per-session rate limit and emits a single persist + broadcast per
   // tick, avoiding an O(N) write storm when many sessions unlock the window
   // simultaneously.
+  // Ticks run independently — no in-flight guard. Per-call timeoutMs in
+  // captureRemotePaneTexts caps each tick at ~3 s, so at most two ticks
+  // overlap at the 3 s/3 s boundary (the slow ssh from the previous tick is
+  // still waiting on its timeout while the next tick fans out fresh
+  // captures). updateLastKnownStatesBatch is sync with a 10 s per-session
+  // rate limit + identical-text dedup, so two concurrent persists are safe.
+  // Gating the next tick on the slowest exec would have re-introduced the
+  // 6 s update cadence that the per-session onCapture broadcast was meant
+  // to fix.
   const thumbInterval = setInterval(() => {
-    const thumbs = captureThumbnails()
-    if (Object.keys(thumbs).length > 0) {
-      broadcastToAll('thumbnails:text-updated', thumbs)
-    }
-    const updates: { id: string; text: string }[] = []
-    for (const session of getSessions()) {
-      const text = getLastSnapshot(session.id)
-      if (text) updates.push({ id: session.id, text })
-    }
-    if (updates.length > 0) updateLastKnownStatesBatch(updates)
+    void (async () => {
+      const captured = await captureThumbnails({
+        // Broadcast each thumbnail the instant its capture lands so a wedged
+        // remote session timing out at the 3 s cap can't delay healthy
+        // siblings' updates.
+        onCapture: (sessionId, text) =>
+          broadcastToAll('thumbnails:text-updated', { [sessionId]: text }),
+      })
+      // Persist directly from the captured Record. The Record is a snapshot
+      // of capture-pane text at capture time, so it can't race the live PTY
+      // stream.
+      const updates = Object.entries(captured).map(([id, text]) => ({ id, text }))
+      if (updates.length > 0) updateLastKnownStatesBatch(updates)
+    })().catch((err) => {
+      console.error('thumbnail tick failed:', err)
+    })
   }, 3000)
 
   app.on('activate', () => {
