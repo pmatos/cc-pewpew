@@ -21,7 +21,11 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
   const isConnecting = isRemote && connectionState === 'connecting'
   const isAuthFailed = isRemote && connectionState === 'auth-failed'
   const isUnreachable = isRemote && connectionState === 'unreachable'
-  const showReconnectOverlay = !isDead && (isPending || isAuthFailed || isUnreachable)
+  // 'offline' covers post-prepareRemoteHost reconnect failures (probe /
+  // reattach / bootstrap errors) that aren't auth- or network-classified.
+  // Without this branch the user sees an inert Terminal pane with no Retry.
+  const isOffline = isRemote && connectionState === 'offline'
+  const showReconnectOverlay = !isDead && (isPending || isAuthFailed || isUnreachable || isOffline)
   const [reviving, setReviving] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
   // Monotonic flip count — each toggle increments by 1, rotating +180deg.
@@ -159,6 +163,15 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
                   <p>
                     {host?.label ?? 'The host'} did not respond. Check your network or VPN, then
                     click Retry.
+                  </p>
+                </>
+              )}
+              {isOffline && (
+                <>
+                  <h3>Reconnect failed</h3>
+                  <p>
+                    The session could not be reattached on {host?.label ?? 'the host'}. Click Retry
+                    to try again.
                   </p>
                 </>
               )}

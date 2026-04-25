@@ -270,6 +270,10 @@ function applyLastKnownState(id: string, text: string, now: number): boolean {
   if (now - last < LAST_KNOWN_STATE_MIN_INTERVAL_MS) return false
   const trimmed =
     text.length > LAST_KNOWN_STATE_MAX_BYTES ? text.slice(-LAST_KNOWN_STATE_MAX_BYTES) : text
+  // Idle sessions emit identical thumbnail text every tick; without this
+  // no-op the 10s window would still trigger a sessions.json write +
+  // broadcast for every live session indefinitely.
+  if (entry.session.lastKnownState?.text === trimmed) return false
   entry.session.lastKnownState = { text: trimmed, timestamp: now }
   lastKnownStateWrites.set(id, now)
   return true

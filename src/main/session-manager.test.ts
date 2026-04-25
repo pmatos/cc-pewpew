@@ -733,6 +733,33 @@ describe('updateLastKnownStatesBatch', () => {
 
     expect(state.sessionsUpdatedBroadcasts - afterFirst).toBe(0)
   })
+
+  it('skips write when text is unchanged across rate-limit windows', async () => {
+    // Idle sessions emit identical thumbnail text every 3s tick. Once the
+    // 10s rate-limit elapses, the gate would otherwise fire a write +
+    // broadcast every 10s indefinitely. The text-equality early-return
+    // turns this into a no-op for stable sessions.
+    writeSessionsJson([baseRemoteSession({ id: 'a' })])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    sm.updateLastKnownStatesBatch([{ id: 'a', text: 'idle prompt $' }])
+    const afterFirst = state.sessionsUpdatedBroadcasts
+
+    // Advance past the 10s rate-limit window.
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.now() + 11_000)
+    try {
+      sm.updateLastKnownStatesBatch([{ id: 'a', text: 'idle prompt $' }])
+      expect(state.sessionsUpdatedBroadcasts - afterFirst).toBe(0)
+
+      // A real text change still goes through.
+      sm.updateLastKnownStatesBatch([{ id: 'a', text: 'idle prompt $ ls' }])
+      expect(state.sessionsUpdatedBroadcasts - afterFirst).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('updateLastKnownState', () => {
