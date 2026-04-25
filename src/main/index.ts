@@ -552,17 +552,29 @@ app.whenReady().then(async () => {
   // 10s per-session rate limit and emits a single persist + broadcast per
   // tick, avoiding an O(N) write storm when many sessions unlock the window
   // simultaneously.
+  let thumbCaptureInFlight = false
   const thumbInterval = setInterval(() => {
-    const thumbs = captureThumbnails()
-    if (Object.keys(thumbs).length > 0) {
-      broadcastToAll('thumbnails:text-updated', thumbs)
-    }
-    const updates: { id: string; text: string }[] = []
-    for (const session of getSessions()) {
-      const text = getLastSnapshot(session.id)
-      if (text) updates.push({ id: session.id, text })
-    }
-    if (updates.length > 0) updateLastKnownStatesBatch(updates)
+    // Skip if the previous tick is still running. Remote captures await ssh
+    // round-trips, so a slow host could otherwise stack overlapping passes and
+    // race on the lastSnapshot writes.
+    if (thumbCaptureInFlight) return
+    thumbCaptureInFlight = true
+    void (async () => {
+      try {
+        const thumbs = await captureThumbnails()
+        if (Object.keys(thumbs).length > 0) {
+          broadcastToAll('thumbnails:text-updated', thumbs)
+        }
+        const updates: { id: string; text: string }[] = []
+        for (const session of getSessions()) {
+          const text = getLastSnapshot(session.id)
+          if (text) updates.push({ id: session.id, text })
+        }
+        if (updates.length > 0) updateLastKnownStatesBatch(updates)
+      } finally {
+        thumbCaptureInFlight = false
+      }
+    })()
   }, 3000)
 
   app.on('activate', () => {

@@ -11,6 +11,7 @@ import {
   spawnAttach,
 } from './host-connection'
 import { classifySshExit } from './ssh-exit-parser'
+import { captureRemotePaneTexts, type RemoteSessionEntry } from './remote-thumbnail'
 import type { Host } from '../shared/types'
 
 interface PtyEntry {
@@ -306,11 +307,14 @@ export function hasTmuxSession(sessionId: string): boolean {
   }
 }
 
-export function captureThumbnails(): Record<string, string> {
+export async function captureThumbnails(): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
+  const remoteEntries: RemoteSessionEntry[] = []
   for (const [sessionId, entry] of ptys) {
-    // Remote thumbnail capture is slice #13; issue #11 only needs the live PTY stream.
-    if (entry.host) continue
+    if (entry.host) {
+      remoteEntries.push({ sessionId, host: entry.host, tmuxSession: entry.tmuxSession })
+      continue
+    }
     try {
       const text = execFileSync('tmux', ['capture-pane', '-t', entry.tmuxSession, '-p'], {
         encoding: 'utf-8',
@@ -319,6 +323,23 @@ export function captureThumbnails(): Record<string, string> {
       result[sessionId] = text
     } catch {
       // Session may be dead
+    }
+  }
+  if (remoteEntries.length > 0) {
+    // Multiplexed through the per-host ControlMaster: every exec call shares the
+    // existing live SSH connection, so this is N tmux invocations but zero new
+    // SSH handshakes. Each per-session call is isolated by Promise.allSettled
+    // inside the helper so a single dead/unreachable session can't poison the
+    // batch or the underlying control connection.
+    const remote = await captureRemotePaneTexts(remoteEntries, { exec: execRemote })
+    for (const [sessionId, text] of Object.entries(remote)) {
+      result[sessionId] = text
+      // Captured pane text is a coherent screen snapshot — overwrite the
+      // streaming-buffer lastSnapshot so the lastKnownState cache persisted by
+      // session-manager reflects the most recent capture instead of the raw
+      // ANSI byte tail.
+      const entry = ptys.get(sessionId)
+      if (entry) entry.lastSnapshot = text
     }
   }
   return result
