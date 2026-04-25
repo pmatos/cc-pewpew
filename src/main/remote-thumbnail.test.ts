@@ -19,6 +19,17 @@ describe('capLines', () => {
     const text = ['only', 'two'].join('\n')
     expect(capLines(text, 24)).toBe(text)
   })
+
+  it('preserves the trailing newline without dropping a real row', () => {
+    // 5 real rows + trailing newline, cap=5 — must keep all 5 rows.
+    const text = ['r1', 'r2', 'r3', 'r4', 'r5'].join('\n') + '\n'
+    expect(capLines(text, 5)).toBe(text)
+  })
+
+  it('caps to last N real rows when input has trailing newline and exceeds cap', () => {
+    const text = Array.from({ length: 6 }, (_, i) => `r${i + 1}`).join('\n') + '\n'
+    expect(capLines(text, 5)).toBe(['r2', 'r3', 'r4', 'r5', 'r6'].join('\n') + '\n')
+  })
 })
 
 describe('captureRemotePaneTexts', () => {
@@ -98,5 +109,26 @@ describe('captureRemotePaneTexts', () => {
     )
 
     expect(result).toEqual({ alive: 'alive\n' })
+  })
+
+  it('passes a per-call timeoutMs to exec so a hung session cannot stall the batch', async () => {
+    const seenTimeouts: (number | undefined)[] = []
+    const exec = async (
+      _h: Host,
+      _argv: string[],
+      opts?: { timeoutMs?: number }
+    ): Promise<ExecResult> => {
+      seenTimeouts.push(opts?.timeoutMs)
+      return ok('hi\n')
+    }
+
+    await captureRemotePaneTexts([{ sessionId: 's1', host, tmuxSession: 'cc-pewpew-s1' }], { exec })
+
+    expect(seenTimeouts).toHaveLength(1)
+    expect(seenTimeouts[0]).toBeDefined()
+    // The local thumbnail capture path uses 3000ms; remote must match so a
+    // single hung session can't push the whole tick past the 3s thumbnail
+    // interval.
+    expect(seenTimeouts[0]!).toBeLessThanOrEqual(3000)
   })
 })
