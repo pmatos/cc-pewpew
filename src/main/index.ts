@@ -23,7 +23,6 @@ import {
   destroyPty,
   getScrollback,
   captureThumbnails,
-  getLastSnapshot,
 } from './pty-manager'
 import {
   initSessionManager,
@@ -555,26 +554,27 @@ app.whenReady().then(async () => {
   let thumbCaptureInFlight = false
   const thumbInterval = setInterval(() => {
     // Skip if the previous tick is still running. Remote captures await ssh
-    // round-trips, so a slow host could otherwise stack overlapping passes and
-    // race on the lastSnapshot writes. Per-session results still surface as
-    // they settle via the onCapture callback below — the in-flight guard only
-    // gates the next batch start, not the broadcast cadence within a batch.
+    // round-trips, so a slow host could otherwise stack overlapping ssh
+    // fan-outs across ticks. Per-session results still surface as they settle
+    // via the onCapture callback below — the in-flight guard only gates the
+    // next batch start, not the broadcast cadence within a batch.
     if (thumbCaptureInFlight) return
     thumbCaptureInFlight = true
     void (async () => {
       try {
-        await captureThumbnails({
+        const captured = await captureThumbnails({
           // Broadcast each thumbnail the instant its capture lands so a wedged
           // remote session timing out at the 3 s cap can't delay healthy
           // siblings' updates.
           onCapture: (sessionId, text) =>
             broadcastToAll('thumbnails:text-updated', { [sessionId]: text }),
         })
-        const updates: { id: string; text: string }[] = []
-        for (const session of getSessions()) {
-          const text = getLastSnapshot(session.id)
-          if (text) updates.push({ id: session.id, text })
-        }
+        // Persist directly from the captured Record. The Record is a snapshot
+        // of capture-pane text at capture time, so it can't race the live PTY
+        // stream that flows through the next 3 s tick — which would otherwise
+        // pollute a fast session's clean capture text with raw streaming-tail
+        // bytes while waiting for a slow sibling's exec to settle.
+        const updates = Object.entries(captured).map(([id, text]) => ({ id, text }))
         if (updates.length > 0) updateLastKnownStatesBatch(updates)
       } finally {
         thumbCaptureInFlight = false

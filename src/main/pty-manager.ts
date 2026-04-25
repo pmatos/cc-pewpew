@@ -18,15 +18,9 @@ interface PtyEntry {
   pty: IPty
   tmuxSession: string
   buffer: string
-  // Trailing window of PTY output. Populated on every flush so issue #12's
-  // `lastKnownState` survives restart with the last-seen pane text. Capped to
-  // LAST_SNAPSHOT_MAX bytes so a 100-session `sessions.json` stays small.
-  lastSnapshot: string
   host?: Host
   released?: boolean
 }
-
-const LAST_SNAPSHOT_MAX = 3 * 1024
 
 const ptys = new Map<string, PtyEntry>()
 let flushInterval: ReturnType<typeof setInterval> | null = null
@@ -35,17 +29,9 @@ function flushBuffers(): void {
   for (const [sessionId, entry] of ptys) {
     if (entry.buffer.length > 0) {
       broadcastToAll('pty:data', { sessionId, data: entry.buffer })
-      const appended = entry.lastSnapshot + entry.buffer
-      entry.lastSnapshot =
-        appended.length > LAST_SNAPSHOT_MAX ? appended.slice(-LAST_SNAPSHOT_MAX) : appended
       entry.buffer = ''
     }
   }
-}
-
-export function getLastSnapshot(sessionId: string): string | undefined {
-  const entry = ptys.get(sessionId)
-  return entry?.lastSnapshot || undefined
 }
 
 export function isTmuxAvailable(): boolean {
@@ -121,7 +107,6 @@ export function createPty(
     pty: ptyProcess,
     tmuxSession,
     buffer: '',
-    lastSnapshot: '',
   }
 
   ptyProcess.onData((data) => {
@@ -186,7 +171,6 @@ export async function createRemotePty(
     pty: ptyProcess,
     tmuxSession,
     buffer: '',
-    lastSnapshot: '',
     host,
   }
 
@@ -340,15 +324,7 @@ export async function captureThumbnails(opts?: {
     // control connection.
     const remote = await captureRemotePaneTexts(remoteEntries, {
       exec: execRemote,
-      onCapture: (sessionId, text) => {
-        // Captured pane text is a coherent screen snapshot — overwrite the
-        // streaming-buffer lastSnapshot so the lastKnownState cache persisted
-        // by session-manager reflects the most recent capture instead of the
-        // raw ANSI byte tail.
-        const entry = ptys.get(sessionId)
-        if (entry) entry.lastSnapshot = text
-        opts?.onCapture?.(sessionId, text)
-      },
+      onCapture: opts?.onCapture,
     })
     for (const [sessionId, text] of Object.entries(remote)) {
       result[sessionId] = text
@@ -441,7 +417,6 @@ export function reattachPty(sessionId: string): void {
     pty: ptyProcess,
     tmuxSession,
     buffer: '',
-    lastSnapshot: '',
   }
 
   ptyProcess.onData((data) => {
@@ -485,7 +460,6 @@ export async function reattachRemotePty(sessionId: string, host: Host): Promise<
     pty: ptyProcess,
     tmuxSession,
     buffer: '',
-    lastSnapshot: '',
     host,
   }
 
