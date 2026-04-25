@@ -131,4 +131,53 @@ describe('captureRemotePaneTexts', () => {
     // interval.
     expect(seenTimeouts[0]!).toBeLessThanOrEqual(3000)
   })
+
+  it('invokes onCapture for a fast session before a slow sibling settles', async () => {
+    let slowSettled = false
+    const fastEmitsObservedSlowState: boolean[] = []
+
+    const exec = async (_h: Host, argv: string[]): Promise<ExecResult> => {
+      if (argv.includes('cc-pewpew-slow')) {
+        await new Promise((r) => setTimeout(r, 60))
+        slowSettled = true
+        return ok('slow\n')
+      }
+      return ok('fast\n')
+    }
+
+    await captureRemotePaneTexts(
+      [
+        { sessionId: 'fast', host, tmuxSession: 'cc-pewpew-fast' },
+        { sessionId: 'slow', host, tmuxSession: 'cc-pewpew-slow' },
+      ],
+      {
+        exec,
+        onCapture: (sid) => {
+          if (sid === 'fast') fastEmitsObservedSlowState.push(slowSettled)
+        },
+      }
+    )
+
+    expect(fastEmitsObservedSlowState).toEqual([false])
+  })
+
+  it('passes the capped per-session text to onCapture and the aggregate return', async () => {
+    const calls: { sid: string; text: string }[] = []
+    const exec = async (_h: Host, argv: string[]) =>
+      ok(argv.includes('cc-pewpew-s1') ? 's1-text\n' : 's2-text\n')
+
+    const result = await captureRemotePaneTexts(
+      [
+        { sessionId: 's1', host, tmuxSession: 'cc-pewpew-s1' },
+        { sessionId: 's2', host, tmuxSession: 'cc-pewpew-s2' },
+      ],
+      { exec, onCapture: (sid, text) => calls.push({ sid, text }) }
+    )
+
+    expect(calls).toEqual([
+      { sid: 's1', text: 's1-text\n' },
+      { sid: 's2', text: 's2-text\n' },
+    ])
+    expect(result).toEqual({ s1: 's1-text\n', s2: 's2-text\n' })
+  })
 })

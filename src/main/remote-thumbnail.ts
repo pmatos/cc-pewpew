@@ -11,6 +11,12 @@ export interface CaptureOptions {
   exec: (host: Host, argv: string[], opts?: { timeoutMs?: number }) => Promise<ExecResult>
   maxRows?: number
   timeoutMs?: number
+  // Fired as soon as an individual session's capture settles successfully.
+  // Lets callers broadcast / persist per-session results without waiting for
+  // the slowest sibling in the batch — without this, one timed-out session
+  // would gate the whole tick and halve the effective update rate of every
+  // healthy thumbnail.
+  onCapture?: (sessionId: string, text: string) => void
 }
 
 export const DEFAULT_REMOTE_THUMBNAIL_ROWS = 24
@@ -38,22 +44,25 @@ export async function captureRemotePaneTexts(
 ): Promise<Record<string, string>> {
   const maxRows = options.maxRows ?? DEFAULT_REMOTE_THUMBNAIL_ROWS
   const timeoutMs = options.timeoutMs ?? DEFAULT_REMOTE_THUMBNAIL_TIMEOUT_MS
-  const settled = await Promise.allSettled(
+  const out: Record<string, string> = {}
+  await Promise.all(
     entries.map(async (entry) => {
-      const result = await options.exec(
-        entry.host,
-        ['tmux', 'capture-pane', '-t', entry.tmuxSession, '-p'],
-        { timeoutMs }
-      )
-      return { entry, result }
+      try {
+        const result = await options.exec(
+          entry.host,
+          ['tmux', 'capture-pane', '-t', entry.tmuxSession, '-p'],
+          { timeoutMs }
+        )
+        if (result.timedOut || result.code !== 0) return
+        const text = capLines(result.stdout, maxRows)
+        out[entry.sessionId] = text
+        // Fire inside the per-entry async function so a fast session's result
+        // surfaces before a slow sibling has even resolved its exec promise.
+        options.onCapture?.(entry.sessionId, text)
+      } catch {
+        // Swallow per-session errors so one rejection can't poison the batch.
+      }
     })
   )
-  const out: Record<string, string> = {}
-  for (const item of settled) {
-    if (item.status !== 'fulfilled') continue
-    const { entry, result } = item.value
-    if (result.timedOut || result.code !== 0) continue
-    out[entry.sessionId] = capLines(result.stdout, maxRows)
-  }
   return out
 }

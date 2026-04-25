@@ -307,7 +307,13 @@ export function hasTmuxSession(sessionId: string): boolean {
   }
 }
 
-export async function captureThumbnails(): Promise<Record<string, string>> {
+export async function captureThumbnails(opts?: {
+  // Fired per session as soon as its capture lands. For remote sessions this
+  // happens inside the per-entry async path of `captureRemotePaneTexts`, so a
+  // healthy session's thumbnail surfaces without waiting for a wedged sibling
+  // to hit the per-call timeout.
+  onCapture?: (sessionId: string, text: string) => void
+}): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
   const remoteEntries: RemoteSessionEntry[] = []
   for (const [sessionId, entry] of ptys) {
@@ -321,6 +327,7 @@ export async function captureThumbnails(): Promise<Record<string, string>> {
         timeout: 3000,
       })
       result[sessionId] = text
+      opts?.onCapture?.(sessionId, text)
     } catch {
       // Session may be dead
     }
@@ -328,18 +335,23 @@ export async function captureThumbnails(): Promise<Record<string, string>> {
   if (remoteEntries.length > 0) {
     // Multiplexed through the per-host ControlMaster: every exec call shares the
     // existing live SSH connection, so this is N tmux invocations but zero new
-    // SSH handshakes. Each per-session call is isolated by Promise.allSettled
-    // inside the helper so a single dead/unreachable session can't poison the
-    // batch or the underlying control connection.
-    const remote = await captureRemotePaneTexts(remoteEntries, { exec: execRemote })
+    // SSH handshakes. Each per-session call is isolated inside the helper so a
+    // single dead/unreachable session can't poison the batch or the underlying
+    // control connection.
+    const remote = await captureRemotePaneTexts(remoteEntries, {
+      exec: execRemote,
+      onCapture: (sessionId, text) => {
+        // Captured pane text is a coherent screen snapshot — overwrite the
+        // streaming-buffer lastSnapshot so the lastKnownState cache persisted
+        // by session-manager reflects the most recent capture instead of the
+        // raw ANSI byte tail.
+        const entry = ptys.get(sessionId)
+        if (entry) entry.lastSnapshot = text
+        opts?.onCapture?.(sessionId, text)
+      },
+    })
     for (const [sessionId, text] of Object.entries(remote)) {
       result[sessionId] = text
-      // Captured pane text is a coherent screen snapshot — overwrite the
-      // streaming-buffer lastSnapshot so the lastKnownState cache persisted by
-      // session-manager reflects the most recent capture instead of the raw
-      // ANSI byte tail.
-      const entry = ptys.get(sessionId)
-      if (entry) entry.lastSnapshot = text
     }
   }
   return result

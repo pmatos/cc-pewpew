@@ -556,15 +556,20 @@ app.whenReady().then(async () => {
   const thumbInterval = setInterval(() => {
     // Skip if the previous tick is still running. Remote captures await ssh
     // round-trips, so a slow host could otherwise stack overlapping passes and
-    // race on the lastSnapshot writes.
+    // race on the lastSnapshot writes. Per-session results still surface as
+    // they settle via the onCapture callback below — the in-flight guard only
+    // gates the next batch start, not the broadcast cadence within a batch.
     if (thumbCaptureInFlight) return
     thumbCaptureInFlight = true
     void (async () => {
       try {
-        const thumbs = await captureThumbnails()
-        if (Object.keys(thumbs).length > 0) {
-          broadcastToAll('thumbnails:text-updated', thumbs)
-        }
+        await captureThumbnails({
+          // Broadcast each thumbnail the instant its capture lands so a wedged
+          // remote session timing out at the 3 s cap can't delay healthy
+          // siblings' updates.
+          onCapture: (sessionId, text) =>
+            broadcastToAll('thumbnails:text-updated', { [sessionId]: text }),
+        })
         const updates: { id: string; text: string }[] = []
         for (const session of getSessions()) {
           const text = getLastSnapshot(session.id)
