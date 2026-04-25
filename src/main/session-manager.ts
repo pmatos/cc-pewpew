@@ -19,6 +19,7 @@ import {
   hasRemoteTmuxSession,
   isTmuxAvailable,
   discoverTmuxSessions,
+  probeRemoteTmuxSession,
   reattachPty,
   reattachRemotePty,
   createRemotePty,
@@ -34,6 +35,8 @@ import {
   retainHostConnection,
   releaseHostConnection,
   stopHostConnection,
+  runtimeStateFor,
+  type HostConnectionState,
 } from './host-connection'
 import { bootstrapHost } from './host-bootstrap'
 import type { Host, RemoteProject, Session, SessionStatus } from '../shared/types'
@@ -116,10 +119,21 @@ async function prepareRemoteHost(host: Host): Promise<{ notifyScriptPath: string
   try {
     ;({ remoteSocketPath } = await ensureHostConnection(host, localSocketPath))
   } catch (err) {
-    // SSH couldn't start. Tear down the host runtime (which runtimeFor already
-    // registered) so the hook-server teardown callback fires and we don't leak
-    // the per-host listener across repeated failed startups.
+    // SSH couldn't start. Capture the runtime state BEFORE the teardown wipes
+    // the entry so callers can still classify auth-failed / unreachable —
+    // stopHostConnection does `runtimes.delete(hostId)` and a later
+    // `runtimeStateFor` would otherwise return `undefined`.
+    const capturedState = runtimeStateFor(host.hostId)
+    // Tear down the host runtime (which runtimeFor already registered) so the
+    // hook-server teardown callback fires and we don't leak the per-host
+    // listener across repeated failed startups.
     await stopHostConnection(host.hostId).catch(() => undefined)
+    if (capturedState === 'auth-failed' || capturedState === 'unreachable') {
+      const wrapped = err instanceof Error ? err : new Error(String(err))
+      ;(wrapped as Error & { hostConnectionState?: HostConnectionState }).hostConnectionState =
+        capturedState
+      throw wrapped
+    }
     throw err
   }
   retainHostConnection(host.hostId)
@@ -235,6 +249,56 @@ function updateSession(id: string, status: SessionStatus): void {
   entry.session.status = status
   entry.session.lastActivity = Date.now()
   onSessionsChanged()
+}
+
+// Rate-limit `lastKnownState` writes per session to once every 10s so the
+// 3s thumbnail tick doesn't churn `sessions.json` on disk.
+const LAST_KNOWN_STATE_MIN_INTERVAL_MS = 10_000
+const LAST_KNOWN_STATE_MAX_BYTES = 3 * 1024
+const lastKnownStateWrites = new Map<string, number>()
+
+// Mutate a single session's `lastKnownState` in memory, respecting the 10s
+// per-session rate limit and 3 KiB cap. Returns `true` when the entry was
+// actually mutated so the caller can decide whether to flush; callers that
+// update many sessions in one tick should prefer `updateLastKnownStatesBatch`
+// to collapse the disk write + broadcast into one call (avoids an O(N) write
+// storm from a tight timer loop).
+function applyLastKnownState(id: string, text: string, now: number): boolean {
+  const entry = sessions.get(id)
+  if (!entry) return false
+  const last = lastKnownStateWrites.get(id) ?? 0
+  if (now - last < LAST_KNOWN_STATE_MIN_INTERVAL_MS) return false
+  const trimmed =
+    text.length > LAST_KNOWN_STATE_MAX_BYTES ? text.slice(-LAST_KNOWN_STATE_MAX_BYTES) : text
+  // Idle sessions emit identical thumbnail text every tick; without this
+  // no-op the 10s window would still trigger a sessions.json write +
+  // broadcast for every live session indefinitely.
+  if (entry.session.lastKnownState?.text === trimmed) return false
+  entry.session.lastKnownState = { text: trimmed, timestamp: now }
+  lastKnownStateWrites.set(id, now)
+  return true
+}
+
+export function updateLastKnownState(id: string, text: string): void {
+  const now = Date.now()
+  if (applyLastKnownState(id, text, now)) {
+    onSessionsChanged()
+  }
+}
+
+// Batch variant for the periodic thumbnail tick: collects all (id, text)
+// pairs for one tick and emits a single persist + broadcast when at least
+// one session was updated. Prevents an O(N) burst of JSON writes when many
+// session snapshots unlock the 10s window simultaneously.
+export function updateLastKnownStatesBatch(
+  updates: ReadonlyArray<{ id: string; text: string }>
+): void {
+  const now = Date.now()
+  let any = false
+  for (const { id, text } of updates) {
+    if (applyLastKnownState(id, text, now)) any = true
+  }
+  if (any) onSessionsChanged()
 }
 
 // Re-probe PR numbers for sessions that don't have one yet, so a PR opened
@@ -582,6 +646,264 @@ export async function killSession(id: string): Promise<void> {
   updateSession(id, 'dead')
 }
 
+interface ReconnectOutcome {
+  state: HostConnectionState | undefined
+  // True when the caller inherits an outstanding retain on the host runtime —
+  // the sibling batch probe consumes it and releases at the end. This keeps
+  // the ControlMaster alive across the doReconnect → batch boundary so each
+  // sibling probe reuses the existing ControlPath instead of spawning a
+  // fresh SSH handshake (which would also fail independently on a flaky
+  // host).
+  retainedForBatch: boolean
+}
+
+// In-flight reconnect promises keyed by session id. Two concurrent clicks on
+// the same pending card (fast double-click, or a click that races the
+// auto-fired batch probe) coalesce into one SSH attempt.
+const inflightReconnects = new Map<string, Promise<ReconnectOutcome>>()
+
+// Probe-only reconnect for a remote session. If the remote tmux session is
+// present we reattach and mark `live`; if it is gone we mark the session
+// `dead` (matches issue #12 AC #4: "either reattach the PTY or marks the
+// session dead"). Creating a fresh remote tmux session is `reviveSession`'s
+// job — that requires explicit user intent ("Restart terminal" on dead).
+//
+// On SSH failure we classify via `runtimeStateFor` (set by host-connection's
+// `startRuntime` before ensureHostConnection rejects), so auth-failed vs.
+// network-unreachable get distinct UI states without re-parsing stderr.
+export async function reconnectRemoteSession(id: string): Promise<void> {
+  const existing = inflightReconnects.get(id)
+  if (existing) {
+    await existing
+    return
+  }
+
+  // Capture hostId BEFORE the await: if `removeSession(id)` runs while this
+  // reconnect is in flight, `sessions.get(id)` would return undefined after
+  // the await and we'd neither release the host retain nor run the sibling
+  // batch — leaking the ControlMaster for the lifetime of the app.
+  const initialHostId = sessions.get(id)?.session.hostId ?? null
+
+  const promise = doReconnectRemoteSession(id)
+  inflightReconnects.set(id, promise)
+  let reconnectError: unknown = undefined
+  let outcome: ReconnectOutcome | undefined
+  try {
+    outcome = await promise
+  } catch (err) {
+    reconnectError = err
+  } finally {
+    inflightReconnects.delete(id)
+  }
+  const successState = outcome?.state
+  const retainedForBatch = outcome?.retainedForBatch ?? false
+  // Fire-and-forget the sibling batch probe — the caller should not block on
+  // it. `probePendingSessionsOnHost` is idempotent so concurrent clicks on
+  // multiple cards of the same host still collapse to a single batch.
+  //
+  // Always attempt the batch probe, even when the clicked reconnect rejected:
+  // - on success (runtime was `live`), we reconcile siblings over the
+  //   now-live ControlMaster
+  // - on auth-failed / unreachable, the batch's short-circuit cascades that
+  //   state to every pending sibling without any new SSH I/O (spec AC #8)
+  //
+  // Skip only when there's no host at all (orphaned hostId / missing registry
+  // entry) or we couldn't determine any state — there's nothing to probe.
+  const hostId = sessions.get(id)?.session.hostId ?? initialHostId
+  const tagged = (reconnectError as { hostConnectionState?: HostConnectionState } | null)
+    ?.hostConnectionState
+  const stateHint = successState ?? tagged ?? (hostId ? runtimeStateFor(hostId) : undefined)
+  if (hostId && stateHint) {
+    // Fire-and-forget: user's first click should not wait for sibling
+    // reconciliation. When doReconnect left us an outstanding retain, the
+    // batch consumes it and releases at the end — that keeps the
+    // ControlMaster alive across the probe so siblings reuse one SSH
+    // handshake instead of spawning one per card.
+    ;(async () => {
+      try {
+        await probePendingSessionsOnHost(hostId, stateHint)
+      } catch (err) {
+        console.error(`probePendingSessionsOnHost(${hostId}) failed:`, err)
+      } finally {
+        if (retainedForBatch) {
+          await releaseHostConnection(hostId).catch(() => undefined)
+        }
+      }
+    })()
+  } else if (hostId && retainedForBatch) {
+    // No batch to run but doReconnect handed us an outstanding retain — must
+    // release or we leak the runtime.
+    await releaseHostConnection(hostId).catch(() => undefined)
+  }
+  if (reconnectError !== undefined) throw reconnectError
+}
+
+async function doReconnectRemoteSession(id: string): Promise<ReconnectOutcome> {
+  const entry = sessions.get(id)
+  if (!entry) throw new Error(`Session ${id} not found`)
+  const session = entry.session
+  if (!session.hostId) {
+    throw new Error(`Session ${id} is not a remote session`)
+  }
+  const hostId = session.hostId
+  const host = getHost(hostId)
+  if (!host) {
+    session.connectionState = 'unreachable'
+    onSessionsChanged()
+    throw new Error(`Host configuration for "${hostId}" was removed`)
+  }
+  session.connectionState = 'connecting'
+  onSessionsChanged()
+
+  let retained = false
+  try {
+    await prepareRemoteHost(host)
+    retained = true
+    const probe = await probeRemoteTmuxSession(id, host)
+    if (probe === 'present') {
+      await reattachRemotePty(id, host)
+      session.connectionState = 'live'
+      if (session.status === 'running') session.status = 'idle'
+      session.lastActivity = Date.now()
+      onSessionsChanged()
+    } else if (probe === 'absent') {
+      // Remote confirmed the tmux session is gone — mark dead. The user can
+      // invoke "Restart terminal" (reviveSession) to spawn a fresh one.
+      session.connectionState = 'offline'
+      session.status = 'dead'
+      session.lastActivity = Date.now()
+      onSessionsChanged()
+    } else {
+      // SSH-level failure probing an otherwise-live control connection. Treat
+      // as unreachable and let the user retry; do NOT mark dead because the
+      // remote Claude may still be running.
+      session.connectionState = 'unreachable'
+      onSessionsChanged()
+    }
+  } catch (err) {
+    // Prefer the state captured by prepareRemoteHost (attached to the error
+    // before stopHostConnection wipes the runtime entry). Fall back to the
+    // live runtime when the failure happened after prepareRemoteHost returned
+    // (e.g. bootstrap / PTY attach step).
+    const tagged = (err as { hostConnectionState?: HostConnectionState } | null)
+      ?.hostConnectionState
+    const runtimeState = tagged ?? runtimeStateFor(hostId)
+    if (runtimeState === 'auth-failed') {
+      session.connectionState = 'auth-failed'
+    } else if (runtimeState === 'unreachable') {
+      session.connectionState = 'unreachable'
+    } else {
+      session.connectionState = 'offline'
+    }
+    onSessionsChanged()
+    if (retained) {
+      await releaseHostConnection(hostId).catch(() => undefined)
+    }
+    throw err
+  }
+  // `retained` is unconditionally true at this point — the only path that
+  // leaves it false throws inside prepareRemoteHost and goes through the
+  // catch block's `throw err`.
+  //
+  // Do NOT release here: the caller (reconnectRemoteSession) owns the retain
+  // and transfers it to the sibling batch probe, which releases at the end.
+  // This keeps the ControlMaster alive across the boundary so per-sibling
+  // `tmux has-session` calls reuse the existing ControlPath instead of
+  // spawning fresh SSH handshakes (which would also fail independently on a
+  // flaky host). The snapshot of runtime state captured here is still
+  // accurate — the release hasn't happened yet.
+  const finalState = runtimeStateFor(hostId)
+  return { state: finalState, retainedForBatch: true }
+}
+
+// Eager batch probe for remaining `pending` sessions on a host that just
+// became live. Runs `tmux has-session` per sibling over the live ControlMaster
+// (no new SSH handshakes). If the runtime state is `auth-failed` /
+// `unreachable` we short-circuit: all siblings inherit that state without any
+// network I/O, satisfying spec AC #8 "auth failures transition directly to
+// host-auth-failed with no further attempts".
+const inflightBatchProbes = new Map<string, Promise<void>>()
+
+export async function probePendingSessionsOnHost(
+  hostId: string,
+  stateHint?: HostConnectionState
+): Promise<void> {
+  const existing = inflightBatchProbes.get(hostId)
+  if (existing) return existing
+  const promise = doProbePendingSessionsOnHost(hostId, stateHint)
+  inflightBatchProbes.set(hostId, promise)
+  try {
+    await promise
+  } finally {
+    inflightBatchProbes.delete(hostId)
+  }
+}
+
+async function doProbePendingSessionsOnHost(
+  hostId: string,
+  stateHint?: HostConnectionState
+): Promise<void> {
+  const host = getHost(hostId)
+  if (!host) return
+
+  const pending: Session[] = []
+  for (const entry of sessions.values()) {
+    if (entry.session.hostId === hostId && entry.session.connectionState === 'pending') {
+      pending.push(entry.session)
+    }
+  }
+  if (pending.length === 0) return
+
+  // Short-circuit the cascade if the runtime is known-failed. Prefer
+  // stateHint: on an ensureHostConnection failure the runtime entry has been
+  // deleted by stopHostConnection, so runtimeStateFor would return undefined
+  // and we'd fall through to the probe loop — defeating the "no further
+  // attempts" contract on auth-failed cascades.
+  const runtime = stateHint ?? runtimeStateFor(hostId)
+  if (runtime === 'auth-failed' || runtime === 'unreachable') {
+    for (const s of pending) s.connectionState = runtime
+    onSessionsChanged()
+    return
+  }
+
+  let bailed = false
+  for (const s of pending) {
+    if (bailed) break
+    // The snapshot was taken once at batch entry; by the time we get here
+    // another concurrent reconnect (e.g. user clicking a sibling card) may
+    // have already advanced this session out of `pending`. Skip — otherwise
+    // we'd duplicate the remote reattach and leak the earlier runtime retain.
+    if (s.connectionState !== 'pending') continue
+    try {
+      const probe = await probeRemoteTmuxSession(s.id, host)
+      if (probe === 'present') {
+        await reattachRemotePty(s.id, host)
+        s.connectionState = 'live'
+        if (s.status === 'running') s.status = 'idle'
+        s.lastActivity = Date.now()
+      } else if (probe === 'absent') {
+        s.connectionState = 'offline'
+        s.status = 'dead'
+        s.lastActivity = Date.now()
+      } else {
+        // SSH probe failed (timeout / auth / network) — the remote may still be
+        // running. Mark unreachable and bail so we don't mis-classify the rest
+        // of the batch as dead on a transient failure.
+        s.connectionState = 'unreachable'
+        bailed = true
+      }
+    } catch (err) {
+      // A mid-batch SSH failure means the host dropped. Mark this sibling
+      // unreachable and stop — remaining siblings stay `pending` for a
+      // later manual reconnect, avoiding a flood of follow-up SSH attempts.
+      console.error(`probePendingSessionsOnHost(${hostId}) aborted on ${s.id}:`, err)
+      s.connectionState = 'unreachable'
+      bailed = true
+    }
+  }
+  onSessionsChanged()
+}
+
 export async function reviveSession(id: string): Promise<void> {
   const entry = sessions.get(id)
   if (!entry) throw new Error(`Session ${id} not found`)
@@ -853,6 +1175,26 @@ export async function relocateProject(
   return { migratedCount: toMigrate.length }
 }
 
+// Backfill / reconcile fields added in later versions. For local sessions
+// (worktreePath exists on this machine) the live git branch trumps whatever
+// was persisted — an earlier version stored a wrong default that we self-heal
+// here. Remote sessions can't access git without SSH, so they keep the
+// persisted branch and only fall back when it's missing.
+function backfillDerivedFields(session: Session): void {
+  if (!session.hostId && existsSync(session.worktreePath)) {
+    session.branch = resolveBranchFromWorktree(session.worktreePath, session.worktreeName)
+  } else if (!session.branch) {
+    session.branch = `cc-pewpew/${session.worktreeName}`
+  }
+  if (session.issueNumber === undefined) {
+    session.issueNumber = parseIssueNumber(session.worktreeName, session.branch)
+  }
+  if (session.prNumber === undefined) {
+    const m = session.worktreeName.match(/^pr-(\d+)$/)
+    if (m) session.prNumber = parseInt(m[1], 10)
+  }
+}
+
 export function restoreSessions(): void {
   if (!existsSync(SESSIONS_PATH)) return
 
@@ -868,20 +1210,19 @@ export function restoreSessions(): void {
     for (const session of data) {
       session.hostId = session.hostId ?? null
       if (session.hostId) {
-        if (
-          session.status === 'running' ||
-          session.status === 'idle' ||
-          session.status === 'needs_input'
-        ) {
-          session.status = 'dead'
+        // Lazy restore: a remote session materializes in `pending` until the
+        // user's first click (or reconnectRemoteSession) opens the host's SSH
+        // control connection and probes tmux. No network I/O here.
+        // `running` → `idle` matches the local "resumedStatus" mapping; a
+        // persisted status of `dead` means the remote tmux is confirmed gone
+        // and there is nothing to reconnect to, so leave connectionState unset.
+        if (session.status === 'running') {
+          session.status = 'idle'
         }
-        session.connectionState = 'offline'
-        if (!session.branch) {
-          session.branch = `cc-pewpew/${session.worktreeName}`
+        if (session.status !== 'dead') {
+          session.connectionState = 'pending'
         }
-        if (session.issueNumber === undefined) {
-          session.issueNumber = parseIssueNumber(session.worktreeName, session.branch)
-        }
+        backfillDerivedFields(session)
         sessions.set(session.id, { session })
         continue
       }
@@ -925,22 +1266,7 @@ export function restoreSessions(): void {
       }
       // Migrate legacy symlink-form paths to canonical so renderer matches work.
       session.worktreePath = canonicalPath(session.worktreePath)
-      // Backfill / reconcile fields added in later versions. Read the real
-      // branch from git when the worktree exists — an earlier version of this
-      // code persisted an incorrect default that we self-heal. If the worktree
-      // is gone, keep whatever was persisted (or the default fallback).
-      if (existsSync(session.worktreePath)) {
-        session.branch = resolveBranchFromWorktree(session.worktreePath, session.worktreeName)
-      } else if (!session.branch) {
-        session.branch = `cc-pewpew/${session.worktreeName}`
-      }
-      if (session.issueNumber === undefined) {
-        session.issueNumber = parseIssueNumber(session.worktreeName, session.branch)
-      }
-      if (session.prNumber === undefined) {
-        const m = session.worktreeName.match(/^pr-(\d+)$/)
-        if (m) session.prNumber = parseInt(m[1], 10)
-      }
+      backfillDerivedFields(session)
       if (session.status !== 'dead') {
         session.lastActivity = Date.now()
       }

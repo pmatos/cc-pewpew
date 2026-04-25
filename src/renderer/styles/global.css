@@ -478,18 +478,44 @@ body,
   background: var(--accent-yellow);
 }
 
-.connection-auth-failed,
-.connection-unreachable {
+.connection-auth-failed {
   background: var(--accent-red);
+}
+
+.connection-unreachable {
+  background: var(--accent-yellow);
 }
 
 .connection-offline {
   background: var(--text-secondary);
 }
 
+.connection-pending {
+  background: var(--text-secondary);
+  opacity: 0.6;
+}
+
 .connection-label {
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+.session-card-text-thumb.stale {
+  opacity: 0.55;
+  filter: saturate(0.6);
+}
+
+.connection-overlay--pending,
+.connection-overlay--connecting {
+  background: rgba(14, 14, 30, 0.82);
+}
+
+.connection-overlay--auth-failed {
+  background: rgba(64, 18, 24, 0.85);
+}
+
+.connection-overlay--unreachable {
+  background: rgba(64, 56, 18, 0.85);
 }
 
 .session-card-time {

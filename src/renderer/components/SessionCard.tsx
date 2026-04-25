@@ -51,6 +51,12 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
     if (selectedCount > 0) {
       clearSelection()
     }
+    // First click on a pending remote session opens the host's control
+    // connection and probes tmux. DetailPane renders the cached preview +
+    // spinner overlay while connectionState transitions to 'live' (or dead).
+    if (session.hostId && connectionState === 'pending') {
+      void window.api.reconnectSession(session.id).catch(() => undefined)
+    }
     if (onOpenSession && session.status !== 'dead' && session.status !== 'error') {
       onOpenSession(session.id, sessionName)
     }
@@ -112,11 +118,23 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
         },
       ]
     }
+    const isRemoteNonLive =
+      !!session.hostId && connectionState !== undefined && connectionState !== 'live'
     return [
       {
         label: session.status === 'dead' ? 'Restart terminal' : 'Open terminal',
         onClick: () => onOpenSession?.(session.id, sessionName),
       },
+      ...(isRemoteNonLive && session.status !== 'dead'
+        ? [
+            {
+              label: 'Reconnect',
+              onClick: () => {
+                void window.api.reconnectSession(session.id).catch(() => undefined)
+              },
+            },
+          ]
+        : []),
       {
         label: 'Kill session',
         onClick: () => {
@@ -158,7 +176,12 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
       style={style}
     >
       <div className="session-card-thumb">
-        {thumbnail ? <pre className="session-card-text-thumb">{thumbnail}</pre> : null}
+        {(() => {
+          const preview = thumbnail ?? session.lastKnownState?.text
+          if (!preview) return null
+          const stale = !thumbnail && connectionState !== 'live'
+          return <pre className={`session-card-text-thumb${stale ? ' stale' : ''}`}>{preview}</pre>
+        })()}
         {host && (
           <div className="session-card-host-overlay" title={`${host.label}: ${connectionState}`}>
             <span className="host-pill">{host.label}</span>

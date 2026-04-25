@@ -23,6 +23,7 @@ import {
   destroyPty,
   getScrollback,
   captureThumbnails,
+  getLastSnapshot,
 } from './pty-manager'
 import {
   initSessionManager,
@@ -35,9 +36,11 @@ import {
   restoreSessions,
   killSession,
   reviveSession,
+  reconnectRemoteSession,
   removeWorktree,
   removeSession,
   relocateProject,
+  updateLastKnownStatesBatch,
 } from './session-manager'
 import { parseDiff, synthesizeUntrackedFile } from './diff-parser'
 import { listHosts, addHost, updateHost, deleteHost, getHost } from './host-registry'
@@ -288,6 +291,15 @@ app.whenReady().then(async () => {
     }
   })
 
+  ipcMain.handle('sessions:reconnect', async (_event, id: string) => {
+    try {
+      await reconnectRemoteSession(id)
+    } catch (err) {
+      console.error(`Failed to reconnect session ${id}:`, err)
+      throw err
+    }
+  })
+
   ipcMain.handle('sessions:remove-worktree', async (_event, id: string) => {
     await removeWorktree(id)
   })
@@ -533,12 +545,24 @@ app.whenReady().then(async () => {
   initPtyManager()
   restoreSessions()
 
-  // Periodic text thumbnail capture from tmux
+  // Periodic text thumbnail capture from tmux.
+  // Also snapshots `lastKnownState` from every live PTY buffer (local + remote)
+  // so a remote session's cached preview survives the next app restart without
+  // any new SSH traffic (issue #12 AC #1 / #9). The batch helper applies the
+  // 10s per-session rate limit and emits a single persist + broadcast per
+  // tick, avoiding an O(N) write storm when many sessions unlock the window
+  // simultaneously.
   const thumbInterval = setInterval(() => {
     const thumbs = captureThumbnails()
     if (Object.keys(thumbs).length > 0) {
       broadcastToAll('thumbnails:text-updated', thumbs)
     }
+    const updates: { id: string; text: string }[] = []
+    for (const session of getSessions()) {
+      const text = getLastSnapshot(session.id)
+      if (text) updates.push({ id: session.id, text })
+    }
+    if (updates.length > 0) updateLastKnownStatesBatch(updates)
   }, 3000)
 
   app.on('activate', () => {

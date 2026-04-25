@@ -15,7 +15,19 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
   const hosts = useHostsStore((s) => s.hosts)
   const host = session?.hostId ? hosts.find((h) => h.hostId === session.hostId) : null
   const isDead = session?.status === 'dead'
+  const connectionState = session?.connectionState
+  const isRemote = !!session?.hostId
+  const isPending = isRemote && connectionState === 'pending'
+  const isConnecting = isRemote && connectionState === 'connecting'
+  const isAuthFailed = isRemote && connectionState === 'auth-failed'
+  const isUnreachable = isRemote && connectionState === 'unreachable'
+  // 'offline' covers post-prepareRemoteHost reconnect failures (probe /
+  // reattach / bootstrap errors) that aren't auth- or network-classified.
+  // Without this branch the user sees an inert Terminal pane with no Retry.
+  const isOffline = isRemote && connectionState === 'offline'
+  const showReconnectOverlay = !isDead && (isPending || isAuthFailed || isUnreachable || isOffline)
   const [reviving, setReviving] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
   // Monotonic flip count — each toggle increments by 1, rotating +180deg.
   // Using a counter (instead of a boolean) keeps the rotation going in the
   // same direction on return instead of reversing.
@@ -80,6 +92,18 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
     }
   }
 
+  const handleReconnect = async () => {
+    setReconnecting(true)
+    try {
+      await window.api.reconnectSession(sessionId)
+    } catch {
+      // Error surfaces via the session's connectionState update; swallow so we
+      // can re-enable the button.
+    } finally {
+      setReconnecting(false)
+    }
+  }
+
   return (
     <div className="detail-pane">
       <div className="detail-pane-header">
@@ -111,6 +135,60 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
               <button className="dead-session-restart" onClick={handleRevive} disabled={reviving}>
                 {reviving ? 'Restarting...' : 'Restart terminal'}
               </button>
+            </div>
+          </div>
+        ) : showReconnectOverlay ? (
+          <div
+            className={`dead-session-overlay connection-overlay connection-overlay--${connectionState}`}
+          >
+            <div className="dead-session-content">
+              {isPending && (
+                <>
+                  <h3>Connecting to {host?.label ?? 'host'}</h3>
+                  <p>Probing the remote tmux session.</p>
+                </>
+              )}
+              {isAuthFailed && (
+                <>
+                  <h3>Authentication failed</h3>
+                  <p>
+                    SSH authentication to {host?.label ?? 'the host'} was rejected. Fix your
+                    credentials and click Retry.
+                  </p>
+                </>
+              )}
+              {isUnreachable && (
+                <>
+                  <h3>Host unreachable</h3>
+                  <p>
+                    {host?.label ?? 'The host'} did not respond. Check your network or VPN, then
+                    click Retry.
+                  </p>
+                </>
+              )}
+              {isOffline && (
+                <>
+                  <h3>Reconnect failed</h3>
+                  <p>
+                    The session could not be reattached on {host?.label ?? 'the host'}. Click Retry
+                    to try again.
+                  </p>
+                </>
+              )}
+              <button
+                className="dead-session-restart"
+                onClick={handleReconnect}
+                disabled={reconnecting || isConnecting}
+              >
+                {reconnecting || isConnecting ? 'Connecting...' : isPending ? 'Connect' : 'Retry'}
+              </button>
+            </div>
+          </div>
+        ) : isConnecting ? (
+          <div className="dead-session-overlay connection-overlay connection-overlay--connecting">
+            <div className="dead-session-content">
+              <h3>Reconnecting…</h3>
+              <p>Re-attaching the terminal.</p>
             </div>
           </div>
         ) : (

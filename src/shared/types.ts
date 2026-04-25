@@ -1,5 +1,16 @@
 export type SessionStatus = 'running' | 'needs_input' | 'idle' | 'completed' | 'error' | 'dead'
-export type ConnectionState = 'connecting' | 'live' | 'offline' | 'auth-failed' | 'unreachable'
+export type ConnectionState =
+  | 'connecting'
+  | 'live'
+  | 'offline'
+  | 'pending'
+  | 'auth-failed'
+  | 'unreachable'
+
+export interface LastKnownState {
+  text: string
+  timestamp: number
+}
 
 export interface Project {
   name: string
@@ -34,6 +45,7 @@ export interface Session {
   lastActivity: number
   hookEvents: HookEvent[]
   repoFingerprint?: string
+  lastKnownState?: LastKnownState
 }
 
 export interface HookEvent {

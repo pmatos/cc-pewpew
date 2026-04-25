@@ -17,9 +17,15 @@ interface PtyEntry {
   pty: IPty
   tmuxSession: string
   buffer: string
+  // Trailing window of PTY output. Populated on every flush so issue #12's
+  // `lastKnownState` survives restart with the last-seen pane text. Capped to
+  // LAST_SNAPSHOT_MAX bytes so a 100-session `sessions.json` stays small.
+  lastSnapshot: string
   host?: Host
   released?: boolean
 }
+
+const LAST_SNAPSHOT_MAX = 3 * 1024
 
 const ptys = new Map<string, PtyEntry>()
 let flushInterval: ReturnType<typeof setInterval> | null = null
@@ -28,9 +34,17 @@ function flushBuffers(): void {
   for (const [sessionId, entry] of ptys) {
     if (entry.buffer.length > 0) {
       broadcastToAll('pty:data', { sessionId, data: entry.buffer })
+      const appended = entry.lastSnapshot + entry.buffer
+      entry.lastSnapshot =
+        appended.length > LAST_SNAPSHOT_MAX ? appended.slice(-LAST_SNAPSHOT_MAX) : appended
       entry.buffer = ''
     }
   }
+}
+
+export function getLastSnapshot(sessionId: string): string | undefined {
+  const entry = ptys.get(sessionId)
+  return entry?.lastSnapshot || undefined
 }
 
 export function isTmuxAvailable(): boolean {
@@ -106,6 +120,7 @@ export function createPty(
     pty: ptyProcess,
     tmuxSession,
     buffer: '',
+    lastSnapshot: '',
   }
 
   ptyProcess.onData((data) => {
@@ -170,6 +185,7 @@ export async function createRemotePty(
     pty: ptyProcess,
     tmuxSession,
     buffer: '',
+    lastSnapshot: '',
     host,
   }
 
@@ -315,6 +331,31 @@ export async function hasRemoteTmuxSession(sessionId: string, host: Host): Promi
   return result.code === 0 && !result.timedOut
 }
 
+// Discriminated probe: distinguishes "tmux session is absent on the remote"
+// from "we couldn't reach the remote to ask". The boolean `hasRemoteTmuxSession`
+// collapses both into `false`, which reconnect/batch-probe paths would otherwise
+// treat as a dead session and incorrectly downgrade a still-running remote
+// terminal.
+export type RemoteTmuxProbeResult = 'present' | 'absent' | 'unreachable'
+
+export async function probeRemoteTmuxSession(
+  sessionId: string,
+  host: Host
+): Promise<RemoteTmuxProbeResult> {
+  const result = await execRemote(host, ['tmux', 'has-session', '-t', `cc-pewpew-${sessionId}`], {
+    timeoutMs: 3000,
+  })
+  if (result.timedOut) return 'unreachable'
+  if (result.code === 0) return 'present'
+  const { reason } = classifySshExit({ exitCode: result.code, stderr: result.stderr })
+  if (reason === 'auth-failed' || reason === 'network' || reason === 'dep-missing') {
+    return 'unreachable'
+  }
+  // Non-zero exit with no SSH-level failure marker is tmux's own "can't find
+  // session" exit. The remote is reachable; the session is simply gone.
+  return 'absent'
+}
+
 export async function getScrollback(sessionId: string): Promise<string> {
   const entry = ptys.get(sessionId)
   if (entry?.host) {
@@ -367,6 +408,7 @@ export function reattachPty(sessionId: string): void {
     pty: ptyProcess,
     tmuxSession,
     buffer: '',
+    lastSnapshot: '',
   }
 
   ptyProcess.onData((data) => {
@@ -410,6 +452,7 @@ export async function reattachRemotePty(sessionId: string, host: Host): Promise<
     pty: ptyProcess,
     tmuxSession,
     buffer: '',
+    lastSnapshot: '',
     host,
   }
 
