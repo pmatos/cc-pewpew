@@ -88,6 +88,61 @@ function HostForm({
   )
 }
 
+interface HostDeleteConfirmProps {
+  host: Host
+  onConfirm: () => Promise<void> | void
+  onCancel: () => void
+}
+
+function HostDeleteConfirm({ host, onConfirm, onCancel }: HostDeleteConfirmProps) {
+  const [submitting, setSubmitting] = useState(false)
+
+  // `submitting` only meaningfully blocks a re-click while we await the async
+  // delete; without `await onConfirm()` the lock would clear synchronously,
+  // letting a fast double-click fire two IPC deletes (the second would surface
+  // a spurious "Unknown host" after the first succeeded).
+  const handleConfirm = async () => {
+    if (submitting) return
+    setSubmitting(true)
+    try {
+      await onConfirm()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div
+      className="hosts-form hosts-delete-confirm"
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onCancel()
+      }}
+    >
+      <div className="hosts-delete-confirm-body">
+        Forget <strong>{host.label}</strong> ({host.alias})? cc-pewpew will mark its sessions dead,
+        close its SSH connection, and remove it from your registry.{' '}
+        <strong>
+          Remote tmux sessions, worktrees, and ~/.config/cc-pewpew/ on the host are not touched.
+        </strong>
+      </div>
+      <div className="create-actions">
+        <button
+          autoFocus
+          className="create-btn cancel"
+          disabled={submitting}
+          onClick={handleConfirm}
+        >
+          Forget host
+        </button>
+        <button className="create-btn" onClick={onCancel} disabled={submitting}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface HostRowProps {
   host: Host
   testing: boolean
@@ -142,6 +197,7 @@ export default function ManageHostsDialog() {
   const updateHost = useHostsStore((s) => s.updateHost)
   const deleteHost = useHostsStore((s) => s.deleteHost)
   const testHost = useHostsStore((s) => s.testHost)
+  const [confirmingDeleteHostId, setConfirmingDeleteHostId] = useState<HostId | null>(null)
 
   useEffect(() => {
     if (!dialogOpen) return
@@ -169,8 +225,9 @@ export default function ManageHostsDialog() {
 
   const editingHost = editingHostId ? hosts.find((h) => h.hostId === editingHostId) : undefined
 
-  const handleDelete = async (hostId: HostId) => {
+  const handleConfirmDelete = async (hostId: HostId) => {
     await deleteHost(hostId)
+    setConfirmingDeleteHostId(null)
   }
 
   return (
@@ -203,6 +260,13 @@ export default function ManageHostsDialog() {
                 onSubmit={(alias, label) => updateHost(host.hostId, alias, label)}
                 onCancel={cancelEdit}
               />
+            ) : confirmingDeleteHostId === host.hostId ? (
+              <HostDeleteConfirm
+                key={host.hostId}
+                host={host}
+                onConfirm={() => handleConfirmDelete(host.hostId)}
+                onCancel={() => setConfirmingDeleteHostId(null)}
+              />
             ) : (
               <HostRow
                 key={host.hostId}
@@ -211,7 +275,7 @@ export default function ManageHostsDialog() {
                 result={testResults[host.hostId]}
                 onTest={() => void testHost(host.hostId)}
                 onEdit={() => startEdit(host.hostId)}
-                onDelete={() => void handleDelete(host.hostId)}
+                onDelete={() => setConfirmingDeleteHostId(host.hostId)}
               />
             )
           )}

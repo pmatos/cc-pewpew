@@ -1095,6 +1095,12 @@ body,
   padding: 8px;
 }
 
+.hosts-delete-confirm-body {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .hosts-dialog-footer {
   padding-top: 4px;
 }

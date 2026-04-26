@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   reattachRemotePtyCalls: [] as { sessionId: string; hostId: string }[],
   createPtyCalls: [] as { sessionId: string; cwd: string }[],
   reattachPtyCalls: [] as string[],
+  detachPtyCalls: [] as string[],
   hasRemoteTmuxResult: new Map<string, boolean>(),
   probeRemoteTmuxResult: new Map<string, 'present' | 'absent' | 'unreachable'>(),
   // Per-session side effect fired before the probe resolves. Lets tests
@@ -99,7 +100,9 @@ vi.mock('./pty-manager', () => ({
   createPty: (sessionId: string, cwd: string) => {
     state.createPtyCalls.push({ sessionId, cwd })
   },
-  detachPty: vi.fn(),
+  detachPty: (sessionId: string) => {
+    state.detachPtyCalls.push(sessionId)
+  },
   destroyPty: vi.fn(),
   destroyRemotePty: vi.fn(async () => undefined),
   hasPty: vi.fn(() => false),
@@ -233,6 +236,7 @@ beforeEach(() => {
   state.reattachRemotePtyCalls = []
   state.createPtyCalls = []
   state.reattachPtyCalls = []
+  state.detachPtyCalls = []
   state.hasRemoteTmuxResult = new Map()
   state.probeRemoteTmuxResult = new Map()
   state.runtimeRefs = new Map()
@@ -798,5 +802,43 @@ describe('restoreSessions — local path unchanged (AC #10 regression)', () => {
     expect(got.connectionState).toBeUndefined()
     expect(state.reattachPtyCalls).toEqual(['l1'])
     expect(state.ensureHostConnectionCalls).toEqual([])
+  })
+})
+
+describe('removeSessionsForHost (issue #14)', () => {
+  it('drops only the matching host, detaches PTY for each, and broadcasts once', async () => {
+    state.hosts = [
+      { hostId: 'A', alias: 'a', label: 'A' },
+      { hostId: 'B', alias: 'b', label: 'B' },
+    ]
+    writeSessionsJson([
+      baseRemoteSession({ id: 'rA1', hostId: 'A' }),
+      baseRemoteSession({ id: 'rA2', hostId: 'A', worktreeName: 'feat-2' }),
+      baseRemoteSession({ id: 'rB1', hostId: 'B' }),
+    ])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    state.sessionsUpdatedBroadcasts = 0
+
+    sm.removeSessionsForHost('A')
+
+    const remaining = sm.getSessions()
+    expect(remaining.map((s) => s.id)).toEqual(['rB1'])
+    expect(state.detachPtyCalls.sort()).toEqual(['rA1', 'rA2'])
+    expect(state.sessionsUpdatedBroadcasts).toBe(1)
+  })
+
+  it('skips persist + broadcast when no sessions match', async () => {
+    state.hosts = [{ hostId: 'A', alias: 'a', label: 'A' }]
+    writeSessionsJson([baseRemoteSession({ id: 'rA1', hostId: 'A' })])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    state.sessionsUpdatedBroadcasts = 0
+
+    sm.removeSessionsForHost('does-not-exist')
+
+    expect(sm.getSessions().map((s) => s.id)).toEqual(['rA1'])
+    expect(state.detachPtyCalls).toEqual([])
+    expect(state.sessionsUpdatedBroadcasts).toBe(0)
   })
 })

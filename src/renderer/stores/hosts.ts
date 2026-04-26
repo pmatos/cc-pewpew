@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useProjectsStore } from './projects'
 import type { Host, HostId, TestConnectionResult } from '../../shared/types'
 
 interface HostsState {
@@ -95,6 +96,12 @@ export const useHostsStore = create<HostsState>((set, get) => ({
       await window.api.deleteHost(hostId)
       set({ error: null })
       await get().fetchHosts()
+      // Cascade deletes the host's remote projects in the main process; the
+      // renderer's projects view caches the previous list, so without an
+      // explicit rescan stale entries with the deleted hostId stay visible
+      // until the next session/scan event and "New Session" on one of them
+      // would fail with "Unknown host".
+      await useProjectsStore.getState().scanProjects()
     } catch (e) {
       set({ error: errorMessage(e) })
     }
