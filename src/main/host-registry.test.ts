@@ -154,43 +154,55 @@ describe('updateHost', () => {
 })
 
 describe('deleteHost', () => {
+  // Cascade guards moved out of deleteHost in issue #14: deletion is now an
+  // unconditional local-only forget. The IPC handler in index.ts orchestrates
+  // PTY teardown, SSH connection close, hook-listener unlink, and remote
+  // project removal around this final registry strip.
   it('deletes when sessions.json is missing', () => {
     const h = addHost({ alias: 'dev', label: 'x' })
     deleteHost(h.hostId)
     expect(listHosts()).toHaveLength(0)
   })
 
-  it('deletes when sessions.json is present but has no hostId binding', () => {
-    fsState.sessionsJson = JSON.stringify([{ session: { id: 's1', status: 'idle' } }])
-    const h = addHost({ alias: 'dev', label: 'x' })
-    expect(() => deleteHost(h.hostId)).not.toThrow()
-  })
-
-  it('refuses delete when a persisted session is bound to the host', () => {
+  it('deletes despite a session bound to the host', () => {
     const h = addHost({ alias: 'dev', label: 'x' })
     fsState.sessionsJson = JSON.stringify([{ session: { id: 's1', hostId: h.hostId } }])
-    expect(() => deleteHost(h.hostId)).toThrow(/bound/)
-  })
-
-  it('accepts either sessions-array or wrapped-array shape', () => {
-    const h = addHost({ alias: 'dev', label: 'x' })
-    fsState.sessionsJson = JSON.stringify({ sessions: [{ hostId: h.hostId }] })
-    expect(() => deleteHost(h.hostId)).toThrow(/bound/)
-  })
-
-  it('tolerates malformed sessions.json (treats as no bindings)', () => {
-    fsState.sessionsJson = 'not json'
-    const h = addHost({ alias: 'dev', label: 'x' })
     expect(() => deleteHost(h.hostId)).not.toThrow()
+    expect(listHosts()).toHaveLength(0)
+  })
+
+  it('deletes despite a remote project bound to the host', () => {
+    const h = addHost({ alias: 'dev', label: 'x' })
+    vi.mocked(hasRemoteProjectsBoundTo).mockReturnValue(true)
+    expect(() => deleteHost(h.hostId)).not.toThrow()
+    expect(listHosts()).toHaveLength(0)
   })
 
   it('throws on unknown hostId', () => {
     expect(() => deleteHost('nope')).toThrow(/Unknown/)
   })
+})
 
-  it('refuses delete when a remote project is bound to the host', () => {
+describe('updateHost retarget guards', () => {
+  // The cascade guards still gate alias retargeting in updateHost (label-only
+  // edits stay safe). These tests pin that contract so a future refactor of
+  // deleteHost doesn't accidentally drop the retarget protection too.
+  it('refuses alias retarget when a remote project is bound', () => {
     const h = addHost({ alias: 'dev', label: 'x' })
     vi.mocked(hasRemoteProjectsBoundTo).mockReturnValue(true)
-    expect(() => deleteHost(h.hostId)).toThrow(/remote projects/)
+    expect(() => updateHost(h.hostId, { alias: 'prod', label: 'x' })).toThrow(/remote projects/)
+  })
+
+  it('refuses alias retarget when a session is bound', () => {
+    const h = addHost({ alias: 'dev', label: 'x' })
+    fsState.sessionsJson = JSON.stringify([{ session: { id: 's1', hostId: h.hostId } }])
+    expect(() => updateHost(h.hostId, { alias: 'prod', label: 'x' })).toThrow(/bound/)
+  })
+
+  it('allows label-only edit even with bindings', () => {
+    const h = addHost({ alias: 'dev', label: 'old' })
+    vi.mocked(hasRemoteProjectsBoundTo).mockReturnValue(true)
+    fsState.sessionsJson = JSON.stringify([{ session: { id: 's1', hostId: h.hostId } }])
+    expect(() => updateHost(h.hostId, { alias: 'dev', label: 'new' })).not.toThrow()
   })
 })

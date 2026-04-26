@@ -1001,6 +1001,23 @@ export async function removeSession(id: string): Promise<void> {
   onSessionsChanged()
 }
 
+// Local-only forget: detach the PTY wrapper for every session bound to the
+// host (releases the host-connection refcount via releaseRemoteEntry without
+// talking to the remote tmux), then drop the entries so they vanish from
+// sessions.json on the next persist. Worktrees, remote tmux sessions, and the
+// remote ~/.config/cc-pewpew/ tree are intentionally left alone — that is the
+// v1 host-delete contract (issue #14).
+export function removeSessionsForHost(hostId: string): void {
+  let removed = false
+  for (const [id, entry] of sessions) {
+    if (entry.session.hostId !== hostId) continue
+    detachPty(id)
+    sessions.delete(id)
+    removed = true
+  }
+  if (removed) onSessionsChanged()
+}
+
 const cleanupInProgress = new Set<string>()
 
 async function promptCleanup(id: string): Promise<void> {

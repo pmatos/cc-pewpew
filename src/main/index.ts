@@ -39,6 +39,7 @@ import {
   reconnectRemoteSession,
   removeWorktree,
   removeSession,
+  removeSessionsForHost,
   relocateProject,
   updateLastKnownStatesBatch,
 } from './session-manager'
@@ -57,6 +58,7 @@ import {
   listRemoteProjects,
   addRemoteProject as persistRemoteProject,
   removeRemoteProject,
+  removeRemoteProjectsForHost,
   toProject as remoteToProject,
   validateRemotePath,
 } from './remote-project-registry'
@@ -526,7 +528,28 @@ app.whenReady().then(async () => {
     }
     return updated
   })
-  ipcMain.handle('hosts:delete', (_event, hostId: string) => deleteHost(hostId))
+  // Local-only forget cascade for issue #14. Order matters:
+  //   1. Detach PTYs and drop sessions for the host. detachPty releases the
+  //      host-connection refcount; if refs hit zero this synchronously runs
+  //      stopHostConnection (which then fires the setOnHostConnectionStopped
+  //      callback to close the per-host hook listener).
+  //   2. stopHostConnection — idempotent if step 1 already tore it down.
+  //      Inside: ssh -O exit closes the -R reverse forward FIRST, then the
+  //      ControlPath socket is unlinked, then onConnectionStopped fires
+  //      stopHookServerForHost. That ordering is what the AC's
+  //      "-R forward gone before any StreamLocalBindUnlink race" requires.
+  //   3. stopHookServerForHost — explicit belt-and-braces for the offline
+  //      path (no runtime → no callback fires); idempotent otherwise.
+  //   4. Drop bootstrap cache, remote projects, and finally the host itself.
+  // Remote tmux/worktrees and the remote ~/.config/cc-pewpew/ are untouched.
+  ipcMain.handle('hosts:delete', async (_event, hostId: string) => {
+    removeSessionsForHost(hostId)
+    await stopHostConnection(hostId).catch(() => undefined)
+    stopHookServerForHost(hostId)
+    invalidateBootstrap(hostId)
+    removeRemoteProjectsForHost(hostId)
+    deleteHost(hostId)
+  })
   ipcMain.handle('hosts:test-connection', async (_event, hostId: string) => {
     const host = getHost(hostId)
     if (!host) throw new Error('Unknown host')

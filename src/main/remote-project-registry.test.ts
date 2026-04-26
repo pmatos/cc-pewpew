@@ -34,6 +34,7 @@ import {
   listRemoteProjects,
   addRemoteProject,
   removeRemoteProject,
+  removeRemoteProjectsForHost,
   hasRemoteProjectsBoundTo,
   toProject,
 } from './remote-project-registry'
@@ -159,6 +160,25 @@ describe('removeRemoteProject', () => {
   it('is idempotent on missing entry', () => {
     const host = seedHost()
     expect(() => removeRemoteProject(host.hostId, '/nope')).not.toThrow()
+    expect(saveConfigSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('removeRemoteProjectsForHost', () => {
+  it('removes every project for the given host while preserving others', () => {
+    const a = seedHost('a', 'a', 'A')
+    const b = seedHost('b', 'b', 'B')
+    addRemoteProject({ hostId: a.hostId, path: '/x' })
+    addRemoteProject({ hostId: a.hostId, path: '/y' })
+    addRemoteProject({ hostId: b.hostId, path: '/z' })
+    removeRemoteProjectsForHost(a.hostId)
+    expect(listRemoteProjects()).toEqual([{ hostId: 'b', path: '/z', name: 'z' }])
+  })
+
+  it('is a no-op when no projects match (does not call saveConfig)', () => {
+    seedHost('a')
+    saveConfigSpy.mockClear()
+    removeRemoteProjectsForHost('a')
     expect(saveConfigSpy).not.toHaveBeenCalled()
   })
 })

@@ -56,6 +56,14 @@ export function removeRemoteProject(hostId: HostId, path: string): void {
   saveConfig(config)
 }
 
+export function removeRemoteProjectsForHost(hostId: HostId): void {
+  const config = getConfig()
+  const next = config.remoteProjects.filter((p) => p.hostId !== hostId)
+  if (next.length === config.remoteProjects.length) return
+  config.remoteProjects = next
+  saveConfig(config)
+}
+
 export function hasRemoteProjectsBoundTo(hostId: HostId): boolean {
   return listRemoteProjects().some((p) => p.hostId === hostId)
 }
