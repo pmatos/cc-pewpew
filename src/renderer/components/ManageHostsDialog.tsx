@@ -90,18 +90,22 @@ function HostForm({
 
 interface HostDeleteConfirmProps {
   host: Host
-  onConfirm: () => void
+  onConfirm: () => Promise<void> | void
   onCancel: () => void
 }
 
 function HostDeleteConfirm({ host, onConfirm, onCancel }: HostDeleteConfirmProps) {
   const [submitting, setSubmitting] = useState(false)
 
+  // `submitting` only meaningfully blocks a re-click while we await the async
+  // delete; without `await onConfirm()` the lock would clear synchronously,
+  // letting a fast double-click fire two IPC deletes (the second would surface
+  // a spurious "Unknown host" after the first succeeded).
   const handleConfirm = async () => {
     if (submitting) return
     setSubmitting(true)
     try {
-      onConfirm()
+      await onConfirm()
     } finally {
       setSubmitting(false)
     }
@@ -222,8 +226,8 @@ export default function ManageHostsDialog() {
   const editingHost = editingHostId ? hosts.find((h) => h.hostId === editingHostId) : undefined
 
   const handleConfirmDelete = async (hostId: HostId) => {
-    setConfirmingDeleteHostId(null)
     await deleteHost(hostId)
+    setConfirmingDeleteHostId(null)
   }
 
   return (
@@ -260,7 +264,7 @@ export default function ManageHostsDialog() {
               <HostDeleteConfirm
                 key={host.hostId}
                 host={host}
-                onConfirm={() => void handleConfirmDelete(host.hostId)}
+                onConfirm={() => handleConfirmDelete(host.hostId)}
                 onCancel={() => setConfirmingDeleteHostId(null)}
               />
             ) : (
