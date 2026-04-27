@@ -60,7 +60,7 @@ export default function Terminal({ sessionId }: Props) {
       }
       if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
         if (e.type === 'keydown') {
-          window.api.ptyWrite(sessionId, '\x1b[13;2u')
+          window.api.ptyWrite(sessionId, '\n')
         }
         return false
       }
