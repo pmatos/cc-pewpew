@@ -115,10 +115,18 @@ function resolveBranchFromWorktree(
 
 type GitRunner = (argv: string[]) => Promise<{ stdout: string }>
 
+function remoteTrackingRef(ref: string): string | undefined {
+  const trimmed = ref.trim()
+  if (!trimmed) return undefined
+  if (trimmed.startsWith('refs/remotes/origin/')) return trimmed
+  if (trimmed.startsWith('origin/')) return `refs/remotes/${trimmed}`
+  return undefined
+}
+
 function parseOriginHeadSymref(stdout: string): string | undefined {
   for (const line of stdout.split('\n')) {
     const match = line.match(/^ref:\s+refs\/heads\/(.+)\s+HEAD$/)
-    if (match) return `origin/${match[1]}`
+    if (match) return `refs/remotes/origin/${match[1]}`
   }
   return undefined
 }
@@ -148,13 +156,13 @@ export async function resolveOriginDefaultBase(run: GitRunner): Promise<string> 
 
   try {
     const { stdout } = await run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
-    const ref = stdout.trim()
+    const ref = remoteTrackingRef(stdout)
     if (ref && !candidates.includes(ref)) candidates.push(ref)
   } catch {
     // fall through to conventional branch names
   }
 
-  for (const ref of ['origin/main', 'origin/master']) {
+  for (const ref of ['refs/remotes/origin/main', 'refs/remotes/origin/master']) {
     if (!candidates.includes(ref)) candidates.push(ref)
   }
 

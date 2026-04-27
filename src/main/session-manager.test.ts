@@ -301,10 +301,10 @@ describe('resolveOriginDefaultBase', () => {
           'fetch origin --quiet': '',
           'ls-remote --symref origin HEAD': new Error('unavailable'),
           'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
-          'rev-parse --verify origin/main': 'abc123\n',
+          'rev-parse --verify refs/remotes/origin/main': 'abc123\n',
         })
       )
-    ).resolves.toBe('origin/main')
+    ).resolves.toBe('refs/remotes/origin/main')
   })
 
   it('prefers ls-remote default branch over stale local origin/HEAD', async () => {
@@ -317,11 +317,27 @@ describe('resolveOriginDefaultBase', () => {
           'fetch origin --quiet': '',
           'ls-remote --symref origin HEAD': 'ref: refs/heads/develop\tHEAD\nabc123\tHEAD\n',
           'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
-          'rev-parse --verify origin/develop': 'abc123\n',
-          'rev-parse --verify origin/main': 'def456\n',
+          'rev-parse --verify refs/remotes/origin/develop': 'abc123\n',
+          'rev-parse --verify refs/remotes/origin/main': 'def456\n',
         })
       )
-    ).resolves.toBe('origin/develop')
+    ).resolves.toBe('refs/remotes/origin/develop')
+  })
+
+  it('validates fully qualified remote-tracking refs to avoid local branch ambiguity', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': 'ref: refs/heads/main\tHEAD\nabc123\tHEAD\n',
+          'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
+          'rev-parse --verify refs/remotes/origin/main': 'abc123\n',
+        })
+      )
+    ).resolves.toBe('refs/remotes/origin/main')
   })
 
   it('throws no-origin-remote when origin is missing', async () => {
@@ -359,10 +375,10 @@ describe('resolveOriginDefaultBase', () => {
           'fetch origin --quiet': '',
           'ls-remote --symref origin HEAD': new Error('unset'),
           'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
-          'rev-parse --verify origin/main': 'abc123\n',
+          'rev-parse --verify refs/remotes/origin/main': 'abc123\n',
         })
       )
-    ).resolves.toBe('origin/main')
+    ).resolves.toBe('refs/remotes/origin/main')
   })
 
   it('uses ls-remote default branch when origin/HEAD is unset', async () => {
@@ -375,10 +391,10 @@ describe('resolveOriginDefaultBase', () => {
           'fetch origin --quiet': '',
           'ls-remote --symref origin HEAD': 'ref: refs/heads/develop\tHEAD\nabc123\tHEAD\n',
           'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
-          'rev-parse --verify origin/develop': 'abc123\n',
+          'rev-parse --verify refs/remotes/origin/develop': 'abc123\n',
         })
       )
-    ).resolves.toBe('origin/develop')
+    ).resolves.toBe('refs/remotes/origin/develop')
   })
 
   it('falls back to origin/master when origin/main is absent', async () => {
@@ -391,11 +407,11 @@ describe('resolveOriginDefaultBase', () => {
           'fetch origin --quiet': '',
           'ls-remote --symref origin HEAD': new Error('unset'),
           'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
-          'rev-parse --verify origin/main': new Error('missing'),
-          'rev-parse --verify origin/master': 'abc123\n',
+          'rev-parse --verify refs/remotes/origin/main': new Error('missing'),
+          'rev-parse --verify refs/remotes/origin/master': 'abc123\n',
         })
       )
-    ).resolves.toBe('origin/master')
+    ).resolves.toBe('refs/remotes/origin/master')
   })
 
   it('throws no-origin-default-branch when no candidate resolves', async () => {
@@ -408,8 +424,8 @@ describe('resolveOriginDefaultBase', () => {
           'fetch origin --quiet': '',
           'ls-remote --symref origin HEAD': new Error('unset'),
           'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
-          'rev-parse --verify origin/main': new Error('missing'),
-          'rev-parse --verify origin/master': new Error('missing'),
+          'rev-parse --verify refs/remotes/origin/main': new Error('missing'),
+          'rev-parse --verify refs/remotes/origin/master': new Error('missing'),
         })
       )
     ).rejects.toThrow(/^no-origin-default-branch$/)
@@ -425,11 +441,11 @@ describe('resolveOriginDefaultBase', () => {
           'fetch origin --quiet': '',
           'ls-remote --symref origin HEAD': new Error('unset'),
           'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
-          'rev-parse --verify origin/main': new Error('stale'),
-          'rev-parse --verify origin/master': 'abc123\n',
+          'rev-parse --verify refs/remotes/origin/main': new Error('stale'),
+          'rev-parse --verify refs/remotes/origin/master': 'abc123\n',
         })
       )
-    ).resolves.toBe('origin/master')
+    ).resolves.toBe('refs/remotes/origin/master')
   })
 })
 
@@ -515,7 +531,7 @@ describe('createSession origin-default base', () => {
         worktreePath,
         '-b',
         branchName,
-        'origin/main',
+        'refs/remotes/origin/main',
       ].join(' '),
       { stdout: '', stderr: 'fatal: a branch named already exists', code: 128, timedOut: false }
     )
