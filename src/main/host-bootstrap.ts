@@ -1,9 +1,11 @@
 import { posix } from 'path'
 import type { ExecResult } from './host-connection'
+import type { AgentTool } from '../shared/types'
 
 export const NOTIFY_SCRIPT_VERSION = 1
 
-const REQUIRED_DEPS = ['tmux', 'git', 'jq', 'socat', 'claude'] as const
+const STRICT_DEPS = ['tmux', 'git', 'jq', 'socat'] as const
+const AGENT_DEPS: readonly AgentTool[] = ['claude', 'codex'] as const
 
 const notifyScript = `#!/usr/bin/env bash
 # cc-pewpew notify script v${NOTIFY_SCRIPT_VERSION}
@@ -53,9 +55,12 @@ export interface HostBootstrapConnection {
   exec(argv: string[], opts?: { timeoutMs?: number }): Promise<ExecResult>
 }
 
+export type AgentAvailability = Record<AgentTool, boolean>
+
 export interface HostBootstrapResult {
   notifyScriptPath: string
   remoteSocketPath: string
+  availableAgents: AgentAvailability
 }
 
 const bootstrapped = new Map<string, HostBootstrapResult>()
@@ -87,19 +92,25 @@ export async function bootstrapHost(
   const cached = bootstrapped.get(hostId)
   if (cached && cached.remoteSocketPath === remoteSocketPath) return cached
 
+  const allDeps = [...STRICT_DEPS, ...AGENT_DEPS]
   const depProbe =
     'missing=""; for dep in "$@"; do command -v "$dep" >/dev/null 2>&1 || missing="$missing $dep"; done; printf "%s\\n" "$missing"'
-  const deps = await connection.exec(['sh', '-c', depProbe, '_', ...REQUIRED_DEPS], {
+  const deps = await connection.exec(['sh', '-c', depProbe, '_', ...allDeps], {
     timeoutMs: 15000,
   })
   await expectOk(deps, 'missing-deps', 'Dependency probe failed')
-  const missingDeps = deps.stdout.trim().split(/\s+/).filter(Boolean)
-  if (missingDeps.length > 0) {
+  const missing = new Set(deps.stdout.trim().split(/\s+/).filter(Boolean))
+  const missingStrict = STRICT_DEPS.filter((d) => missing.has(d))
+  if (missingStrict.length > 0) {
     throw new HostBootstrapError(
       'missing-deps',
-      `Remote host is missing required tools: ${missingDeps.join(', ')}`,
-      missingDeps
+      `Remote host is missing required tools: ${missingStrict.join(', ')}`,
+      missingStrict
     )
+  }
+  const availableAgents: AgentAvailability = {
+    claude: !missing.has('claude'),
+    codex: !missing.has('codex'),
   }
 
   const socketProbe = await connection.exec(['sh', '-c', 'test -S "$1"', '_', remoteSocketPath], {
@@ -154,7 +165,7 @@ export async function bootstrapHost(
   )
   await expectOk(install, 'install-failed', 'Unable to install remote notify hook')
 
-  const result = { notifyScriptPath, remoteSocketPath }
+  const result: HostBootstrapResult = { notifyScriptPath, remoteSocketPath, availableAgents }
   bootstrapped.set(hostId, result)
   return result
 }

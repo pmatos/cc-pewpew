@@ -3,6 +3,7 @@ import { useProjectsStore } from '../stores/projects'
 import { useSessionsStore } from '../stores/sessions'
 import { useHostsStore } from '../stores/hosts'
 import ContextMenu, { type MenuItem } from './ContextMenu'
+import type { AgentTool } from '../../shared/types'
 
 interface MenuState {
   x: number
@@ -26,6 +27,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(null)
   const [pendingSessionHostId, setPendingSessionHostId] = useState<string | null>(null)
   const [sessionNameInput, setSessionNameInput] = useState('')
+  const [pendingTool, setPendingTool] = useState<AgentTool>('claude')
   const [creating, setCreating] = useState(false)
   const [pendingPrPath, setPendingPrPath] = useState<string | null>(null)
   const [prNumberInput, setPrNumberInput] = useState('')
@@ -183,7 +185,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     setCreating(true)
     try {
       const name = sessionNameInput.trim() || undefined
-      await window.api.createSession(pendingSessionPath, name, pendingSessionHostId)
+      await window.api.createSession(pendingSessionPath, name, pendingSessionHostId, pendingTool)
       setPendingSessionPath(null)
       setPendingSessionHostId(null)
       setSessionNameInput('')
@@ -234,6 +236,29 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             }}
             autoFocus
           />
+          <div className="session-name-label">Tool:</div>
+          <div className="tool-picker">
+            <label>
+              <input
+                type="radio"
+                name="tool"
+                value="claude"
+                checked={pendingTool === 'claude'}
+                onChange={() => setPendingTool('claude')}
+              />
+              Claude
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="tool"
+                value="codex"
+                checked={pendingTool === 'codex'}
+                onChange={() => setPendingTool('codex')}
+              />
+              Codex
+            </label>
+          </div>
           <div className="create-actions">
             <button className="create-btn" onClick={handleCreateSession} disabled={creating}>
               {creating ? 'Creating...' : 'Create'}

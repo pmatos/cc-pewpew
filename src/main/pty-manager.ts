@@ -12,7 +12,31 @@ import {
 } from './host-connection'
 import { classifySshExit } from './ssh-exit-parser'
 import { captureRemotePaneTexts, type RemoteSessionEntry } from './remote-thumbnail'
-import type { Host } from '../shared/types'
+import type { AgentTool, Host } from '../shared/types'
+
+interface SpawnOptions {
+  continueSession?: boolean
+  tool?: AgentTool
+  agentSessionId?: string
+}
+
+export function buildAgentArgs(options?: SpawnOptions): string[] {
+  const tool = options?.tool ?? 'claude'
+  if (tool === 'codex') {
+    if (options?.continueSession && options?.agentSessionId) {
+      return [
+        'codex',
+        'resume',
+        options.agentSessionId,
+        '--dangerously-bypass-approvals-and-sandbox',
+      ]
+    }
+    return ['codex', '--dangerously-bypass-approvals-and-sandbox']
+  }
+  const args = ['claude', '--dangerously-skip-permissions']
+  if (options?.continueSession) args.push('--continue')
+  return args
+}
 
 interface PtyEntry {
   pty: IPty
@@ -54,11 +78,7 @@ export function stopPtyManager(): void {
   }
 }
 
-export function createPty(
-  sessionId: string,
-  cwd: string,
-  options?: { continueSession?: boolean }
-): void {
+export function createPty(sessionId: string, cwd: string, options?: SpawnOptions): void {
   if (!existsSync(cwd)) {
     throw new Error(`Working directory does not exist: ${cwd}`)
   }
@@ -72,13 +92,9 @@ export function createPty(
   }
 
   const tmuxSession = `cc-pewpew-${sessionId}`
+  const agentArgs = buildAgentArgs(options)
 
-  const claudeArgs = ['claude', '--dangerously-skip-permissions']
-  if (options?.continueSession) {
-    claudeArgs.push('--continue')
-  }
-
-  // Create a detached tmux session that directly runs claude
+  // Create a detached tmux session that directly runs the agent CLI.
   // Using tmux's shell command avoids issues with interactive shell init (omz, etc.)
   execFileSync('tmux', [
     'new-session',
@@ -91,7 +107,7 @@ export function createPty(
     '120',
     '-y',
     '30',
-    ...claudeArgs,
+    ...agentArgs,
   ])
 
   // Attach to it via node-pty
@@ -130,14 +146,10 @@ export async function createRemotePty(
   sessionId: string,
   cwd: string,
   host: Host,
-  options?: { continueSession?: boolean }
+  options?: SpawnOptions
 ): Promise<void> {
   const tmuxSession = `cc-pewpew-${sessionId}`
-
-  const claudeArgs = ['claude', '--dangerously-skip-permissions']
-  if (options?.continueSession) {
-    claudeArgs.push('--continue')
-  }
+  const agentArgs = buildAgentArgs(options)
 
   const create = await execRemote(host, [
     'tmux',
@@ -151,7 +163,7 @@ export async function createRemotePty(
     '120',
     '-y',
     '30',
-    ...claudeArgs,
+    ...agentArgs,
   ])
   if (create.timedOut || create.code !== 0) {
     const detail = create.stderr.trim() || create.stdout.trim() || `exit ${create.code}`

@@ -37,22 +37,47 @@ describe('bootstrapHost', () => {
     expect(result).toEqual({
       notifyScriptPath: '/home/dev/.config/cc-pewpew/hooks/notify-v1.sh',
       remoteSocketPath: '/tmp/ipc',
+      availableAgents: { claude: true, codex: true },
     })
-    expect(calls.some((argv) => argv.includes('tmux') && argv.includes('claude'))).toBe(true)
+    expect(
+      calls.some(
+        (argv) => argv.includes('tmux') && argv.includes('claude') && argv.includes('codex')
+      )
+    ).toBe(true)
     expect(calls.some((argv) => argv.includes('/tmp/ipc'))).toBe(true)
     expect(
       calls.some((argv) => argv.includes('/home/dev/.config/cc-pewpew/hooks/notify-v1.sh'))
     ).toBe(true)
   })
 
-  it('returns a typed missing-deps error with the selective missing set', async () => {
+  it('hard-fails on missing strict deps but tolerates missing agent CLIs', async () => {
     const calls: string[][] = []
     await expect(
-      bootstrapHost('host-bootstrap-missing', fakeConnection(calls, ' jq claude\n'), '/tmp/ipc')
+      bootstrapHost('host-bootstrap-missing', fakeConnection(calls, ' jq\n'), '/tmp/ipc')
     ).rejects.toMatchObject({
       kind: 'missing-deps',
-      missingDeps: ['jq', 'claude'],
+      missingDeps: ['jq'],
     } satisfies Partial<HostBootstrapError>)
+  })
+
+  it('reports availableAgents.codex=false when only codex is missing', async () => {
+    const calls: string[][] = []
+    const result = await bootstrapHost(
+      'host-bootstrap-no-codex',
+      fakeConnection(calls, ' codex\n'),
+      '/tmp/ipc'
+    )
+    expect(result.availableAgents).toEqual({ claude: true, codex: false })
+  })
+
+  it('reports availableAgents.claude=false when only claude is missing', async () => {
+    const calls: string[][] = []
+    const result = await bootstrapHost(
+      'host-bootstrap-no-claude',
+      fakeConnection(calls, ' claude\n'),
+      '/tmp/ipc'
+    )
+    expect(result.availableAgents).toEqual({ claude: false, codex: true })
   })
 
   it('installs through a version guard so already-installed notify scripts are kept', async () => {

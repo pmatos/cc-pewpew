@@ -18,6 +18,7 @@ function makeSession(id: string): Session {
     lastActivity: 0,
     hookEvents: [],
     hostId: null,
+    tool: 'claude',
   }
 }
 

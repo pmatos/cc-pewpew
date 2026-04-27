@@ -93,6 +93,13 @@ When debugging visual issues, **always use this approach first** rather than ask
 - Conventional Commits: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
 - Prefer editing existing files over creating new ones
 
+## Supported agents
+
+- **Claude Code** (`claude`) — default. Uses `--continue` to resume. Hooks installed at `<worktree>/.claude/settings.local.json`.
+- **OpenAI Codex** (`codex`) — opt-in per session. Resume uses `codex resume <session_id>` (the `agentSessionId` is captured from the `SessionStart` hook payload). Hooks installed at `<worktree>/.codex/hooks.json` and gated behind `[features].codex_hooks = true` in `~/.codex/config.toml`, which cc-pewpew enables idempotently on first codex session install.
+
+The default tool is configurable via `defaultTool` in `~/.config/cc-pewpew/config.json`. Per-session selection is exposed in the "New session" dialog. Both `claude` and `codex` must be in `PATH` (locally and on every remote host where the corresponding tool is selected).
+
 ## Implementation
 
 The project follows PLAN.md (v2). Terminals are embedded via xterm.js + node-pty + tmux (no external windows). Sessions persist across app restarts.

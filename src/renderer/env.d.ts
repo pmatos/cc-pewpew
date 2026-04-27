@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 import type {
+  AgentTool,
   DiffMode,
   Host,
   Project,
@@ -24,7 +25,8 @@ declare global {
       createSession: (
         projectPath: string,
         name?: string,
-        hostId?: string | null
+        hostId?: string | null,
+        tool?: AgentTool
       ) => Promise<Session>
       createPrSession: (projectPath: string, prNumber: number) => Promise<Session | string>
       mirrorWorktree: (
