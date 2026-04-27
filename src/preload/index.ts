@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ToastEvent } from '../shared/types'
+import type { AgentTool, ToastEvent } from '../shared/types'
 
 contextBridge.exposeInMainWorld('api', {
   scanProjects: () => ipcRenderer.invoke('projects:scan'),
@@ -14,8 +14,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('hook:event', handler)
     return () => ipcRenderer.removeListener('hook:event', handler)
   },
-  createSession: (projectPath: string, name?: string, hostId?: string | null) =>
-    ipcRenderer.invoke('sessions:create', projectPath, name, hostId ?? null),
+  createSession: (projectPath: string, name?: string, hostId?: string | null, tool?: AgentTool) =>
+    ipcRenderer.invoke('sessions:create', projectPath, name, hostId ?? null, tool),
   createPrSession: (projectPath: string, prNumber: number) =>
     ipcRenderer.invoke('sessions:create-pr', projectPath, prNumber),
   mirrorWorktree: (projectPath: string, worktreePath: string) =>
@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('api', {
   getSidebarWidth: () => ipcRenderer.invoke('config:get-sidebar-width'),
   saveSidebarWidth: (width: number) => ipcRenderer.invoke('config:save-sidebar-width', width),
   getUiScale: () => ipcRenderer.invoke('config:get-ui-scale'),
+  getDefaultTool: () => ipcRenderer.invoke('config:get-default-tool') as Promise<AgentTool>,
   onTextThumbnails: (callback: (data: Record<string, string>) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: Record<string, string>) =>
       callback(data)

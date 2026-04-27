@@ -48,9 +48,14 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
     refocusTerminal()
   }, [refocusTerminal])
 
+  // Review is Claude-only for now. Codex's diff/review flow is deferred to a
+  // separate slice (see issue #50). Gating both the trigger and the overlay
+  // keeps codex sessions out of the flip path entirely.
+  const reviewEnabled = !session || session.tool === 'claude'
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === 'r') {
+      if (e.ctrlKey && e.key === 'r' && reviewEnabled) {
         e.preventDefault()
         e.stopPropagation()
         setFlipCount((c) => {
@@ -81,7 +86,7 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
     }
     document.addEventListener('keydown', handler, true)
     return () => document.removeEventListener('keydown', handler, true)
-  }, [onClose, reviewOpen, closeReview, refocusTerminal])
+  }, [onClose, reviewOpen, closeReview, refocusTerminal, reviewEnabled])
 
   const handleRevive = async () => {
     setReviving(true)
@@ -198,7 +203,9 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
                 <Terminal sessionId={sessionId} />
               </div>
               <div className="flip-back">
-                {reviewOpen && <ReviewOverlay sessionId={sessionId} onClose={closeReview} />}
+                {reviewOpen && reviewEnabled && (
+                  <ReviewOverlay sessionId={sessionId} onClose={closeReview} />
+                )}
               </div>
             </div>
           </div>

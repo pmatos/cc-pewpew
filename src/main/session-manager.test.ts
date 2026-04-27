@@ -203,6 +203,7 @@ function baseRemoteSession(overrides: Partial<Session>): Session {
     status: 'idle',
     lastActivity: 1000,
     hookEvents: [],
+    tool: 'claude',
     ...overrides,
   }
 }
@@ -221,6 +222,7 @@ function baseLocalSession(overrides: Partial<Session>): Session {
     status: 'idle',
     lastActivity: 1000,
     hookEvents: [],
+    tool: 'claude',
     ...overrides,
   }
 }
@@ -841,5 +843,78 @@ describe('removeSessionsForHost (issue #14)', () => {
     expect(sm.getSessions().map((s) => s.id)).toEqual(['rA1'])
     expect(state.detachPtyCalls).toEqual([])
     expect(state.sessionsUpdatedBroadcasts).toBe(0)
+  })
+})
+
+describe('codex agent integration', () => {
+  it('backfills tool="claude" on legacy sessions missing the field', async () => {
+    // Persisted JSON omits `tool` to simulate a session created before the
+    // multi-agent change; restoreSessions must default it without crashing.
+    writeFileSync(
+      join(state.configDir, 'sessions.json'),
+      JSON.stringify([
+        {
+          id: 'legacy1',
+          hostId: null,
+          projectPath: '/p',
+          projectName: 'p',
+          worktreeName: 'w',
+          worktreePath: '/p/w',
+          branch: 'main',
+          pid: 0,
+          tmuxSession: 'cc-pewpew-legacy1',
+          status: 'idle',
+          lastActivity: 0,
+          hookEvents: [],
+        },
+      ])
+    )
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    const restored = sm.getSessions().find((s) => s.id === 'legacy1')
+    expect(restored?.tool).toBe('claude')
+  })
+
+  it('handleHookEvent session.start captures codex session_id as agentSessionId', async () => {
+    writeSessionsJson([baseLocalSession({ id: 'cx1', tool: 'codex', worktreePath: '/cx/wt' })])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    sm.handleHookEvent('session.start', { cwd: '/cx/wt', session_id: 'codex-uuid-9' }, null)
+    const updated = sm.getSessions().find((s) => s.id === 'cx1')
+    expect(updated?.agentSessionId).toBe('codex-uuid-9')
+  })
+
+  it('handleHookEvent session.stop sets needs_input for codex sessions (parity with claude)', async () => {
+    writeSessionsJson([baseLocalSession({ id: 'cx2', tool: 'codex', worktreePath: '/cx/wt2' })])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    sm.handleHookEvent('session.stop', { cwd: '/cx/wt2' }, null)
+    const updated = sm.getSessions().find((s) => s.id === 'cx2')
+    expect(updated?.status).toBe('needs_input')
+  })
+
+  it('does not overwrite agentSessionId once captured', async () => {
+    writeSessionsJson([
+      baseLocalSession({
+        id: 'cx3',
+        tool: 'codex',
+        worktreePath: '/cx/wt3',
+        agentSessionId: 'first',
+      }),
+    ])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    sm.handleHookEvent('session.start', { cwd: '/cx/wt3', session_id: 'second' }, null)
+    const updated = sm.getSessions().find((s) => s.id === 'cx3')
+    expect(updated?.agentSessionId).toBe('first')
+  })
+
+  it('claude session.start does not set agentSessionId', async () => {
+    writeSessionsJson([baseLocalSession({ id: 'cl1', tool: 'claude', worktreePath: '/cl/wt' })])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    sm.handleHookEvent('session.start', { cwd: '/cl/wt', session_id: 'should-not-store' }, null)
+    const updated = sm.getSessions().find((s) => s.id === 'cl1')
+    expect(updated?.agentSessionId).toBeUndefined()
   })
 })

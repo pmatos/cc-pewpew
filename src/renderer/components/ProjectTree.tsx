@@ -3,6 +3,7 @@ import { useProjectsStore } from '../stores/projects'
 import { useSessionsStore } from '../stores/sessions'
 import { useHostsStore } from '../stores/hosts'
 import ContextMenu, { type MenuItem } from './ContextMenu'
+import type { AgentTool } from '../../shared/types'
 
 interface MenuState {
   x: number
@@ -26,6 +27,8 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(null)
   const [pendingSessionHostId, setPendingSessionHostId] = useState<string | null>(null)
   const [sessionNameInput, setSessionNameInput] = useState('')
+  const [defaultTool, setDefaultTool] = useState<AgentTool>('claude')
+  const [pendingTool, setPendingTool] = useState<AgentTool>('claude')
   const [creating, setCreating] = useState(false)
   const [pendingPrPath, setPendingPrPath] = useState<string | null>(null)
   const [prNumberInput, setPrNumberInput] = useState('')
@@ -40,6 +43,22 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   useEffect(() => {
     scanProjects()
   }, [scanProjects])
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.getDefaultTool().then((tool) => {
+      if (cancelled) return
+      setDefaultTool(tool)
+      // Don't touch pendingTool here — the New Session menu-item handler is
+      // the only path that opens the dialog and it re-seeds pendingTool from
+      // defaultTool at click time. Mutating pendingTool from this async
+      // callback would race against any user toggle made between the click
+      // and getDefaultTool resolving.
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const toggle = (path: string) => {
     setExpanded((prev) => {
@@ -75,6 +94,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           setPendingSessionPath(menu.projectPath)
           setPendingSessionHostId(hostId)
           setSessionNameInput('')
+          setPendingTool(defaultTool)
         },
       })
       items.push({ label: '', separator: true, onClick: () => {} })
@@ -102,6 +122,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           setPendingSessionPath(menu.projectPath)
           setPendingSessionHostId(null)
           setSessionNameInput('')
+          setPendingTool(defaultTool)
         },
       })
       items.push({
@@ -183,7 +204,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     setCreating(true)
     try {
       const name = sessionNameInput.trim() || undefined
-      await window.api.createSession(pendingSessionPath, name, pendingSessionHostId)
+      await window.api.createSession(pendingSessionPath, name, pendingSessionHostId, pendingTool)
       setPendingSessionPath(null)
       setPendingSessionHostId(null)
       setSessionNameInput('')
@@ -234,6 +255,29 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             }}
             autoFocus
           />
+          <div className="session-name-label">Tool:</div>
+          <div className="tool-picker">
+            <label>
+              <input
+                type="radio"
+                name="tool"
+                value="claude"
+                checked={pendingTool === 'claude'}
+                onChange={() => setPendingTool('claude')}
+              />
+              Claude
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="tool"
+                value="codex"
+                checked={pendingTool === 'codex'}
+                onChange={() => setPendingTool('codex')}
+              />
+              Codex
+            </label>
+          </div>
           <div className="create-actions">
             <button className="create-btn" onClick={handleCreateSession} disabled={creating}>
               {creating ? 'Creating...' : 'Create'}

@@ -1,9 +1,11 @@
 import { posix } from 'path'
 import type { ExecResult } from './host-connection'
+import type { AgentTool } from '../shared/types'
 
 export const NOTIFY_SCRIPT_VERSION = 1
 
-const REQUIRED_DEPS = ['tmux', 'git', 'jq', 'socat', 'claude'] as const
+const STRICT_DEPS = ['tmux', 'git', 'jq', 'socat'] as const
+const AGENT_DEPS: readonly AgentTool[] = ['claude', 'codex'] as const
 
 const notifyScript = `#!/usr/bin/env bash
 # cc-pewpew notify script v${NOTIFY_SCRIPT_VERSION}
@@ -53,12 +55,54 @@ export interface HostBootstrapConnection {
   exec(argv: string[], opts?: { timeoutMs?: number }): Promise<ExecResult>
 }
 
-export interface HostBootstrapResult {
+export type AgentAvailability = Record<AgentTool, boolean>
+
+// The cached portion of bootstrap — the parts that genuinely don't change
+// between calls (notify script install, socket path). Agent availability is
+// deliberately *not* cached because users install/remove `claude` or `codex`
+// out-of-band, and stale availability would block valid session creation.
+interface CachedBootstrap {
   notifyScriptPath: string
   remoteSocketPath: string
 }
 
-const bootstrapped = new Map<string, HostBootstrapResult>()
+export interface HostBootstrapResult {
+  notifyScriptPath: string
+  remoteSocketPath: string
+  availableAgents: AgentAvailability
+}
+
+const bootstrapped = new Map<string, CachedBootstrap>()
+
+// Probe just the agent CLIs. Cheap — single SSH exec — so we re-run on every
+// bootstrapHost call to pick up codex/claude installs/removals that happened
+// after the first bootstrap. This is in the hot path of session creation,
+// not session attach, so the latency is bounded.
+export async function probeRemoteAgents(
+  connection: HostBootstrapConnection
+): Promise<AgentAvailability> {
+  const probe =
+    'missing=""; for dep in "$@"; do command -v "$dep" >/dev/null 2>&1 || missing="$missing $dep"; done; printf "%s\\n" "$missing"'
+  const result = await connection.exec(['sh', '-c', probe, '_', ...AGENT_DEPS], {
+    timeoutMs: 10000,
+  })
+  // Surface probe failures as a typed bootstrap error rather than masquerading
+  // as "agent not installed". A transient SSH timeout otherwise shows up as a
+  // misleading "<tool> is not installed on host X" message that leads users to
+  // reinstall a binary that's actually present.
+  if (result.timedOut) {
+    throw new HostBootstrapError('install-failed', 'Agent availability probe timed out')
+  }
+  if (result.code !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`
+    throw new HostBootstrapError('install-failed', `Agent availability probe failed: ${detail}`)
+  }
+  const missing = new Set(result.stdout.trim().split(/\s+/).filter(Boolean))
+  return {
+    claude: !missing.has('claude'),
+    codex: !missing.has('codex'),
+  }
+}
 
 // Called when the SSH target for a host changes (alias edit). Drops the cached
 // bootstrap result so the next session re-probes dependencies and reinstalls
@@ -85,21 +129,32 @@ export async function bootstrapHost(
   remoteSocketPath: string
 ): Promise<HostBootstrapResult> {
   const cached = bootstrapped.get(hostId)
-  if (cached && cached.remoteSocketPath === remoteSocketPath) return cached
+  if (cached && cached.remoteSocketPath === remoteSocketPath) {
+    // Cache hit on the heavy work — but always re-probe agents to reflect
+    // out-of-band installs/removals.
+    const availableAgents = await probeRemoteAgents(connection)
+    return { ...cached, availableAgents }
+  }
 
+  const allDeps = [...STRICT_DEPS, ...AGENT_DEPS]
   const depProbe =
     'missing=""; for dep in "$@"; do command -v "$dep" >/dev/null 2>&1 || missing="$missing $dep"; done; printf "%s\\n" "$missing"'
-  const deps = await connection.exec(['sh', '-c', depProbe, '_', ...REQUIRED_DEPS], {
+  const deps = await connection.exec(['sh', '-c', depProbe, '_', ...allDeps], {
     timeoutMs: 15000,
   })
   await expectOk(deps, 'missing-deps', 'Dependency probe failed')
-  const missingDeps = deps.stdout.trim().split(/\s+/).filter(Boolean)
-  if (missingDeps.length > 0) {
+  const missing = new Set(deps.stdout.trim().split(/\s+/).filter(Boolean))
+  const missingStrict = STRICT_DEPS.filter((d) => missing.has(d))
+  if (missingStrict.length > 0) {
     throw new HostBootstrapError(
       'missing-deps',
-      `Remote host is missing required tools: ${missingDeps.join(', ')}`,
-      missingDeps
+      `Remote host is missing required tools: ${missingStrict.join(', ')}`,
+      missingStrict
     )
+  }
+  const availableAgents: AgentAvailability = {
+    claude: !missing.has('claude'),
+    codex: !missing.has('codex'),
   }
 
   const socketProbe = await connection.exec(['sh', '-c', 'test -S "$1"', '_', remoteSocketPath], {
@@ -154,7 +209,6 @@ export async function bootstrapHost(
   )
   await expectOk(install, 'install-failed', 'Unable to install remote notify hook')
 
-  const result = { notifyScriptPath, remoteSocketPath }
-  bootstrapped.set(hostId, result)
-  return result
+  bootstrapped.set(hostId, { notifyScriptPath, remoteSocketPath })
+  return { notifyScriptPath, remoteSocketPath, availableAgents }
 }

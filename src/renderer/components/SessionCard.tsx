@@ -210,6 +210,12 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
         <div className="session-card-status">
           <span className={`status-dot ${statusClass}`} />
           <span>{label}</span>
+          <span
+            className={`tool-badge tool-${session.tool}`}
+            title={session.tool === 'codex' ? 'Codex' : 'Claude'}
+          >
+            {session.tool === 'codex' ? 'X' : 'C'}
+          </span>
           {host && connectionState && <span className="connection-label">{connectionState}</span>}
         </div>
         <div className="session-card-time">{timeAgo(session.lastActivity)}</div>

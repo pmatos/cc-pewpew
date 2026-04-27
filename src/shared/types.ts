@@ -28,6 +28,8 @@ export interface Worktree {
   isMain: boolean
 }
 
+export type AgentTool = 'claude' | 'codex'
+
 export interface Session {
   id: string
   hostId: string | null
@@ -46,6 +48,8 @@ export interface Session {
   hookEvents: HookEvent[]
   repoFingerprint?: string
   lastKnownState?: LastKnownState
+  tool: AgentTool
+  agentSessionId?: string
 }
 
 export interface HookEvent {

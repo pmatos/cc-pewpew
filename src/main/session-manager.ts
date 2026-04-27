@@ -25,7 +25,17 @@ import {
   createRemotePty,
 } from './pty-manager'
 import { getRepoFingerprint, gitWorktrees } from './project-scanner'
-import { installHooks, installRemoteHooks } from './hook-installer'
+import {
+  installHooks,
+  installRemoteHooks,
+  installCodexHooks,
+  installRemoteCodexHooks,
+  ensureCodexHooksFeatureFlag,
+  ensureRemoteCodexHooksFeatureFlag,
+  rollbackCodexHooks,
+  rollbackRemoteCodexHooks,
+  commitRemoteCodexHooks,
+} from './hook-installer'
 import { getHost } from './host-registry'
 import { listRemoteProjects } from './remote-project-registry'
 import { listenHookServerForHost } from './hook-server'
@@ -41,7 +51,7 @@ import {
 } from './host-connection'
 import { bootstrapHost, HostBootstrapError } from './host-bootstrap'
 import { emitToast } from './notifications'
-import type { Host, RemoteProject, Session, SessionStatus } from '../shared/types'
+import type { AgentTool, Host, RemoteProject, Session, SessionStatus } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
 const SESSIONS_PATH = join(CONFIG_DIR, 'sessions.json')
@@ -115,7 +125,9 @@ function getRequiredHost(hostId: string): Host {
 // failure still has to tear down the hook listener we started first (the
 // reverse-forward target); stopHostConnection triggers the
 // setOnHostConnectionStopped callback to do that.
-async function prepareRemoteHost(host: Host): Promise<{ notifyScriptPath: string }> {
+async function prepareRemoteHost(
+  host: Host
+): Promise<{ notifyScriptPath: string; availableAgents: { claude: boolean; codex: boolean } }> {
   const localSocketPath = listenHookServerForHost(host.hostId)
   let remoteSocketPath: string
   try {
@@ -148,7 +160,10 @@ async function prepareRemoteHost(host: Host): Promise<{ notifyScriptPath: string
       },
       remoteSocketPath
     )
-    return { notifyScriptPath: bootstrap.notifyScriptPath }
+    return {
+      notifyScriptPath: bootstrap.notifyScriptPath,
+      availableAgents: bootstrap.availableAgents,
+    }
   } catch (err) {
     await releaseHostConnection(host.hostId).catch(() => undefined)
     if (err instanceof HostBootstrapError) {
@@ -396,23 +411,46 @@ async function isGitWorktree(worktreePath: string): Promise<boolean> {
 // In-flight adoption promises keyed by canonical worktree path. Serializes
 // concurrent mirror requests for the same path (e.g. double-click on + Mirror,
 // racing against mirrorAllWorktrees) so only one session/PTY is created.
-const inflightAdoptions = new Map<string, Promise<Session>>()
+// Tracks the tool the in-flight adoption is using so a concurrent call with a
+// different tool gets a mixed-tool error rather than silently sharing the
+// wrong agent's session.
+interface InflightAdoption {
+  promise: Promise<Session>
+  tool: AgentTool
+}
+const inflightAdoptions = new Map<string, InflightAdoption>()
 
 export async function createSessionForWorktree(
   projectPath: string,
   worktreePath: string,
-  label?: string
+  label?: string,
+  tool?: AgentTool
 ): Promise<Session> {
+  const effectiveTool: AgentTool = tool ?? getConfig().defaultTool
   const target = canonicalPath(worktreePath)
   for (const e of sessions.values()) {
-    if (canonicalPath(e.session.worktreePath) === target) return e.session
+    if (canonicalPath(e.session.worktreePath) === target) {
+      if (e.session.tool !== effectiveTool) {
+        throw new Error(
+          `Worktree already has a ${e.session.tool} session; mixed tools per worktree are not supported`
+        )
+      }
+      return e.session
+    }
   }
 
   const inflight = inflightAdoptions.get(target)
-  if (inflight) return inflight
+  if (inflight) {
+    if (inflight.tool !== effectiveTool) {
+      throw new Error(
+        `Worktree already has a ${inflight.tool} session in-flight; mixed tools per worktree are not supported`
+      )
+    }
+    return inflight.promise
+  }
 
-  const promise = adoptWorktree(projectPath, worktreePath, label)
-  inflightAdoptions.set(target, promise)
+  const promise = adoptWorktree(projectPath, worktreePath, label, effectiveTool)
+  inflightAdoptions.set(target, { promise, tool: effectiveTool })
   try {
     return await promise
   } finally {
@@ -420,10 +458,25 @@ export async function createSessionForWorktree(
   }
 }
 
+async function installAgentHooks(tool: AgentTool, worktreePath: string): Promise<void> {
+  if (tool === 'codex') {
+    const snapshot = await installCodexHooks(worktreePath, { skipGitignore: true })
+    try {
+      ensureCodexHooksFeatureFlag()
+    } catch (err) {
+      rollbackCodexHooks(snapshot)
+      throw err
+    }
+    return
+  }
+  await installHooks(worktreePath, { skipGitignore: true })
+}
+
 async function adoptWorktree(
   projectPath: string,
   worktreePath: string,
-  label: string | undefined
+  label: string | undefined,
+  tool: AgentTool
 ): Promise<Session> {
   if (!(await isGitWorktree(worktreePath))) {
     throw new Error(`${worktreePath} is not a valid git worktree`)
@@ -438,8 +491,8 @@ async function adoptWorktree(
   const tmuxSession = `cc-pewpew-${id}`
   const branch = resolveBranchFromWorktree(worktreePath, worktreeName)
 
-  await installHooks(worktreePath, { skipGitignore: true })
-  createPty(id, worktreePath)
+  await installAgentHooks(tool, worktreePath)
+  createPty(id, worktreePath, { tool })
 
   const session: Session = {
     id,
@@ -455,6 +508,7 @@ async function adoptWorktree(
     status: 'running',
     lastActivity: Date.now(),
     hookEvents: [],
+    tool,
   }
 
   sessions.set(id, { session })
@@ -499,15 +553,51 @@ export async function mirrorAllWorktrees(projectPath: string): Promise<MirrorAll
   return { mirrored, failed }
 }
 
+async function installRemoteAgentHooks(
+  tool: AgentTool,
+  host: Host,
+  worktreePath: string,
+  notifyScriptPath: string
+): Promise<void> {
+  const remote = (argv: string[], opts?: { timeoutMs?: number }) => execRemote(host, argv, opts)
+  if (tool === 'codex') {
+    const snapshot = await installRemoteCodexHooks(remote, worktreePath, notifyScriptPath)
+    try {
+      await ensureRemoteCodexHooksFeatureFlag(remote)
+    } catch (err) {
+      await rollbackRemoteCodexHooks(remote, snapshot)
+      throw err
+    }
+    await commitRemoteCodexHooks(remote, snapshot)
+    return
+  }
+  await installRemoteHooks(remote, worktreePath, notifyScriptPath)
+}
+
 async function createRemoteSession(
   hostId: string,
   projectPath: string,
-  name?: string
+  name?: string,
+  tool?: AgentTool
 ): Promise<Session> {
+  const effectiveTool: AgentTool = tool ?? getConfig().defaultTool
   const host = getRequiredHost(hostId)
   const remoteProject = getRemoteProject(hostId, projectPath)
   const worktreeName = name || `session-${randomUUID().slice(0, 8)}`
   const worktreePath = posix.join(projectPath, '.claude', 'worktrees', worktreeName)
+
+  for (const e of sessions.values()) {
+    if (
+      e.session.hostId === hostId &&
+      e.session.worktreePath === worktreePath &&
+      e.session.tool !== effectiveTool
+    ) {
+      throw new Error(
+        `Worktree already has a ${e.session.tool} session; mixed tools per worktree are not supported`
+      )
+    }
+  }
+
   const id = randomUUID().slice(0, 8)
   const tmuxSession = `cc-pewpew-${id}`
   const branchName = `cc-pewpew/${worktreeName}`
@@ -515,7 +605,11 @@ async function createRemoteSession(
   // prepareRemoteHost retains the SSH runtime on success; we own the ref and
   // release it at the end (or in catch). createRemotePty takes its own retain
   // on success, which is what keeps the connection alive past this function.
-  const { notifyScriptPath } = await prepareRemoteHost(host)
+  const { notifyScriptPath, availableAgents } = await prepareRemoteHost(host)
+  if (!availableAgents[effectiveTool]) {
+    await releaseHostConnection(hostId).catch(() => undefined)
+    throw new Error(`${effectiveTool} is not installed on host ${host.label || host.alias}`)
+  }
   let branch: string
   try {
     const addWithBranch = await execRemote(host, [
@@ -545,12 +639,8 @@ async function createRemoteSession(
         )
       ).trim() || branchName
 
-    await installRemoteHooks(
-      (argv, opts) => execRemote(host, argv, opts),
-      worktreePath,
-      notifyScriptPath
-    )
-    await createRemotePty(id, worktreePath, host)
+    await installRemoteAgentHooks(effectiveTool, host, worktreePath, notifyScriptPath)
+    await createRemotePty(id, worktreePath, host, { tool: effectiveTool })
   } catch (err) {
     await releaseHostConnection(hostId).catch(() => undefined)
     throw err
@@ -572,6 +662,7 @@ async function createRemoteSession(
     connectionState: 'live',
     lastActivity: Date.now(),
     hookEvents: [],
+    tool: effectiveTool,
     ...(remoteProject.repoFingerprint ? { repoFingerprint: remoteProject.repoFingerprint } : {}),
   }
 
@@ -583,9 +674,10 @@ async function createRemoteSession(
 export async function createSession(
   projectPath: string,
   name?: string,
-  hostId: string | null = null
+  hostId: string | null = null,
+  tool?: AgentTool
 ): Promise<Session> {
-  if (hostId) return createRemoteSession(hostId, projectPath, name)
+  if (hostId) return createRemoteSession(hostId, projectPath, name, tool)
 
   const worktreeName = name || `session-${randomUUID().slice(0, 8)}`
   const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
@@ -605,7 +697,7 @@ export async function createSession(
     await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath])
   }
 
-  return createSessionForWorktree(projectPath, worktreePath, worktreeName)
+  return createSessionForWorktree(projectPath, worktreePath, worktreeName, tool)
 }
 
 export function handleHookEvent(
@@ -640,6 +732,12 @@ export function handleHookEvent(
     case 'session.start':
       entry.session.status = 'running'
       entry.session.connectionState = originHostId ? 'live' : entry.session.connectionState
+      // Capture codex's session_id so `codex resume <id>` can recover the same
+      // conversation after restart. Claude resumes via `--continue` and doesn't
+      // need this.
+      if (entry.session.tool === 'codex' && ccSessionId && !entry.session.agentSessionId) {
+        entry.session.agentSessionId = ccSessionId
+      }
       break
     case 'session.stop':
       entry.session.status = 'needs_input'
@@ -971,7 +1069,11 @@ export async function reviveSession(id: string): Promise<void> {
       if (await hasRemoteTmuxSession(id, host)) {
         await reattachRemotePty(id, host)
       } else {
-        await createRemotePty(id, session.worktreePath, host, { continueSession: true })
+        await createRemotePty(id, session.worktreePath, host, {
+          continueSession: true,
+          tool: session.tool,
+          agentSessionId: session.agentSessionId,
+        })
       }
     } catch (err) {
       session.connectionState = 'offline'
@@ -990,7 +1092,11 @@ export async function reviveSession(id: string): Promise<void> {
   if (hasTmuxSession(id)) {
     reattachPty(id)
   } else {
-    createPty(id, session.worktreePath, { continueSession: true })
+    createPty(id, session.worktreePath, {
+      continueSession: true,
+      tool: session.tool,
+      agentSessionId: session.agentSessionId,
+    })
   }
   updateSession(id, 'idle')
 }
@@ -1210,7 +1316,7 @@ export async function relocateProject(
     if (hasPty(s.id)) {
       destroyPty(s.id)
       if (existsSync(s.worktreePath)) {
-        createPty(s.id, s.worktreePath)
+        createPty(s.id, s.worktreePath, { tool: s.tool })
         s.status = 'idle'
       } else {
         s.status = 'dead'
@@ -1229,7 +1335,14 @@ export async function relocateProject(
   }
   saveConfig(config)
 
-  await installHooks(newProjectPath)
+  const toolsInUse = new Set(toMigrate.map((e) => e.session.tool))
+  if (toolsInUse.has('claude') || toolsInUse.size === 0) {
+    await installHooks(newProjectPath)
+  }
+  if (toolsInUse.has('codex')) {
+    await installCodexHooks(newProjectPath)
+    ensureCodexHooksFeatureFlag()
+  }
   onSessionsChanged()
 
   return { migratedCount: toMigrate.length }
@@ -1253,6 +1366,7 @@ function backfillDerivedFields(session: Session): void {
     const m = session.worktreeName.match(/^pr-(\d+)$/)
     if (m) session.prNumber = parseInt(m[1], 10)
   }
+  if (!session.tool) session.tool = 'claude'
 }
 
 export function restoreSessions(): void {
@@ -1308,7 +1422,17 @@ export function restoreSessions(): void {
           // tmux server lost the session (e.g., PC reboot) but the worktree
           // survives — auto-recreate and resume the claude conversation.
           try {
-            createPty(session.id, session.worktreePath, { continueSession: true })
+            const canResume = session.tool !== 'codex' || !!session.agentSessionId
+            if (session.tool === 'codex' && !session.agentSessionId) {
+              console.warn(
+                `codex session ${session.id} has no agentSessionId; spawning fresh instead of resuming`
+              )
+            }
+            createPty(session.id, session.worktreePath, {
+              continueSession: canResume,
+              tool: session.tool,
+              agentSessionId: session.agentSessionId,
+            })
             session.status = resumedStatus
             recoveredCount++
           } catch (err) {
