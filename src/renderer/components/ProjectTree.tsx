@@ -49,16 +49,15 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     window.api.getDefaultTool().then((tool) => {
       if (cancelled) return
       setDefaultTool(tool)
-      // Only seed pendingTool if the dialog isn't already open with an
-      // explicit user choice — avoid clobbering an in-flight selection.
-      setPendingTool((cur) => (pendingSessionPath === null ? tool : cur))
+      // Don't touch pendingTool here — the New Session menu-item handler is
+      // the only path that opens the dialog and it re-seeds pendingTool from
+      // defaultTool at click time. Mutating pendingTool from this async
+      // callback would race against any user toggle made between the click
+      // and getDefaultTool resolving.
     })
     return () => {
       cancelled = true
     }
-    // pendingSessionPath intentionally omitted: we only want the initial seed,
-    // not a re-fetch on every dialog open/close.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const toggle = (path: string) => {

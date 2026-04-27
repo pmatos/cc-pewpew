@@ -86,6 +86,28 @@ describe('installCodexHooks', () => {
     expect(json.hooks.Stop).toHaveLength(1)
     expect(json.hooks.PostToolUse).toHaveLength(1)
   })
+
+  it.each([
+    ['null', 'null'],
+    ['number', '42'],
+    ['string', '"hello"'],
+    ['array', '[1,2,3]'],
+    ['malformed', '{not json}'],
+  ])('tolerates a %s hooks.json without throwing', async (_label, body) => {
+    const codexDir = join(state.tmpProject, '.codex')
+    mkdirSync(codexDir, { recursive: true })
+    writeFileSync(join(codexDir, 'hooks.json'), body)
+
+    const { installCodexHooks } = await loadInstaller()
+    await expect(
+      installCodexHooks(state.tmpProject, { skipGitignore: true })
+    ).resolves.toBeDefined()
+
+    const json = JSON.parse(
+      readFileSync(join(state.tmpProject, '.codex', 'hooks.json'), 'utf-8')
+    ) as { hooks: Record<string, unknown[]> }
+    expect(json.hooks.SessionStart).toHaveLength(1)
+  })
 })
 
 describe('mergeCodexHooksFlag', () => {

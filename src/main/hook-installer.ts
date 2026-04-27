@@ -52,6 +52,22 @@ function atomicWrite(path: string, contents: string): void {
   renameSync(tmp, path)
 }
 
+// JSON.parse can return any valid JSON value — null, primitives, arrays — so
+// callers that go on to read `.hooks` need to coerce non-object results back
+// to an empty object. Without this, a syntactically valid `null` or `"text"`
+// hooks file would crash session setup at the next property access.
+function parseAsObject(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    // fall through to empty object
+  }
+  return {}
+}
+
 export async function installHooks(
   projectPath: string,
   { skipGitignore = false }: { skipGitignore?: boolean } = {}
@@ -61,14 +77,9 @@ export async function installHooks(
 
   const settingsPath = join(claudeDir, 'settings.local.json')
 
-  let existing: Record<string, unknown> = {}
-  if (existsSync(settingsPath)) {
-    try {
-      existing = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-    } catch {
-      existing = {}
-    }
-  }
+  const existing: Record<string, unknown> = existsSync(settingsPath)
+    ? parseAsObject(readFileSync(settingsPath, 'utf-8'))
+    : {}
 
   const newHooks = buildHooks(NOTIFY_SCRIPT)
   const existingHooks = (existing.hooks || {}) as Record<string, unknown[]>
@@ -165,14 +176,7 @@ export async function installCodexHooks(
   // user-authored hooks that the merge step folded into the new file.
   const priorContent = existsSync(hooksPath) ? readFileSync(hooksPath, 'utf-8') : null
 
-  let existing: Record<string, unknown> = {}
-  if (priorContent !== null) {
-    try {
-      existing = JSON.parse(priorContent)
-    } catch {
-      existing = {}
-    }
-  }
+  const existing: Record<string, unknown> = priorContent !== null ? parseAsObject(priorContent) : {}
 
   const newHooks = buildCodexHooks(NOTIFY_SCRIPT)
   const existingHooks = (existing.hooks || {}) as Record<string, unknown[]>
