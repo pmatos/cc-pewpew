@@ -6,9 +6,11 @@ import StatusBar from './components/StatusBar'
 import ManageHostsDialog from './components/ManageHostsDialog'
 import ZoomOpenMorph from './components/ZoomOpenMorph'
 import AddRemoteProjectDialog from './components/AddRemoteProjectDialog'
+import ToastContainer from './components/ToastContainer'
 import { useProjectsStore } from './stores/projects'
 import { useSessionsStore } from './stores/sessions'
 import { useHostsStore } from './stores/hosts'
+import { useToastsStore } from './stores/toasts'
 
 export default function App() {
   const { scanProjects, filterReady, toggleFilterReady } = useProjectsStore()
@@ -49,6 +51,13 @@ export default function App() {
         setActiveSessionId(sessionId)
         setActiveSessionName(`${session.projectName}/${session.worktreeName}`)
       }
+    })
+  }, [])
+
+  // Subscribe to toast IPC from main (SSH failures, bootstrap errors, etc.)
+  useEffect(() => {
+    return window.api.onToast((event) => {
+      useToastsStore.getState().enqueue(event)
     })
   }, [])
 
@@ -232,6 +241,7 @@ export default function App() {
 
       <ManageHostsDialog />
       <AddRemoteProjectDialog />
+      <ToastContainer />
       {morphPayload && (
         <ZoomOpenMorph
           startRect={morphPayload.startRect}

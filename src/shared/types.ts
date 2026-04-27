@@ -108,7 +108,7 @@ export interface Host {
   label: string
 }
 
-export type SshExitReason = 'auth-failed' | 'network' | 'dep-missing' | 'unknown'
+export type SshExitReason = 'auth-failed' | 'network' | 'dep-missing' | 'bind-unlink' | 'unknown'
 
 export interface TestConnectionResult {
   ok: boolean
@@ -153,4 +153,27 @@ export interface ReviewDefaultBranchResult {
   ok: boolean
   branch?: string
   reason?: 'remote-unsupported'
+}
+
+export type SshInvocationKind = 'control' | 'control-exit' | 'exec' | 'attach' | 'probe'
+
+export interface SshLogEntry {
+  ts: number
+  hostId: HostId
+  kind: SshInvocationKind
+  argv: string[]
+  exitCode: number | null
+  stderrSnippet: string
+  durationMs?: number
+}
+
+export type ToastSeverity = 'error' | 'warning' | 'info'
+
+export interface ToastEvent {
+  id: string
+  severity: ToastSeverity
+  title: string
+  detail?: string
+  hostLabel?: string
+  ttlMs?: number
 }

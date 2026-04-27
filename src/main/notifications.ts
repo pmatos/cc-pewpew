@@ -1,6 +1,7 @@
-import { Notification } from 'electron'
+import { BrowserWindow, Notification } from 'electron'
+import { randomUUID } from 'crypto'
 import { getMainWindow } from './window-registry'
-import type { Session } from '../shared/types'
+import type { Session, ToastEvent } from '../shared/types'
 
 export function notifyNeedsInput(session: Session): void {
   if (!Notification.isSupported()) return
@@ -20,4 +21,19 @@ export function notifyNeedsInput(session: Session): void {
   })
 
   notification.show()
+}
+
+export function emitToast(event: Omit<ToastEvent, 'id'> & { id?: string }): void {
+  const payload: ToastEvent = {
+    id: event.id ?? randomUUID(),
+    ttlMs: event.ttlMs ?? 6000,
+    severity: event.severity,
+    title: event.title,
+    detail: event.detail,
+    hostLabel: event.hostLabel,
+  }
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue
+    win.webContents.send('toast:show', payload)
+  }
 }

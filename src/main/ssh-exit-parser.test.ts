@@ -98,6 +98,28 @@ const cases: Case[] = [
     stderr: 'bash: socat: command not found',
     expected: 'dep-missing',
   },
+  // bind-unlink (remote sshd lacks `StreamLocalBindUnlink yes`)
+  {
+    name: 'StreamLocalBindUnlink requires (single line)',
+    exitCode: 255,
+    stderr: 'StreamLocalBindUnlink requires StreamLocalBindUnlink yes on the server',
+    expected: 'bind-unlink',
+  },
+  {
+    name: 'StreamLocalBindUnlink with debug prefix',
+    exitCode: 255,
+    stderr:
+      'debug1: forwarding remote socket\nStreamLocalBindUnlink requires StreamLocalBindUnlink yes',
+    expected: 'bind-unlink',
+  },
+  // ordering: auth markers win over a co-occurring bind-unlink line
+  {
+    name: 'permission denied wins over bind-unlink',
+    exitCode: 255,
+    stderr:
+      'StreamLocalBindUnlink requires StreamLocalBindUnlink yes\nPermission denied (publickey).',
+    expected: 'auth-failed',
+  },
   // unknown / defensive
   { name: 'empty stderr + 255', exitCode: 255, stderr: '', expected: 'unknown' },
   { name: 'null exit code (signal kill)', exitCode: null, stderr: '', expected: 'unknown' },

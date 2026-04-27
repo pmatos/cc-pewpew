@@ -52,6 +52,7 @@ import {
   setOnHostConnectionStopped,
 } from './host-connection'
 import { invalidateBootstrap } from './host-bootstrap'
+import { clearSshLog } from './ssh-log-buffer'
 import { stopHookServerForHost } from './hook-server'
 import {
   listRemoteProjects,
@@ -604,6 +605,7 @@ app.whenReady().then(async () => {
     await stopHostConnection(hostId).catch(() => undefined)
     stopHookServerForHost(hostId)
     invalidateBootstrap(hostId)
+    clearSshLog(hostId)
     removeRemoteProjectsForHost(hostId)
     deleteHost(hostId)
   })

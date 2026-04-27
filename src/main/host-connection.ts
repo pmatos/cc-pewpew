@@ -13,8 +13,102 @@ import * as pty from 'node-pty'
 import type { IPty, IPtyForkOptions } from 'node-pty'
 import { shellQuote } from './shell-quote'
 import { classifySshExit } from './ssh-exit-parser'
+import { recordSshInvocation } from './ssh-log-buffer'
+import { emitToast } from './notifications'
+import { getHost } from './host-registry'
 import { CONFIG_DIR } from './config'
-import type { Host, HostId, TestConnectionResult, ValidateRemoteRepoResult } from '../shared/types'
+import type {
+  Host,
+  HostId,
+  SshInvocationKind,
+  TestConnectionResult,
+  ToastSeverity,
+  ValidateRemoteRepoResult,
+} from '../shared/types'
+
+interface SshLogContext {
+  hostId?: HostId
+  kind: SshInvocationKind
+}
+
+function logSshInvocation(
+  ctx: SshLogContext | undefined,
+  argv: string[],
+  exitCode: number | null,
+  stderr: string,
+  durationMs: number
+): void {
+  if (!ctx?.hostId) return
+  recordSshInvocation({
+    ts: Date.now(),
+    hostId: ctx.hostId,
+    kind: ctx.kind,
+    argv,
+    exitCode,
+    stderrSnippet: stderr.slice(0, 1024),
+    durationMs,
+  })
+}
+
+// Bootstrap signals that an early dep-missing toast from a probe would be
+// redundant with the richer toast bootstrap will emit on completion. Cleared
+// when bootstrap finishes (success or failure) — see startBootstrapWindow.
+const bootstrapInProgress = new Set<HostId>()
+export function startBootstrapWindow(hostId: HostId): () => void {
+  bootstrapInProgress.add(hostId)
+  return () => bootstrapInProgress.delete(hostId)
+}
+
+function firstStderrLine(stderr: string): string {
+  for (const raw of stderr.split('\n')) {
+    const line = raw.trim()
+    if (line) return line
+  }
+  return ''
+}
+
+function hostLabel(host: Host): string {
+  return getHost(host.hostId)?.label ?? host.alias
+}
+
+function maybeEmitFailureToast(
+  host: Host,
+  kind: SshInvocationKind,
+  exitCode: number | null,
+  stderr: string
+): void {
+  if (exitCode === 0) return
+  // `-O exit` non-zero typically means the control socket was already gone;
+  // not actionable. The PTY attach exit is surfaced through the session card's
+  // connection-state UI; a parallel toast would spam every disconnect. Probes
+  // taken during bootstrap collide with the bootstrap layer's own toast.
+  if (kind === 'control-exit' || kind === 'attach') return
+  if (kind === 'probe' && bootstrapInProgress.has(host.hostId)) return
+
+  const { reason, message } = classifySshExit({ exitCode, stderr })
+  const detail = firstStderrLine(stderr) || message
+  const label = hostLabel(host)
+  let severity: ToastSeverity = 'error'
+  let title: string
+  switch (reason) {
+    case 'auth-failed':
+      title = `SSH authentication failed on ${label}`
+      break
+    case 'network':
+      title = `Cannot reach ${label}`
+      break
+    case 'bind-unlink':
+      title = `${label}: remote sshd needs StreamLocalBindUnlink yes`
+      break
+    case 'dep-missing':
+      title = `${label}: tool missing on remote`
+      break
+    default:
+      severity = 'warning'
+      title = `ssh failed on ${label}: exit ${exitCode ?? '?'}`
+  }
+  emitToast({ severity, title, detail, hostLabel: label })
+}
 
 export interface ExecResult {
   stdout: string
@@ -105,8 +199,10 @@ const DEFAULT_MAX_BUFFER = 16 * 1024 * 1024
 function runSsh(
   argv: string[],
   timeoutMs: number,
+  ctx?: SshLogContext,
   maxBuffer = DEFAULT_MAX_BUFFER
 ): Promise<ExecResult> {
+  const t0 = Date.now()
   return new Promise((resolve) => {
     const child = execFile(
       'ssh',
@@ -123,9 +219,11 @@ function runSsh(
         // as an exit-127 "command not found" so classifySshExit routes it to
         // `dep-missing` instead of the generic `unknown`.
         if (!timedOut && errno && errno.code === 'ENOENT') {
+          const enoentStderr = 'ssh: command not found'
+          logSshInvocation(ctx, argv, 127, enoentStderr, Date.now() - t0)
           resolve({
             stdout: '',
-            stderr: 'ssh: command not found',
+            stderr: enoentStderr,
             code: 127,
             timedOut: false,
           })
@@ -136,9 +234,11 @@ function runSsh(
             ? (error as { code: number }).code
             : (child.exitCode ?? 1)
           : 0
+        const stderrStr = stderr.toString()
+        logSshInvocation(ctx, argv, code, stderrStr, Date.now() - t0)
         resolve({
           stdout: stdout.toString(),
-          stderr: stderr.toString(),
+          stderr: stderrStr,
           code,
           timedOut,
         })
@@ -185,7 +285,8 @@ async function controlCheck(runtime: HostRuntime): Promise<boolean> {
       '--',
       runtime.host.alias,
     ],
-    1000
+    1000,
+    { hostId: runtime.host.hostId, kind: 'probe' }
   )
   return result.code === 0
 }
@@ -206,7 +307,7 @@ export function classifyConnectionFailure(
 ): HostConnectionState {
   const { reason } = classifySshExit({ exitCode: code, stderr })
   if (reason === 'auth-failed') return 'auth-failed'
-  if (reason === 'network') return 'unreachable'
+  if (reason === 'network' || reason === 'bind-unlink') return 'unreachable'
   return 'offline'
 }
 
@@ -217,8 +318,10 @@ export function runtimeStateFor(hostId: HostId): HostConnectionState | undefined
 async function startRuntime(runtime: HostRuntime): Promise<void> {
   runtime.state = 'connecting'
   let stderr = ''
+  const argv = controlArgs(runtime)
+  const t0 = Date.now()
 
-  const child = spawn('ssh', controlArgs(runtime), {
+  const child = spawn('ssh', argv, {
     stdio: ['ignore', 'ignore', 'pipe'],
   })
   runtime.child = child
@@ -230,6 +333,13 @@ async function startRuntime(runtime: HostRuntime): Promise<void> {
   const exitPromise = new Promise<never>((_, reject) => {
     child.once('exit', (code) => {
       runtime.child = null
+      logSshInvocation(
+        { hostId: runtime.host.hostId, kind: 'control' },
+        argv,
+        code,
+        stderr,
+        Date.now() - t0
+      )
       runtime.state = classifyConnectionFailure(code, stderr)
       reject(new Error(stderr.trim() || `ssh control connection exited: ${code ?? 'signal'}`))
     })
@@ -242,13 +352,18 @@ async function startRuntime(runtime: HostRuntime): Promise<void> {
       runtime.child = null
       runtime.state = 'offline'
       const errno = err as NodeJS.ErrnoException
-      reject(
-        new Error(
-          errno.code === 'ENOENT'
-            ? 'ssh: command not found'
-            : `ssh failed to spawn: ${errno.message || errno.code || 'unknown'}`
-        )
+      const errStderr =
+        errno.code === 'ENOENT'
+          ? 'ssh: command not found'
+          : `ssh failed to spawn: ${errno.message || errno.code || 'unknown'}`
+      logSshInvocation(
+        { hostId: runtime.host.hostId, kind: 'control' },
+        argv,
+        null,
+        errStderr,
+        Date.now() - t0
       )
+      reject(new Error(errStderr))
     })
   })
 
@@ -265,6 +380,7 @@ async function startRuntime(runtime: HostRuntime): Promise<void> {
       }
     }
     runtime.child = null
+    maybeEmitFailureToast(runtime.host, 'control', exitCode, stderr)
     runtime.state = classifyConnectionFailure(exitCode, stderr)
     throw err
   }
@@ -316,7 +432,8 @@ export async function stopHostConnection(hostId: HostId): Promise<void> {
         '--',
         runtime.host.alias,
       ],
-      2000
+      2000,
+      { hostId: runtime.host.hostId, kind: 'control-exit' }
     ).catch(() => undefined)
     try {
       runtime.child.kill()
@@ -388,7 +505,13 @@ export async function exec(
         ...quoted,
       ]
     : ['-o', 'BatchMode=yes', '--', aliasOf(aliasOrHost), ...quoted]
-  return runSsh(sshArgv, timeoutMs)
+  const ctx: SshLogContext | undefined =
+    typeof aliasOrHost === 'string' ? undefined : { hostId: aliasOrHost.hostId, kind: 'exec' }
+  const result = await runSsh(sshArgv, timeoutMs, ctx)
+  if (typeof aliasOrHost !== 'string' && !result.timedOut && result.code !== 0) {
+    maybeEmitFailureToast(aliasOrHost, 'exec', result.code, result.stderr)
+  }
+  return result
 }
 
 export function spawnAttach(host: Host, argv: string[], options: IPtyForkOptions): IPty {
@@ -403,7 +526,21 @@ export function spawnAttach(host: Host, argv: string[], options: IPtyForkOptions
     host.alias,
     ...quoted,
   ]
-  return pty.spawn('ssh', sshArgv, options)
+  const t0 = Date.now()
+  const ptyProcess = pty.spawn('ssh', sshArgv, options)
+  // Stderr is piped to the PTY (the user sees it in xterm); we record the
+  // exit code and full argv for ring-buffer reproducibility, leaving the
+  // stderr snippet empty.
+  ptyProcess.onExit(({ exitCode }) => {
+    logSshInvocation(
+      { hostId: host.hostId, kind: 'attach' },
+      sshArgv,
+      exitCode,
+      '',
+      Date.now() - t0
+    )
+  })
+  return ptyProcess
 }
 
 // Validates that a remote path is a git repository ROOT (not a subdirectory)
@@ -452,8 +589,17 @@ export async function validateRemoteRepo(
     return { ok: true, fingerprint }
   }
   const { reason, message } = classifySshExit({ exitCode: code, stderr })
-  if (reason === 'auth-failed' || reason === 'network' || reason === 'dep-missing') {
-    return { ok: false, reason, message }
+  if (
+    reason === 'auth-failed' ||
+    reason === 'network' ||
+    reason === 'dep-missing' ||
+    reason === 'bind-unlink'
+  ) {
+    // ValidateRemoteRepoReason has no 'bind-unlink' variant — coerce to
+    // 'network' since the user-facing outcome (cannot use this host) is the
+    // same and `message` already carries the specific stderr line.
+    const coercedReason = reason === 'bind-unlink' ? 'network' : reason
+    return { ok: false, reason: coercedReason, message }
   }
   return {
     ok: false,
