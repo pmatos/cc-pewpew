@@ -66,6 +66,19 @@ import type { DiffMode, ValidateRemoteRepoReason } from '../shared/types'
 // Use native Wayland rendering when available (avoids Xwayland scaling artifacts)
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
 
+// Chromium stores one value per switch key, so a plain appendSwitch on a
+// feature-list flag overwrites whatever the user passed via argv. Merge our
+// additions into the existing value so launch flags like
+// `--disable-features=Foo` survive.
+function mergeFeatureSwitch(
+  name: 'enable-features' | 'disable-features',
+  additions: string[]
+): void {
+  const existing = app.commandLine.getSwitchValue(name)
+  const merged = new Set([...(existing ? existing.split(',').filter(Boolean) : []), ...additions])
+  app.commandLine.appendSwitch(name, [...merged].join(','))
+}
+
 // Linux dual-GPU workaround: ANGLE/EGL initialization can fail inside AppImages
 // or on systems with multiple GPUs (e.g. Intel iGPU + NVIDIA dGPU) because the
 // bundled Chromium can't access the right driver libraries. If the user passed
@@ -90,7 +103,7 @@ if (process.platform === 'linux') {
         (process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY))
     if (!isWayland) {
       app.commandLine.appendSwitch('use-angle', 'vulkan')
-      app.commandLine.appendSwitch('enable-features', 'Vulkan')
+      mergeFeatureSwitch('enable-features', ['Vulkan'])
       // If Vulkan also fails, Chromium will fall back to SwiftShader automatically.
     }
   }
@@ -99,7 +112,7 @@ if (process.platform === 'linux') {
   // at startup. Inside AppImages the bundled libva can't load the host's
   // matching driver, producing a noisy `vaInitialize failed: unknown libva
   // error`. Disable the feature outright so the log goes away.
-  app.commandLine.appendSwitch('disable-features', 'VaapiVideoDecoder,VaapiVideoEncoder')
+  mergeFeatureSwitch('disable-features', ['VaapiVideoDecoder', 'VaapiVideoEncoder'])
 }
 
 // Apply UI scale to the entire app (native menu bar + web content) before app is ready
