@@ -77,10 +77,17 @@ if (process.platform === 'linux') {
   } else {
     // Vulkan ANGLE sidesteps EGL/GBM init failures on hybrid Intel+NVIDIA
     // laptops, but the Wayland ozone backend can't render Vulkan surfaces and
-    // logs `--ozone-platform=wayland is not compatible with Vulkan`. Only
-    // request Vulkan on X11 sessions; on Wayland let Chromium pick its
-    // default GL ANGLE backend.
-    const isWayland = process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY
+    // logs `--ozone-platform=wayland is not compatible with Vulkan`. Honour
+    // an explicit `--ozone-platform=<value>` argv first so a user forcing X11
+    // inside a Wayland login still gets the Vulkan workaround; otherwise
+    // infer from the session env vars (the same signal `ozone-platform-hint
+    // =auto` resolves against). Only request Vulkan on X11; on Wayland let
+    // Chromium pick its default GL ANGLE backend.
+    const ozoneArg = process.argv.find((a) => a.startsWith('--ozone-platform='))?.split('=')[1]
+    const isWayland =
+      ozoneArg === 'wayland' ||
+      (ozoneArg !== 'x11' &&
+        (process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY))
     if (!isWayland) {
       app.commandLine.appendSwitch('use-angle', 'vulkan')
       app.commandLine.appendSwitch('enable-features', 'Vulkan')
