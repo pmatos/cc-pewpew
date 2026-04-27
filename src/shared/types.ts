@@ -136,3 +136,21 @@ export interface ValidateRemoteRepoResult {
   reason?: ValidateRemoteRepoReason
   message?: string
 }
+
+export interface ReviewDiffResult {
+  ok: boolean
+  files?: DiffFile[]
+  reason?: 'remote-unsupported'
+}
+
+export interface ReviewBranchesResult {
+  ok: boolean
+  branches?: string[]
+  reason?: 'remote-unsupported'
+}
+
+export interface ReviewDefaultBranchResult {
+  ok: boolean
+  branch?: string
+  reason?: 'remote-unsupported'
+}

@@ -61,7 +61,13 @@ import {
   toProject as remoteToProject,
   validateRemotePath,
 } from './remote-project-registry'
-import type { DiffMode, ValidateRemoteRepoReason } from '../shared/types'
+import type {
+  DiffMode,
+  ReviewBranchesResult,
+  ReviewDefaultBranchResult,
+  ReviewDiffResult,
+  ValidateRemoteRepoReason,
+} from '../shared/types'
 
 // Use native Wayland rendering when available (avoids Xwayland scaling artifacts)
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
@@ -366,9 +372,17 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'review:get-diff',
-    async (_event, sessionId: string, mode: DiffMode, baseBranch?: string) => {
+    async (
+      _event,
+      sessionId: string,
+      mode: DiffMode,
+      baseBranch?: string
+    ): Promise<ReviewDiffResult> => {
       const session = getSession(sessionId)
       if (!session) throw new Error(`Session not found: ${sessionId}`)
+      if (session.hostId != null) {
+        return { ok: false, reason: 'remote-unsupported' }
+      }
       const cwd = session.worktreePath || session.projectPath
       const { execFile: execFileCb } = await import('child_process')
       const { promisify: pfy } = await import('util')
@@ -422,40 +436,52 @@ app.whenReady().then(async () => {
         }
       }
 
-      return files
+      return { ok: true, files }
     }
   )
 
-  ipcMain.handle('review:list-branches', async (_event, sessionId: string) => {
-    const session = getSession(sessionId)
-    if (!session) throw new Error(`Session not found: ${sessionId}`)
-    const cwd = session.worktreePath || session.projectPath
-    const { execFile: execFileCb } = await import('child_process')
-    const { promisify: pfy } = await import('util')
-    const execAsync = pfy(execFileCb)
-    const { stdout } = await execAsync('git', ['branch', '-a', '--format=%(refname:short)'], {
-      cwd,
-    })
-    return stdout.split('\n').filter(Boolean)
-  })
-
-  ipcMain.handle('review:get-default-branch', async (_event, sessionId: string) => {
-    const session = getSession(sessionId)
-    if (!session) throw new Error(`Session not found: ${sessionId}`)
-    const cwd = session.worktreePath || session.projectPath
-    const { execFile: execFileCb } = await import('child_process')
-    const { promisify: pfy } = await import('util')
-    const execAsync = pfy(execFileCb)
-    try {
-      const { stdout } = await execAsync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+  ipcMain.handle(
+    'review:list-branches',
+    async (_event, sessionId: string): Promise<ReviewBranchesResult> => {
+      const session = getSession(sessionId)
+      if (!session) throw new Error(`Session not found: ${sessionId}`)
+      if (session.hostId != null) {
+        return { ok: false, reason: 'remote-unsupported' }
+      }
+      const cwd = session.worktreePath || session.projectPath
+      const { execFile: execFileCb } = await import('child_process')
+      const { promisify: pfy } = await import('util')
+      const execAsync = pfy(execFileCb)
+      const { stdout } = await execAsync('git', ['branch', '-a', '--format=%(refname:short)'], {
         cwd,
       })
-      const ref = stdout.trim()
-      return ref.replace('refs/remotes/origin/', '')
-    } catch {
-      return 'main'
+      return { ok: true, branches: stdout.split('\n').filter(Boolean) }
     }
-  })
+  )
+
+  ipcMain.handle(
+    'review:get-default-branch',
+    async (_event, sessionId: string): Promise<ReviewDefaultBranchResult> => {
+      const session = getSession(sessionId)
+      if (!session) throw new Error(`Session not found: ${sessionId}`)
+      if (session.hostId != null) {
+        return { ok: false, reason: 'remote-unsupported' }
+      }
+      const cwd = session.worktreePath || session.projectPath
+      const { execFile: execFileCb } = await import('child_process')
+      const { promisify: pfy } = await import('util')
+      const execAsync = pfy(execFileCb)
+      try {
+        const { stdout } = await execAsync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+          cwd,
+        })
+        const ref = stdout.trim()
+        return { ok: true, branch: ref.replace('refs/remotes/origin/', '') }
+      } catch {
+        return { ok: true, branch: 'main' }
+      }
+    }
+  )
 
   ipcMain.handle('config:get-canvas', () => {
     return getConfig().canvas

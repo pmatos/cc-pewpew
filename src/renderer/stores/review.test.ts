@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { useReviewStore, getReviewProgress } from './review'
 import type { HunkAnnotation, DiffFile } from '../../shared/types'
 
@@ -124,6 +124,7 @@ describe('getReviewProgress', () => {
           focusedHunkKey: null,
           cachedMode: null,
           diffUpdated: false,
+          remoteUnsupported: false,
         },
       },
     })
@@ -149,6 +150,7 @@ describe('getReviewProgress', () => {
           focusedHunkKey: null,
           cachedMode: null,
           diffUpdated: false,
+          remoteUnsupported: false,
         },
       },
     })
@@ -171,6 +173,7 @@ describe('getReviewProgress', () => {
           focusedHunkKey: null,
           cachedMode: null,
           diffUpdated: false,
+          remoteUnsupported: false,
         },
       },
     })
@@ -190,5 +193,44 @@ describe('multiple sessions isolation', () => {
 
     expect(s1.annotations['f::0']).toEqual([makeAnnotation('a1', 'approved')])
     expect(s2.annotations['f::0']).toEqual([makeAnnotation('a2', 'rejected')])
+  })
+})
+
+describe('fetchDiff envelope handling', () => {
+  const getReviewDiff = vi.fn()
+
+  beforeEach(() => {
+    vi.stubGlobal('window', { api: { getReviewDiff } })
+    getReviewDiff.mockReset()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('marks session remoteUnsupported when handler returns the gated envelope', async () => {
+    getReviewDiff.mockResolvedValueOnce({ ok: false, reason: 'remote-unsupported' })
+
+    await store.getState().fetchDiff('s1', 'uncommitted')
+
+    const session = store.getState().sessions['s1']
+    expect(session).toBeDefined()
+    expect(session.remoteUnsupported).toBe(true)
+    expect(session.files).toEqual([])
+    expect(session.loading).toBe(false)
+    expect(session.error).toBeNull()
+  })
+
+  it('populates files from a successful envelope and leaves remoteUnsupported false', async () => {
+    const file = makeFile('a.ts', 1)
+    getReviewDiff.mockResolvedValueOnce({ ok: true, files: [file] })
+
+    await store.getState().fetchDiff('s1', 'uncommitted')
+
+    const session = store.getState().sessions['s1']
+    expect(session.files).toEqual([file])
+    expect(session.remoteUnsupported).toBe(false)
+    expect(session.loading).toBe(false)
+    expect(session.cachedMode).toBe('uncommitted')
   })
 })
