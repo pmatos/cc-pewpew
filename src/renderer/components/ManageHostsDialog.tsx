@@ -63,7 +63,7 @@ function HostForm({
         autoFocus
         type="text"
         className="create-input"
-        placeholder="ssh alias (e.g. devbox)"
+        placeholder="Host from ~/.ssh/config (e.g. devbox)"
         value={alias}
         onChange={(e) => setAlias(e.target.value)}
         onKeyDown={handleKey}
