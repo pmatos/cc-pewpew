@@ -119,8 +119,16 @@ if (process.platform === 'linux') {
   // cc-pewpew never plays video, but Chromium still tries to bring up VA-API
   // at startup. Inside AppImages the bundled libva can't load the host's
   // matching driver, producing a noisy `vaInitialize failed: unknown libva
-  // error`. Disable the feature outright so the log goes away.
-  mergeFeatureSwitch('disable-features', ['VaapiVideoDecoder', 'VaapiVideoEncoder'])
+  // error`. The feature-flag disable alone doesn't gate the probe in
+  // vaapi_wrapper.cc, so also pass the switch-level flags that
+  // short-circuit accelerated video init entirely.
+  app.commandLine.appendSwitch('disable-accelerated-video-decode')
+  app.commandLine.appendSwitch('disable-accelerated-video-encode')
+  mergeFeatureSwitch('disable-features', [
+    'VaapiVideoDecoder',
+    'VaapiVideoEncoder',
+    'VaapiVideoDecodeLinuxGL',
+  ])
 }
 
 // Apply UI scale to the entire app (native menu bar + web content) before app is ready
