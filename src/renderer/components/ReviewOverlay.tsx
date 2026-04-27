@@ -27,6 +27,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
   const removeAnnotation = useReviewStore((s) => s.removeAnnotation)
   const clearAnnotations = useReviewStore((s) => s.clearAnnotations)
   const session = useSessionsStore((s) => s.sessions.find((s) => s.id === sessionId))
+  const isRemote = session?.hostId != null
 
   const [focusedHunkKey, setFocusedHunkKey] = useState<string | null>(null)
   const [scrollToFile, setScrollToFile] = useState<string | undefined>(undefined)
@@ -47,16 +48,21 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
   }, [])
 
   useEffect(() => {
+    if (isRemote) return
     fetchDiff(sessionId, 'uncommitted')
     window.api
       .getReviewBranches(sessionId)
-      .then(setBranches)
+      .then((r) => {
+        if (r.ok && r.branches) setBranches(r.branches)
+      })
       .catch(() => {})
     window.api
       .getReviewDefaultBranch(sessionId)
-      .then(setSelectedBranch)
+      .then((r) => {
+        if (r.ok && r.branch) setSelectedBranch(r.branch)
+      })
       .catch(() => {})
-  }, [sessionId, fetchDiff])
+  }, [sessionId, fetchDiff, isRemote])
 
   const files = useMemo(() => reviewState?.files ?? [], [reviewState?.files])
   const annotations = useMemo(() => reviewState?.annotations ?? {}, [reviewState?.annotations])
@@ -70,12 +76,13 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
 
   const switchMode = useCallback(
     (newMode: DiffMode, branch?: string) => {
+      if (isRemote) return
       setDiffMode(newMode)
       setFocusedHunkKey(null)
       clearAnnotations(sessionId)
       fetchDiff(sessionId, newMode, newMode === 'branch' ? (branch ?? selectedBranch) : undefined)
     },
-    [sessionId, selectedBranch, fetchDiff, clearAnnotations]
+    [sessionId, selectedBranch, fetchDiff, clearAnnotations, isRemote]
   )
 
   const handleModeChange = useCallback(
@@ -251,6 +258,22 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
   const loading = !reviewState || reviewState.loading
   const error = reviewState?.error
   const focusedFile = focusedHunkKey ? focusedHunkKey.split('::')[0] : undefined
+
+  if (isRemote || reviewState?.remoteUnsupported) {
+    return (
+      <div ref={containerRef} className="review-overlay" tabIndex={-1}>
+        <div className="review-remote-unsupported">
+          <div className="review-remote-unsupported-headline">
+            Review not yet available on remote sessions
+          </div>
+          <div className="review-remote-unsupported-body">
+            Diff and branch tools require local git access. Remote review support is planned for a
+            future release.
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div ref={containerRef} className="review-overlay" tabIndex={-1}>

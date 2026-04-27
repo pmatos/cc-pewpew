@@ -9,6 +9,7 @@ interface SessionReviewState {
   focusedHunkKey: string | null
   cachedMode: DiffMode | null
   diffUpdated: boolean
+  remoteUnsupported: boolean
 }
 
 export function getReviewProgress(state: SessionReviewState): {
@@ -60,6 +61,7 @@ function emptySession(): SessionReviewState {
     focusedHunkKey: null,
     cachedMode: null,
     diffUpdated: false,
+    remoteUnsupported: false,
   }
 }
 
@@ -91,7 +93,19 @@ export const useReviewStore = create<ReviewStore>((set, get) => ({
     }
 
     try {
-      const files = await window.api.getReviewDiff(sessionId, mode, baseBranch)
+      const result = await window.api.getReviewDiff(sessionId, mode, baseBranch)
+
+      if (!result.ok && result.reason === 'remote-unsupported') {
+        set((state) => ({
+          sessions: {
+            ...state.sessions,
+            [sessionId]: { ...emptySession(), remoteUnsupported: true },
+          },
+        }))
+        return
+      }
+
+      const files = result.files ?? []
 
       // Guard against stale async responses: if mode changed while awaiting, discard
       const currentSession = get().sessions[sessionId]

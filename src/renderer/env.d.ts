@@ -1,11 +1,13 @@
 /// <reference types="vite/client" />
 
 import type {
-  DiffFile,
   DiffMode,
   Host,
   Project,
   RemoteProject,
+  ReviewBranchesResult,
+  ReviewDefaultBranchResult,
+  ReviewDiffResult,
   Session,
   TestConnectionResult,
 } from '../shared/types'
@@ -61,9 +63,13 @@ declare global {
       ptyGetScrollback: (sessionId: string) => Promise<string>
       onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => () => void
       openSwimLanes: (sessionIds: string[]) => Promise<void>
-      getReviewDiff: (sessionId: string, mode: DiffMode, baseBranch?: string) => Promise<DiffFile[]>
-      getReviewBranches: (sessionId: string) => Promise<string[]>
-      getReviewDefaultBranch: (sessionId: string) => Promise<string>
+      getReviewDiff: (
+        sessionId: string,
+        mode: DiffMode,
+        baseBranch?: string
+      ) => Promise<ReviewDiffResult>
+      getReviewBranches: (sessionId: string) => Promise<ReviewBranchesResult>
+      getReviewDefaultBranch: (sessionId: string) => Promise<ReviewDefaultBranchResult>
       listHosts: () => Promise<Host[]>
       addHost: (alias: string, label: string) => Promise<Host>
       updateHost: (hostId: string, alias: string, label: string) => Promise<Host>
