@@ -141,6 +141,13 @@ export interface ValidateRemoteRepoResult {
   message?: string
 }
 
+export type WorktreeBase = 'local' | 'origin-default'
+
+export interface CreateSessionOptions {
+  baseRef?: WorktreeBase
+  tool?: AgentTool
+}
+
 export interface ReviewDiffResult {
   ok: boolean
   files?: DiffFile[]

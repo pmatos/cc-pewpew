@@ -2,6 +2,7 @@
 
 import type {
   AgentTool,
+  CreateSessionOptions,
   DiffMode,
   Host,
   Project,
@@ -12,6 +13,7 @@ import type {
   Session,
   TestConnectionResult,
   ToastEvent,
+  WorktreeBase,
 } from '../shared/types'
 
 declare global {
@@ -26,7 +28,7 @@ declare global {
         projectPath: string,
         name?: string,
         hostId?: string | null,
-        tool?: AgentTool
+        options?: CreateSessionOptions
       ) => Promise<Session>
       createPrSession: (projectPath: string, prNumber: number) => Promise<Session | string>
       mirrorWorktree: (
@@ -57,6 +59,7 @@ declare global {
       saveSidebarWidth: (width: number) => Promise<void>
       getUiScale: () => Promise<number>
       getDefaultTool: () => Promise<AgentTool>
+      getWorktreeBase: () => Promise<WorktreeBase>
       onTextThumbnails: (callback: (data: Record<string, string>) => void) => () => void
       pickDirectory: () => Promise<string | null>
       relocateProject: (oldPath: string, newPath: string) => Promise<{ migratedCount: number }>

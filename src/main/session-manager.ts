@@ -51,7 +51,15 @@ import {
 } from './host-connection'
 import { bootstrapHost, HostBootstrapError } from './host-bootstrap'
 import { emitToast } from './notifications'
-import type { AgentTool, Host, RemoteProject, Session, SessionStatus } from '../shared/types'
+import type {
+  AgentTool,
+  CreateSessionOptions,
+  Host,
+  RemoteProject,
+  Session,
+  SessionStatus,
+  WorktreeBase,
+} from '../shared/types'
 
 const execFileAsync = promisify(execFile)
 const SESSIONS_PATH = join(CONFIG_DIR, 'sessions.json')
@@ -103,6 +111,47 @@ function resolveBranchFromWorktree(
     }
   }
   return `${sanitizeBranchPrefix(projectName)}/${worktreeName}`
+}
+
+type GitRunner = (argv: string[]) => Promise<{ stdout: string }>
+
+export async function resolveOriginDefaultBase(run: GitRunner): Promise<string> {
+  try {
+    await run(['remote', 'get-url', 'origin'])
+  } catch {
+    throw new Error('no-origin-remote')
+  }
+
+  try {
+    await run(['fetch', 'origin', '--quiet'])
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    throw new Error(`Failed to fetch origin: ${detail}`, { cause: err })
+  }
+
+  const candidates: string[] = []
+  try {
+    const { stdout } = await run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
+    const ref = stdout.trim()
+    if (ref) candidates.push(ref)
+  } catch {
+    // fall through to conventional branch names
+  }
+
+  for (const ref of ['origin/main', 'origin/master']) {
+    if (!candidates.includes(ref)) candidates.push(ref)
+  }
+
+  for (const ref of candidates) {
+    try {
+      await run(['rev-parse', '--verify', ref])
+      return ref
+    } catch {
+      // try next candidate
+    }
+  }
+
+  throw new Error('no-origin-default-branch')
 }
 
 // Extract the owner segment from a GitHub `origin` remote URL. Used to
@@ -237,6 +286,10 @@ async function expectRemoteOk(host: Host, argv: string[], message: string): Prom
     throw new Error(`${message}: ${detail}`)
   }
   return result.stdout
+}
+
+function effectiveWorktreeBase(options: CreateSessionOptions): WorktreeBase {
+  return options.baseRef ?? getConfig().worktreeBase
 }
 
 // Positive hits are cached forever; negative hits (no PR yet / gh transient
@@ -598,9 +651,9 @@ async function createRemoteSession(
   hostId: string,
   projectPath: string,
   name?: string,
-  tool?: AgentTool
+  options: CreateSessionOptions = {}
 ): Promise<Session> {
-  const effectiveTool: AgentTool = tool ?? getConfig().defaultTool
+  const effectiveTool: AgentTool = options.tool ?? getConfig().defaultTool
   const host = getRequiredHost(hostId)
   const remoteProject = getRemoteProject(hostId, projectPath)
   const worktreeName = name || `session-${randomUUID().slice(0, 8)}`
@@ -621,6 +674,7 @@ async function createRemoteSession(
   const id = randomUUID().slice(0, 8)
   const tmuxSession = `cc-pewpew-${id}`
   const branchName = `${sanitizeBranchPrefix(remoteProject.name)}/${worktreeName}`
+  const baseRef = effectiveWorktreeBase(options)
 
   // prepareRemoteHost retains the SSH runtime on success; we own the ref and
   // release it at the end (or in catch). createRemotePty takes its own retain
@@ -632,22 +686,35 @@ async function createRemoteSession(
   }
   let branch: string
   try {
-    const addWithBranch = await execRemote(host, [
-      'git',
-      '-C',
-      projectPath,
-      'worktree',
-      'add',
-      worktreePath,
-      '-b',
-      branchName,
-    ])
-    if (addWithBranch.timedOut || addWithBranch.code !== 0) {
+    if (baseRef === 'origin-default') {
+      const originRef = await resolveOriginDefaultBase((argv) =>
+        expectRemoteOk(host, ['git', '-C', projectPath, ...argv], 'git failed').then((stdout) => ({
+          stdout,
+        }))
+      )
       await expectRemoteOk(
         host,
-        ['git', '-C', projectPath, 'worktree', 'add', worktreePath],
+        ['git', '-C', projectPath, 'worktree', 'add', worktreePath, '-b', branchName, originRef],
         'Failed to create remote worktree'
       )
+    } else {
+      const addWithBranch = await execRemote(host, [
+        'git',
+        '-C',
+        projectPath,
+        'worktree',
+        'add',
+        worktreePath,
+        '-b',
+        branchName,
+      ])
+      if (addWithBranch.timedOut || addWithBranch.code !== 0) {
+        await expectRemoteOk(
+          host,
+          ['git', '-C', projectPath, 'worktree', 'add', worktreePath],
+          'Failed to create remote worktree'
+        )
+      }
     }
 
     branch =
@@ -695,14 +762,22 @@ export async function createSession(
   projectPath: string,
   name?: string,
   hostId: string | null = null,
-  tool?: AgentTool
+  options: CreateSessionOptions = {}
 ): Promise<Session> {
-  if (hostId) return createRemoteSession(hostId, projectPath, name, tool)
+  if (hostId) return createRemoteSession(hostId, projectPath, name, options)
 
   const worktreeName = name || `session-${randomUUID().slice(0, 8)}`
   const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
+  const branchName = `${sanitizeBranchPrefix(basename(projectPath))}/${worktreeName}`
+  const baseRef = effectiveWorktreeBase(options)
 
-  try {
+  if (baseRef === 'origin-default') {
+    const originRef = await resolveOriginDefaultBase(async (argv) => {
+      const { stdout } = await execFileAsync('git', ['-C', projectPath, ...argv], {
+        timeout: 30000,
+      })
+      return { stdout: String(stdout) }
+    })
     await execFileAsync('git', [
       '-C',
       projectPath,
@@ -710,14 +785,27 @@ export async function createSession(
       'add',
       worktreePath,
       '-b',
-      `${sanitizeBranchPrefix(basename(projectPath))}/${worktreeName}`,
+      branchName,
+      originRef,
     ])
-  } catch {
-    // Branch may already exist — try without -b
-    await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath])
+  } else {
+    try {
+      await execFileAsync('git', [
+        '-C',
+        projectPath,
+        'worktree',
+        'add',
+        worktreePath,
+        '-b',
+        branchName,
+      ])
+    } catch {
+      // Branch may already exist — try without -b
+      await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath])
+    }
   }
 
-  return createSessionForWorktree(projectPath, worktreePath, worktreeName, tool)
+  return createSessionForWorktree(projectPath, worktreePath, worktreeName, options.tool)
 }
 
 export function handleHookEvent(

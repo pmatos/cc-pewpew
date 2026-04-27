@@ -852,6 +852,19 @@ body,
   border-color: var(--accent-green);
 }
 
+.session-base-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.session-base-checkbox input {
+  margin: 0;
+}
+
 .create-actions {
   display: flex;
   gap: 4px;
