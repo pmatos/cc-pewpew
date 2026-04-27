@@ -299,11 +299,29 @@ describe('resolveOriginDefaultBase', () => {
         fakeGitRunner({
           'remote get-url origin': 'git@example.com:org/repo.git\n',
           'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': new Error('unavailable'),
           'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
           'rev-parse --verify origin/main': 'abc123\n',
         })
       )
     ).resolves.toBe('origin/main')
+  })
+
+  it('prefers ls-remote default branch over stale local origin/HEAD', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': 'ref: refs/heads/develop\tHEAD\nabc123\tHEAD\n',
+          'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
+          'rev-parse --verify origin/develop': 'abc123\n',
+          'rev-parse --verify origin/main': 'def456\n',
+        })
+      )
+    ).resolves.toBe('origin/develop')
   })
 
   it('throws no-origin-remote when origin is missing', async () => {
@@ -339,8 +357,8 @@ describe('resolveOriginDefaultBase', () => {
         fakeGitRunner({
           'remote get-url origin': 'git@example.com:org/repo.git\n',
           'fetch origin --quiet': '',
-          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
           'ls-remote --symref origin HEAD': new Error('unset'),
+          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
           'rev-parse --verify origin/main': 'abc123\n',
         })
       )
@@ -355,8 +373,8 @@ describe('resolveOriginDefaultBase', () => {
         fakeGitRunner({
           'remote get-url origin': 'git@example.com:org/repo.git\n',
           'fetch origin --quiet': '',
-          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
           'ls-remote --symref origin HEAD': 'ref: refs/heads/develop\tHEAD\nabc123\tHEAD\n',
+          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
           'rev-parse --verify origin/develop': 'abc123\n',
         })
       )
@@ -371,8 +389,8 @@ describe('resolveOriginDefaultBase', () => {
         fakeGitRunner({
           'remote get-url origin': 'git@example.com:org/repo.git\n',
           'fetch origin --quiet': '',
-          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
           'ls-remote --symref origin HEAD': new Error('unset'),
+          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
           'rev-parse --verify origin/main': new Error('missing'),
           'rev-parse --verify origin/master': 'abc123\n',
         })
@@ -388,8 +406,8 @@ describe('resolveOriginDefaultBase', () => {
         fakeGitRunner({
           'remote get-url origin': 'git@example.com:org/repo.git\n',
           'fetch origin --quiet': '',
-          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
           'ls-remote --symref origin HEAD': new Error('unset'),
+          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
           'rev-parse --verify origin/main': new Error('missing'),
           'rev-parse --verify origin/master': new Error('missing'),
         })
@@ -405,8 +423,8 @@ describe('resolveOriginDefaultBase', () => {
         fakeGitRunner({
           'remote get-url origin': 'git@example.com:org/repo.git\n',
           'fetch origin --quiet': '',
-          'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
           'ls-remote --symref origin HEAD': new Error('unset'),
+          'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
           'rev-parse --verify origin/main': new Error('stale'),
           'rev-parse --verify origin/master': 'abc123\n',
         })

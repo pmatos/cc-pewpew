@@ -139,16 +139,16 @@ export async function resolveOriginDefaultBase(run: GitRunner): Promise<string> 
 
   const candidates: string[] = []
   try {
-    const { stdout } = await run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
-    const ref = stdout.trim()
+    const { stdout } = await run(['ls-remote', '--symref', 'origin', 'HEAD'])
+    const ref = parseOriginHeadSymref(stdout)
     if (ref) candidates.push(ref)
   } catch {
-    // fall through to conventional branch names
+    // fall through to local origin/HEAD
   }
 
   try {
-    const { stdout } = await run(['ls-remote', '--symref', 'origin', 'HEAD'])
-    const ref = parseOriginHeadSymref(stdout)
+    const { stdout } = await run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
+    const ref = stdout.trim()
     if (ref && !candidates.includes(ref)) candidates.push(ref)
   } catch {
     // fall through to conventional branch names
