@@ -115,6 +115,14 @@ function resolveBranchFromWorktree(
 
 type GitRunner = (argv: string[]) => Promise<{ stdout: string }>
 
+function parseOriginHeadSymref(stdout: string): string | undefined {
+  for (const line of stdout.split('\n')) {
+    const match = line.match(/^ref:\s+refs\/heads\/(.+)\s+HEAD$/)
+    if (match) return `origin/${match[1]}`
+  }
+  return undefined
+}
+
 export async function resolveOriginDefaultBase(run: GitRunner): Promise<string> {
   try {
     await run(['remote', 'get-url', 'origin'])
@@ -134,6 +142,14 @@ export async function resolveOriginDefaultBase(run: GitRunner): Promise<string> 
     const { stdout } = await run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
     const ref = stdout.trim()
     if (ref) candidates.push(ref)
+  } catch {
+    // fall through to conventional branch names
+  }
+
+  try {
+    const { stdout } = await run(['ls-remote', '--symref', 'origin', 'HEAD'])
+    const ref = parseOriginHeadSymref(stdout)
+    if (ref && !candidates.includes(ref)) candidates.push(ref)
   } catch {
     // fall through to conventional branch names
   }
@@ -290,6 +306,36 @@ async function expectRemoteOk(host: Host, argv: string[], message: string): Prom
 
 function effectiveWorktreeBase(options: CreateSessionOptions): WorktreeBase {
   return options.baseRef ?? getConfig().worktreeBase
+}
+
+async function branchExists(projectPath: string, branchName: string): Promise<boolean> {
+  try {
+    await execFileAsync(
+      'git',
+      ['-C', projectPath, 'rev-parse', '--verify', `refs/heads/${branchName}`],
+      { timeout: 5000 }
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function remoteBranchExists(
+  host: Host,
+  projectPath: string,
+  branchName: string
+): Promise<boolean> {
+  try {
+    await expectRemoteOk(
+      host,
+      ['git', '-C', projectPath, 'rev-parse', '--verify', `refs/heads/${branchName}`],
+      'git failed'
+    )
+    return true
+  } catch {
+    return false
+  }
 }
 
 // Positive hits are cached forever; negative hits (no PR yet / gh transient
@@ -692,11 +738,20 @@ async function createRemoteSession(
           stdout,
         }))
       )
-      await expectRemoteOk(
-        host,
-        ['git', '-C', projectPath, 'worktree', 'add', worktreePath, '-b', branchName, originRef],
-        'Failed to create remote worktree'
-      )
+      try {
+        await expectRemoteOk(
+          host,
+          ['git', '-C', projectPath, 'worktree', 'add', worktreePath, '-b', branchName, originRef],
+          'Failed to create remote worktree'
+        )
+      } catch (err) {
+        if (!(await remoteBranchExists(host, projectPath, branchName))) throw err
+        await expectRemoteOk(
+          host,
+          ['git', '-C', projectPath, 'worktree', 'add', worktreePath, branchName],
+          'Failed to create remote worktree'
+        )
+      }
     } else {
       const addWithBranch = await execRemote(host, [
         'git',
@@ -778,16 +833,21 @@ export async function createSession(
       })
       return { stdout: String(stdout) }
     })
-    await execFileAsync('git', [
-      '-C',
-      projectPath,
-      'worktree',
-      'add',
-      worktreePath,
-      '-b',
-      branchName,
-      originRef,
-    ])
+    try {
+      await execFileAsync('git', [
+        '-C',
+        projectPath,
+        'worktree',
+        'add',
+        worktreePath,
+        '-b',
+        branchName,
+        originRef,
+      ])
+    } catch (err) {
+      if (!(await branchExists(projectPath, branchName))) throw err
+      await execFileAsync('git', ['-C', projectPath, 'worktree', 'add', worktreePath, branchName])
+    }
   } else {
     try {
       await execFileAsync('git', [
