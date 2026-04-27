@@ -83,7 +83,13 @@ function maybeEmitFailureToast(
   // connection-state UI; a parallel toast would spam every disconnect. Probes
   // taken during bootstrap collide with the bootstrap layer's own toast.
   if (kind === 'control-exit' || kind === 'attach') return
-  if (kind === 'probe' && bootstrapInProgress.has(host.hostId)) return
+  // Probes and execs taken during bootstrap collide with the bootstrap
+  // layer's own toast. bootstrapHost runs all its probes through
+  // connection.exec (kind='exec'), not the runtime's internal controlCheck
+  // (kind='probe'), so both must be suppressed here. session-manager's
+  // HostBootstrapError handler is the single source of truth during the
+  // bootstrap window.
+  if ((kind === 'probe' || kind === 'exec') && bootstrapInProgress.has(host.hostId)) return
 
   const { reason, message } = classifySshExit({ exitCode, stderr })
   // For exec invocations, an unrecognized non-zero exit is most often the
