@@ -75,12 +75,24 @@ if (process.platform === 'linux') {
   if (process.argv.includes('--disable-gpu')) {
     app.disableHardwareAcceleration()
   } else {
-    // Prefer Vulkan backend — it sidesteps the EGL/GBM initialisation failures
-    // seen on hybrid Intel+NVIDIA laptops under Wayland.
-    app.commandLine.appendSwitch('use-angle', 'vulkan')
-    app.commandLine.appendSwitch('enable-features', 'Vulkan')
-    // If Vulkan also fails, Chromium will fall back to SwiftShader automatically.
+    // Vulkan ANGLE sidesteps EGL/GBM init failures on hybrid Intel+NVIDIA
+    // laptops, but the Wayland ozone backend can't render Vulkan surfaces and
+    // logs `--ozone-platform=wayland is not compatible with Vulkan`. Only
+    // request Vulkan on X11 sessions; on Wayland let Chromium pick its
+    // default GL ANGLE backend.
+    const isWayland = process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY
+    if (!isWayland) {
+      app.commandLine.appendSwitch('use-angle', 'vulkan')
+      app.commandLine.appendSwitch('enable-features', 'Vulkan')
+      // If Vulkan also fails, Chromium will fall back to SwiftShader automatically.
+    }
   }
+
+  // cc-pewpew never plays video, but Chromium still tries to bring up VA-API
+  // at startup. Inside AppImages the bundled libva can't load the host's
+  // matching driver, producing a noisy `vaInitialize failed: unknown libva
+  // error`. Disable the feature outright so the log goes away.
+  app.commandLine.appendSwitch('disable-features', 'VaapiVideoDecoder,VaapiVideoEncoder')
 }
 
 // Apply UI scale to the entire app (native menu bar + web content) before app is ready
