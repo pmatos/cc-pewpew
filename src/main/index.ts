@@ -72,6 +72,19 @@ import type {
 // Use native Wayland rendering when available (avoids Xwayland scaling artifacts)
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
 
+// Chromium stores one value per switch key, so a plain appendSwitch on a
+// feature-list flag overwrites whatever the user passed via argv. Merge our
+// additions into the existing value so launch flags like
+// `--disable-features=Foo` survive.
+function mergeFeatureSwitch(
+  name: 'enable-features' | 'disable-features',
+  additions: string[]
+): void {
+  const existing = app.commandLine.getSwitchValue(name)
+  const merged = new Set([...(existing ? existing.split(',').filter(Boolean) : []), ...additions])
+  app.commandLine.appendSwitch(name, [...merged].join(','))
+}
+
 // Linux dual-GPU workaround: ANGLE/EGL initialization can fail inside AppImages
 // or on systems with multiple GPUs (e.g. Intel iGPU + NVIDIA dGPU) because the
 // bundled Chromium can't access the right driver libraries. If the user passed
@@ -81,12 +94,31 @@ if (process.platform === 'linux') {
   if (process.argv.includes('--disable-gpu')) {
     app.disableHardwareAcceleration()
   } else {
-    // Prefer Vulkan backend — it sidesteps the EGL/GBM initialisation failures
-    // seen on hybrid Intel+NVIDIA laptops under Wayland.
-    app.commandLine.appendSwitch('use-angle', 'vulkan')
-    app.commandLine.appendSwitch('enable-features', 'Vulkan')
-    // If Vulkan also fails, Chromium will fall back to SwiftShader automatically.
+    // Vulkan ANGLE sidesteps EGL/GBM init failures on hybrid Intel+NVIDIA
+    // laptops, but the Wayland ozone backend can't render Vulkan surfaces and
+    // logs `--ozone-platform=wayland is not compatible with Vulkan`. Honour
+    // an explicit `--ozone-platform=<value>` argv first so a user forcing X11
+    // inside a Wayland login still gets the Vulkan workaround; otherwise
+    // infer from the session env vars (the same signal `ozone-platform-hint
+    // =auto` resolves against). Only request Vulkan on X11; on Wayland let
+    // Chromium pick its default GL ANGLE backend.
+    const ozoneArg = process.argv.find((a) => a.startsWith('--ozone-platform='))?.split('=')[1]
+    const isWayland =
+      ozoneArg === 'wayland' ||
+      (ozoneArg !== 'x11' &&
+        (process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY))
+    if (!isWayland) {
+      app.commandLine.appendSwitch('use-angle', 'vulkan')
+      mergeFeatureSwitch('enable-features', ['Vulkan'])
+      // If Vulkan also fails, Chromium will fall back to SwiftShader automatically.
+    }
   }
+
+  // cc-pewpew never plays video, but Chromium still tries to bring up VA-API
+  // at startup. Inside AppImages the bundled libva can't load the host's
+  // matching driver, producing a noisy `vaInitialize failed: unknown libva
+  // error`. Disable the feature outright so the log goes away.
+  mergeFeatureSwitch('disable-features', ['VaapiVideoDecoder', 'VaapiVideoEncoder'])
 }
 
 // Apply UI scale to the entire app (native menu bar + web content) before app is ready
