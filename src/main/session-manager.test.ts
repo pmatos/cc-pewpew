@@ -845,7 +845,6 @@ describe('removeSessionsForHost (issue #14)', () => {
     expect(state.sessionsUpdatedBroadcasts).toBe(0)
   })
 })
-
 describe('codex agent integration', () => {
   it('backfills tool="claude" on legacy sessions missing the field', async () => {
     // Persisted JSON omits `tool` to simulate a session created before the
@@ -916,5 +915,45 @@ describe('codex agent integration', () => {
     sm.handleHookEvent('session.start', { cwd: '/cl/wt', session_id: 'should-not-store' }, null)
     const updated = sm.getSessions().find((s) => s.id === 'cl1')
     expect(updated?.agentSessionId).toBeUndefined()
+  })
+})
+
+describe('sanitizeBranchPrefix', () => {
+  it('preserves valid ref-component characters', async () => {
+    const sm = await loadSessionManager()
+    expect(sm.sanitizeBranchPrefix('cc-pewpew')).toBe('cc-pewpew')
+    expect(sm.sanitizeBranchPrefix('my_repo.v2')).toBe('my_repo.v2')
+  })
+
+  it('replaces git-illegal characters with `-`', async () => {
+    const sm = await loadSessionManager()
+    expect(sm.sanitizeBranchPrefix('My Repo')).toBe('My-Repo')
+    expect(sm.sanitizeBranchPrefix('repo:with~bad^chars?*[\\]')).toBe('repo-with-bad-chars')
+  })
+
+  it('strips consecutive dots rejected by git ref names', async () => {
+    const sm = await loadSessionManager()
+    expect(sm.sanitizeBranchPrefix('my..repo')).toBe('my-repo')
+    expect(sm.sanitizeBranchPrefix('repo...v2')).toBe('repo-v2')
+  })
+
+  it('strips leading and trailing punctuation', async () => {
+    const sm = await loadSessionManager()
+    expect(sm.sanitizeBranchPrefix('-leading')).toBe('leading')
+    expect(sm.sanitizeBranchPrefix('.dot.')).toBe('dot')
+  })
+
+  it('strips trailing `.lock` suffixes (illegal as ref-component suffixes)', async () => {
+    const sm = await loadSessionManager()
+    expect(sm.sanitizeBranchPrefix('proj.lock')).toBe('proj')
+    expect(sm.sanitizeBranchPrefix('proj.lock.lock')).toBe('proj')
+    expect(sm.sanitizeBranchPrefix('proj-.lock')).toBe('proj')
+  })
+
+  it('falls back to `cc-pewpew` when nothing valid remains', async () => {
+    const sm = await loadSessionManager()
+    expect(sm.sanitizeBranchPrefix('   ')).toBe('cc-pewpew')
+    expect(sm.sanitizeBranchPrefix(':::')).toBe('cc-pewpew')
+    expect(sm.sanitizeBranchPrefix('')).toBe('cc-pewpew')
   })
 })
