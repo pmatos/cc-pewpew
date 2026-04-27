@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import type { AgentTool, Host, RemoteProject } from '../shared/types'
+import type { AgentTool, Host, RemoteProject, WorktreeBase } from '../shared/types'
 
 export interface CanvasState {
   zoom: number
@@ -31,6 +31,7 @@ export interface AppConfig {
   gitignoreWarned: string[]
   remoteProjects: RemoteProject[]
   defaultTool: AgentTool
+  worktreeBase: WorktreeBase
 }
 
 export const CONFIG_DIR = join(
@@ -52,6 +53,7 @@ const DEFAULT_CONFIG: AppConfig = {
   gitignoreWarned: [],
   remoteProjects: [],
   defaultTool: 'claude',
+  worktreeBase: 'local',
 }
 
 export function shouldWarnGitignore(projectPath: string): boolean {

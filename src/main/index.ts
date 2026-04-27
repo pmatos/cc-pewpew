@@ -63,7 +63,7 @@ import {
   validateRemotePath,
 } from './remote-project-registry'
 import type {
-  AgentTool,
+  CreateSessionOptions,
   DiffMode,
   ReviewBranchesResult,
   ReviewDefaultBranchResult,
@@ -270,9 +270,9 @@ app.whenReady().then(async () => {
       projectPath: string,
       name?: string,
       hostId?: string | null,
-      tool?: AgentTool
+      options?: CreateSessionOptions
     ) => {
-      return createSession(projectPath, name, hostId ?? null, tool)
+      return createSession(projectPath, name, hostId ?? null, options ?? {})
     }
   )
 
@@ -562,6 +562,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('config:get-default-tool', () => {
     return getConfig().defaultTool
+  })
+
+  ipcMain.handle('config:get-worktree-base', () => {
+    return getConfig().worktreeBase
   })
 
   ipcMain.handle('swim-lanes:open', (_event, sessionIds: string[]) => {

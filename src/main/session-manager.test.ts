@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { execFileSync } from 'child_process'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Host, Session } from '../shared/types'
+import type { Host, RemoteProject, Session, WorktreeBase } from '../shared/types'
 
 // Hoisted state so vi.mock factories can reach mutable per-test values before
 // the SUT imports run.
@@ -12,6 +13,8 @@ const state = vi.hoisted(() => ({
   tmuxAvailable: true,
   repoFingerprint: undefined as string | undefined,
   hosts: [] as Host[],
+  remoteProjects: [] as RemoteProject[],
+  worktreeBase: 'local' as WorktreeBase,
   runtimeStates: new Map<string, string>(),
   // Call logs for assertion.
   ensureHostConnectionCalls: [] as string[],
@@ -29,6 +32,10 @@ const state = vi.hoisted(() => ({
   runtimeRefs: new Map<string, number>(),
   sessionsUpdatedBroadcasts: 0,
   execRemoteCalls: [] as { hostId: string; argv: string[] }[],
+  execRemoteResults: new Map<
+    string,
+    { stdout: string; stderr: string; code: number; timedOut: boolean }
+  >(),
   // Toggle to simulate ensureHostConnection throwing.
   ensureHostConnectionThrows: null as null | { message: string; runtimeStateAfter: string },
   // When set, delays next ensureHostConnection resolution (used for idempotency
@@ -50,6 +57,8 @@ vi.mock('./config', () => ({
     uiScale: 1,
     hosts: state.hosts,
     remoteProjects: [],
+    defaultTool: 'claude',
+    worktreeBase: state.worktreeBase,
   }),
   saveConfig: vi.fn(),
 }))
@@ -85,7 +94,7 @@ vi.mock('./host-registry', () => ({
 }))
 
 vi.mock('./remote-project-registry', () => ({
-  listRemoteProjects: () => [],
+  listRemoteProjects: () => state.remoteProjects,
 }))
 
 vi.mock('./hook-server', () => ({
@@ -93,7 +102,10 @@ vi.mock('./hook-server', () => ({
 }))
 
 vi.mock('./host-bootstrap', () => ({
-  bootstrapHost: vi.fn(async () => ({ notifyScriptPath: '/tmp/notify-v1.sh' })),
+  bootstrapHost: vi.fn(async () => ({
+    notifyScriptPath: '/tmp/notify-v1.sh',
+    availableAgents: { claude: true, codex: true },
+  })),
 }))
 
 vi.mock('./pty-manager', () => ({
@@ -152,6 +164,8 @@ vi.mock('./host-connection', () => ({
   exec: async (hostOrAlias: Host | string, argv: string[]) => {
     const hostId = typeof hostOrAlias === 'string' ? hostOrAlias : hostOrAlias.hostId
     state.execRemoteCalls.push({ hostId, argv })
+    const configured = state.execRemoteResults.get(argv.join(' '))
+    if (configured) return configured
     return { stdout: '', stderr: '', code: 0, timedOut: false }
   },
   retainHostConnection: vi.fn((hostId: string) => {
@@ -227,12 +241,23 @@ function baseLocalSession(overrides: Partial<Session>): Session {
   }
 }
 
+const canRunGit = (() => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+})()
+
 beforeEach(() => {
   state.configDir = mkdtempSync(join(tmpdir(), 'sess-mgr-'))
   state.liveTmuxIds = []
   state.tmuxAvailable = true
   state.repoFingerprint = undefined
   state.hosts = [{ hostId: 'h1', alias: 'devbox', label: 'Dev' }]
+  state.remoteProjects = []
+  state.worktreeBase = 'local'
   state.runtimeStates = new Map()
   state.ensureHostConnectionCalls = []
   state.createRemotePtyCalls = []
@@ -246,12 +271,301 @@ beforeEach(() => {
   state.sessionsUpdatedBroadcasts = 0
   state.probeSideEffect = new Map()
   state.execRemoteCalls = []
+  state.execRemoteResults = new Map()
   state.ensureHostConnectionThrows = null
   state.ensureHostConnectionGate = null
 })
 
 afterEach(() => {
   rmSync(state.configDir, { recursive: true, force: true })
+})
+
+describe('resolveOriginDefaultBase', () => {
+  function fakeGitRunner(script: Record<string, string | Error>) {
+    return async (argv: string[]) => {
+      const key = argv.join(' ')
+      const result = script[key]
+      if (result === undefined) throw new Error(`unexpected git ${key}`)
+      if (result instanceof Error) throw result
+      return { stdout: result }
+    }
+  }
+
+  it('returns origin/HEAD when symbolic-ref resolves and validates', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': new Error('unavailable'),
+          'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
+          'rev-parse --verify refs/remotes/origin/main': 'abc123\n',
+        })
+      )
+    ).resolves.toBe('refs/remotes/origin/main')
+  })
+
+  it('prefers ls-remote default branch over stale local origin/HEAD', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': 'ref: refs/heads/develop\tHEAD\nabc123\tHEAD\n',
+          'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
+          'rev-parse --verify refs/remotes/origin/develop': 'abc123\n',
+          'rev-parse --verify refs/remotes/origin/main': 'def456\n',
+        })
+      )
+    ).resolves.toBe('refs/remotes/origin/develop')
+  })
+
+  it('validates fully qualified remote-tracking refs to avoid local branch ambiguity', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': 'ref: refs/heads/main\tHEAD\nabc123\tHEAD\n',
+          'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
+          'rev-parse --verify refs/remotes/origin/main': 'abc123\n',
+        })
+      )
+    ).resolves.toBe('refs/remotes/origin/main')
+  })
+
+  it('throws no-origin-remote when origin is missing', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': new Error('No such remote'),
+        })
+      )
+    ).rejects.toThrow(/^no-origin-remote$/)
+  })
+
+  it('adds context when fetch fails', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': new Error('network down'),
+        })
+      )
+    ).rejects.toThrow(/Failed to fetch origin: network down/)
+  })
+
+  it('falls back to origin/main when origin/HEAD is unset', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': new Error('unset'),
+          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
+          'rev-parse --verify refs/remotes/origin/main': 'abc123\n',
+        })
+      )
+    ).resolves.toBe('refs/remotes/origin/main')
+  })
+
+  it('uses ls-remote default branch when origin/HEAD is unset', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': 'ref: refs/heads/develop\tHEAD\nabc123\tHEAD\n',
+          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
+          'rev-parse --verify refs/remotes/origin/develop': 'abc123\n',
+        })
+      )
+    ).resolves.toBe('refs/remotes/origin/develop')
+  })
+
+  it('falls back to origin/master when origin/main is absent', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': new Error('unset'),
+          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
+          'rev-parse --verify refs/remotes/origin/main': new Error('missing'),
+          'rev-parse --verify refs/remotes/origin/master': 'abc123\n',
+        })
+      )
+    ).resolves.toBe('refs/remotes/origin/master')
+  })
+
+  it('throws no-origin-default-branch when no candidate resolves', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': new Error('unset'),
+          'symbolic-ref --short refs/remotes/origin/HEAD': new Error('unset'),
+          'rev-parse --verify refs/remotes/origin/main': new Error('missing'),
+          'rev-parse --verify refs/remotes/origin/master': new Error('missing'),
+        })
+      )
+    ).rejects.toThrow(/^no-origin-default-branch$/)
+  })
+
+  it('falls through when origin/HEAD points at a stale ref', async () => {
+    const sm = await loadSessionManager()
+
+    await expect(
+      sm.resolveOriginDefaultBase(
+        fakeGitRunner({
+          'remote get-url origin': 'git@example.com:org/repo.git\n',
+          'fetch origin --quiet': '',
+          'ls-remote --symref origin HEAD': new Error('unset'),
+          'symbolic-ref --short refs/remotes/origin/HEAD': 'origin/main\n',
+          'rev-parse --verify refs/remotes/origin/main': new Error('stale'),
+          'rev-parse --verify refs/remotes/origin/master': 'abc123\n',
+        })
+      )
+    ).resolves.toBe('refs/remotes/origin/master')
+  })
+})
+
+describe('createSession origin-default base', () => {
+  const gitIt = canRunGit ? it : it.skip
+
+  function git(cwd: string, args: string[]): string {
+    return execFileSync('git', args, { cwd, encoding: 'utf-8' })
+  }
+
+  function createProjectWithUpdatedOrigin(root: string): string {
+    const source = join(root, 'source')
+    const remote = join(root, 'remote.git')
+    const project = join(root, 'project')
+    mkdirSync(source)
+
+    git(source, ['init'])
+    git(source, ['config', 'user.email', 'test@example.com'])
+    git(source, ['config', 'user.name', 'Test User'])
+    writeFileSync(join(source, 'file.txt'), 'one\n')
+    git(source, ['add', 'file.txt'])
+    git(source, ['commit', '-m', 'one'])
+    git(source, ['branch', '-M', 'main'])
+    execFileSync('git', ['clone', '--bare', source, remote], { stdio: 'ignore' })
+    execFileSync('git', ['clone', remote, project], { stdio: 'ignore' })
+
+    git(source, ['remote', 'add', 'origin', remote])
+    writeFileSync(join(source, 'file.txt'), 'two\n')
+    git(source, ['commit', '-am', 'two'])
+    git(source, ['push', 'origin', 'main'])
+    mkdirSync(join(project, '.claude', 'worktrees'), { recursive: true })
+
+    return project
+  }
+
+  gitIt('branches the new worktree from the fetched origin default branch', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'origin-base-'))
+    try {
+      const project = createProjectWithUpdatedOrigin(root)
+      const sm = await loadSessionManager()
+      const session = await sm.createSession(project, 'from-origin', null, {
+        baseRef: 'origin-default',
+      })
+
+      const originTip = git(project, ['rev-parse', 'origin/main']).trim()
+      const worktreeTip = git(session.worktreePath, ['rev-parse', 'HEAD']).trim()
+      expect(worktreeTip).toBe(originTip)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  gitIt('reuses an existing branch when origin-default session name is recreated', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'origin-base-existing-'))
+    try {
+      const project = createProjectWithUpdatedOrigin(root)
+      const branchName = 'project/from-origin'
+      git(project, ['branch', branchName, 'origin/main'])
+
+      const sm = await loadSessionManager()
+      const session = await sm.createSession(project, 'from-origin', null, {
+        baseRef: 'origin-default',
+      })
+
+      const branch = git(session.worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()
+      expect(branch).toBe(branchName)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('retries remote origin-default worktree creation when the branch already exists', async () => {
+    state.remoteProjects = [{ hostId: 'h1', path: '/remote/proj', name: 'proj' }]
+    const branchName = 'proj/feat'
+    const worktreePath = '/remote/proj/.claude/worktrees/feat'
+    state.execRemoteResults.set(
+      [
+        'git',
+        '-C',
+        '/remote/proj',
+        'worktree',
+        'add',
+        worktreePath,
+        '-b',
+        branchName,
+        'refs/remotes/origin/main',
+      ].join(' '),
+      { stdout: '', stderr: 'fatal: a branch named already exists', code: 128, timedOut: false }
+    )
+    state.execRemoteResults.set(
+      ['git', '-C', '/remote/proj', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'].join(
+        ' '
+      ),
+      { stdout: 'origin/main\n', stderr: '', code: 0, timedOut: false }
+    )
+    state.execRemoteResults.set(
+      ['git', '-C', '/remote/proj', 'rev-parse', '--verify', 'refs/heads/proj/feat'].join(' '),
+      { stdout: 'abc123\n', stderr: '', code: 0, timedOut: false }
+    )
+    state.execRemoteResults.set(
+      ['git', '-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'].join(' '),
+      { stdout: `${branchName}\n`, stderr: '', code: 0, timedOut: false }
+    )
+    const sm = await loadSessionManager()
+
+    const session = await sm.createSession('/remote/proj', 'feat', 'h1', {
+      baseRef: 'origin-default',
+    })
+
+    expect(session.branch).toBe(branchName)
+    expect(state.execRemoteCalls.map((c) => c.argv)).toContainEqual([
+      'git',
+      '-C',
+      '/remote/proj',
+      'worktree',
+      'add',
+      worktreePath,
+      branchName,
+    ])
+  })
 })
 
 describe('restoreSessions — remote lazy materialization', () => {

@@ -30,6 +30,8 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const [defaultTool, setDefaultTool] = useState<AgentTool>('claude')
   const [pendingTool, setPendingTool] = useState<AgentTool>('claude')
   const [creating, setCreating] = useState(false)
+  const [baseFromOrigin, setBaseFromOrigin] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
   const [pendingPrPath, setPendingPrPath] = useState<string | null>(null)
   const [prNumberInput, setPrNumberInput] = useState('')
   const [prError, setPrError] = useState<string | null>(null)
@@ -82,6 +84,29 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     setMenu({ x: e.clientX, y: e.clientY, projectPath, setupState, hostId })
   }
 
+  const openNewSessionDialog = async (projectPath: string, hostId: string | null) => {
+    setCreateError(null)
+    setSessionNameInput('')
+    setPendingTool(defaultTool)
+    try {
+      const worktreeBase = await window.api.getWorktreeBase()
+      setBaseFromOrigin(worktreeBase === 'origin-default')
+    } catch {
+      setBaseFromOrigin(false)
+    }
+    setPendingSessionPath(projectPath)
+    setPendingSessionHostId(hostId)
+  }
+
+  const describeCreateError = (err: unknown): string => {
+    const message = err instanceof Error ? err.message : String(err)
+    if (message.includes('no-origin-remote')) return 'This project has no origin remote.'
+    if (message.includes('no-origin-default-branch')) {
+      return "Could not determine origin's default branch."
+    }
+    return message.replace(/^Error:\s*/, '') || 'Failed to create session.'
+  }
+
   const getMenuItems = (): MenuItem[] => {
     if (!menu) return []
     const items: MenuItem[] = []
@@ -90,11 +115,8 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
       const hostId = menu.hostId
       items.push({
         label: 'New session...',
-        onClick: () => {
-          setPendingSessionPath(menu.projectPath)
-          setPendingSessionHostId(hostId)
-          setSessionNameInput('')
-          setPendingTool(defaultTool)
+        onClick: async () => {
+          await openNewSessionDialog(menu.projectPath, hostId)
         },
       })
       items.push({ label: '', separator: true, onClick: () => {} })
@@ -118,11 +140,8 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     } else {
       items.push({
         label: 'New session...',
-        onClick: () => {
-          setPendingSessionPath(menu.projectPath)
-          setPendingSessionHostId(null)
-          setSessionNameInput('')
-          setPendingTool(defaultTool)
+        onClick: async () => {
+          await openNewSessionDialog(menu.projectPath, null)
         },
       })
       items.push({
@@ -202,12 +221,18 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const handleCreateSession = async () => {
     if (!pendingSessionPath || creating) return
     setCreating(true)
+    setCreateError(null)
     try {
       const name = sessionNameInput.trim() || undefined
-      await window.api.createSession(pendingSessionPath, name, pendingSessionHostId, pendingTool)
+      await window.api.createSession(pendingSessionPath, name, pendingSessionHostId, {
+        tool: pendingTool,
+        baseRef: baseFromOrigin ? 'origin-default' : 'local',
+      })
       setPendingSessionPath(null)
       setPendingSessionHostId(null)
       setSessionNameInput('')
+    } catch (err) {
+      setCreateError(describeCreateError(err))
     } finally {
       setCreating(false)
     }
@@ -251,6 +276,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
               if (e.key === 'Escape') {
                 setPendingSessionPath(null)
                 setPendingSessionHostId(null)
+                setCreateError(null)
               }
             }}
             autoFocus
@@ -278,6 +304,18 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
               Codex
             </label>
           </div>
+          <label className="session-base-checkbox">
+            <input
+              type="checkbox"
+              checked={baseFromOrigin}
+              onChange={(e) => {
+                setBaseFromOrigin(e.target.checked)
+                setCreateError(null)
+              }}
+            />
+            <span>Branch from origin/&lt;default&gt;</span>
+          </label>
+          {createError && <div className="pr-error">{createError}</div>}
           <div className="create-actions">
             <button className="create-btn" onClick={handleCreateSession} disabled={creating}>
               {creating ? 'Creating...' : 'Create'}
@@ -287,6 +325,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
               onClick={() => {
                 setPendingSessionPath(null)
                 setPendingSessionHostId(null)
+                setCreateError(null)
               }}
             >
               Cancel
