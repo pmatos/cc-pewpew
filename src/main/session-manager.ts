@@ -70,8 +70,12 @@ function parseIssueNumber(...sources: (string | undefined)[]): number | undefine
 }
 
 // Read the actual branch checked out in a worktree. Falls back to the
-// cc-pewpew-conventional name if the worktree is missing or git fails.
-function resolveBranchFromWorktree(worktreePath: string, worktreeName: string): string {
+// conventional `<project>/<worktree>` name if the worktree is missing or git fails.
+function resolveBranchFromWorktree(
+  worktreePath: string,
+  worktreeName: string,
+  projectName: string
+): string {
   if (existsSync(worktreePath)) {
     try {
       const out = execFileSync('git', ['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'], {
@@ -82,7 +86,7 @@ function resolveBranchFromWorktree(worktreePath: string, worktreeName: string): 
       // fall through to default
     }
   }
-  return `cc-pewpew/${worktreeName}`
+  return `${projectName}/${worktreeName}`
 }
 
 // Extract the owner segment from a GitHub `origin` remote URL. Used to
@@ -489,7 +493,7 @@ async function adoptWorktree(
   const projectName = basename(projectPath)
   const worktreeName = label || (await deriveLabel(worktreePath))
   const tmuxSession = `cc-pewpew-${id}`
-  const branch = resolveBranchFromWorktree(worktreePath, worktreeName)
+  const branch = resolveBranchFromWorktree(worktreePath, worktreeName, projectName)
 
   await installAgentHooks(tool, worktreePath)
   createPty(id, worktreePath, { tool })
@@ -600,7 +604,7 @@ async function createRemoteSession(
 
   const id = randomUUID().slice(0, 8)
   const tmuxSession = `cc-pewpew-${id}`
-  const branchName = `cc-pewpew/${worktreeName}`
+  const branchName = `${remoteProject.name}/${worktreeName}`
 
   // prepareRemoteHost retains the SSH runtime on success; we own the ref and
   // release it at the end (or in catch). createRemotePty takes its own retain
@@ -690,7 +694,7 @@ export async function createSession(
       'add',
       worktreePath,
       '-b',
-      `cc-pewpew/${worktreeName}`,
+      `${basename(projectPath)}/${worktreeName}`,
     ])
   } catch {
     // Branch may already exist — try without -b
@@ -1304,7 +1308,7 @@ export async function relocateProject(
     s.projectName = basename(newProjectPath)
     // Only rewrite worktreePath for managed worktrees under the old project's
     // .claude/worktrees tree, preserving the exact subpath (worktreeName may be
-    // a branch label like "cc-pewpew/feat-x" that doesn't match the dirname).
+    // a branch label like "<project>/feat-x" that doesn't match the dirname).
     // External mirrored paths are kept verbatim.
     if (s.worktreePath.startsWith(oldManagedRoot)) {
       const suffix = s.worktreePath.slice(oldManagedRoot.length)
@@ -1355,9 +1359,13 @@ export async function relocateProject(
 // persisted branch and only fall back when it's missing.
 function backfillDerivedFields(session: Session): void {
   if (!session.hostId && existsSync(session.worktreePath)) {
-    session.branch = resolveBranchFromWorktree(session.worktreePath, session.worktreeName)
+    session.branch = resolveBranchFromWorktree(
+      session.worktreePath,
+      session.worktreeName,
+      session.projectName
+    )
   } else if (!session.branch) {
-    session.branch = `cc-pewpew/${session.worktreeName}`
+    session.branch = `${session.projectName}/${session.worktreeName}`
   }
   if (session.issueNumber === undefined) {
     session.issueNumber = parseIssueNumber(session.worktreeName, session.branch)
