@@ -69,6 +69,22 @@ function parseIssueNumber(...sources: (string | undefined)[]): number | undefine
   return undefined
 }
 
+// Project names come from arbitrary directory basenames (or a user-supplied
+// remote-project label), so they can contain characters that are illegal in a
+// git ref component (space, `:`, `~`, `^`, `?`, `*`, `[`, `\`, control chars,
+// `..`, leading `-`/`.`, etc.). Coerce to a safe slug; fall back to
+// `cc-pewpew` when nothing valid remains.
+export function sanitizeBranchPrefix(name: string): string {
+  const slug = name
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/\.{2,}/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-._]+|[-._]+$/g, '')
+    .replace(/(?:\.lock)+$/i, '')
+    .replace(/^[-._]+|[-._]+$/g, '')
+  return slug || 'cc-pewpew'
+}
+
 // Read the actual branch checked out in a worktree. Falls back to the
 // conventional `<project>/<worktree>` name if the worktree is missing or git fails.
 function resolveBranchFromWorktree(
@@ -86,7 +102,7 @@ function resolveBranchFromWorktree(
       // fall through to default
     }
   }
-  return `${projectName}/${worktreeName}`
+  return `${sanitizeBranchPrefix(projectName)}/${worktreeName}`
 }
 
 // Extract the owner segment from a GitHub `origin` remote URL. Used to
@@ -604,7 +620,7 @@ async function createRemoteSession(
 
   const id = randomUUID().slice(0, 8)
   const tmuxSession = `cc-pewpew-${id}`
-  const branchName = `${remoteProject.name}/${worktreeName}`
+  const branchName = `${sanitizeBranchPrefix(remoteProject.name)}/${worktreeName}`
 
   // prepareRemoteHost retains the SSH runtime on success; we own the ref and
   // release it at the end (or in catch). createRemotePty takes its own retain
@@ -694,7 +710,7 @@ export async function createSession(
       'add',
       worktreePath,
       '-b',
-      `${basename(projectPath)}/${worktreeName}`,
+      `${sanitizeBranchPrefix(basename(projectPath))}/${worktreeName}`,
     ])
   } catch {
     // Branch may already exist — try without -b
@@ -1365,7 +1381,7 @@ function backfillDerivedFields(session: Session): void {
       session.projectName
     )
   } else if (!session.branch) {
-    session.branch = `${session.projectName}/${session.worktreeName}`
+    session.branch = `${sanitizeBranchPrefix(session.projectName)}/${session.worktreeName}`
   }
   if (session.issueNumber === undefined) {
     session.issueNumber = parseIssueNumber(session.worktreeName, session.branch)
