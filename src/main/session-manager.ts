@@ -153,11 +153,24 @@ async function prepareRemoteHost(host: Host): Promise<{ notifyScriptPath: string
     await releaseHostConnection(host.hostId).catch(() => undefined)
     if (err instanceof HostBootstrapError) {
       const label = host.label || host.alias
-      if (err.kind === 'missing-deps') {
+      // bootstrapHost re-uses kind='missing-deps' for two scenarios: the
+      // dep-probe ssh command itself failing (auth/network/timeout — empty
+      // missingDeps) and the probe succeeding with an actually-missing tool
+      // (populated missingDeps). Only the second deserves the "missing
+      // required tools" remediation toast; the first should surface the
+      // underlying err.message so the user sees the real ssh failure.
+      if (err.kind === 'missing-deps' && err.missingDeps.length > 0) {
         emitToast({
           severity: 'error',
           title: `${label}: missing required tools`,
           detail: err.missingDeps.join(', '),
+          hostLabel: label,
+        })
+      } else if (err.kind === 'missing-deps') {
+        emitToast({
+          severity: 'error',
+          title: `${label}: bootstrap probe failed`,
+          detail: err.message,
           hostLabel: label,
         })
       } else if (err.kind === 'stream-local-bind') {
