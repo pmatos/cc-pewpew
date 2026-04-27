@@ -36,9 +36,11 @@ import {
   releaseHostConnection,
   stopHostConnection,
   runtimeStateFor,
+  startBootstrapWindow,
   type HostConnectionState,
 } from './host-connection'
-import { bootstrapHost } from './host-bootstrap'
+import { bootstrapHost, HostBootstrapError } from './host-bootstrap'
+import { emitToast } from './notifications'
 import type { Host, RemoteProject, Session, SessionStatus } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
@@ -137,6 +139,7 @@ async function prepareRemoteHost(host: Host): Promise<{ notifyScriptPath: string
     throw err
   }
   retainHostConnection(host.hostId)
+  const endBootstrapWindow = startBootstrapWindow(host.hostId)
   try {
     const bootstrap = await bootstrapHost(
       host.hostId,
@@ -148,7 +151,47 @@ async function prepareRemoteHost(host: Host): Promise<{ notifyScriptPath: string
     return { notifyScriptPath: bootstrap.notifyScriptPath }
   } catch (err) {
     await releaseHostConnection(host.hostId).catch(() => undefined)
+    if (err instanceof HostBootstrapError) {
+      const label = host.label || host.alias
+      // bootstrapHost re-uses kind='missing-deps' for two scenarios: the
+      // dep-probe ssh command itself failing (auth/network/timeout — empty
+      // missingDeps) and the probe succeeding with an actually-missing tool
+      // (populated missingDeps). Only the second deserves the "missing
+      // required tools" remediation toast; the first should surface the
+      // underlying err.message so the user sees the real ssh failure.
+      if (err.kind === 'missing-deps' && err.missingDeps.length > 0) {
+        emitToast({
+          severity: 'error',
+          title: `${label}: missing required tools`,
+          detail: err.missingDeps.join(', '),
+          hostLabel: label,
+        })
+      } else if (err.kind === 'missing-deps') {
+        emitToast({
+          severity: 'error',
+          title: `${label}: bootstrap probe failed`,
+          detail: err.message,
+          hostLabel: label,
+        })
+      } else if (err.kind === 'stream-local-bind') {
+        emitToast({
+          severity: 'error',
+          title: `${label}: hook socket missing`,
+          detail: err.message,
+          hostLabel: label,
+        })
+      } else {
+        emitToast({
+          severity: 'error',
+          title: `${label}: failed to install hook script`,
+          detail: err.message,
+          hostLabel: label,
+        })
+      }
+    }
     throw err
+  } finally {
+    endBootstrapWindow()
   }
 }
 

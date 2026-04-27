@@ -258,7 +258,12 @@ export async function destroyRemotePty(sessionId: string, host: Host): Promise<v
   }
   if (result.code !== 0) {
     const { reason, message } = classifySshExit({ exitCode: result.code, stderr: result.stderr })
-    if (reason === 'auth-failed' || reason === 'network' || reason === 'dep-missing') {
+    if (
+      reason === 'auth-failed' ||
+      reason === 'network' ||
+      reason === 'dep-missing' ||
+      reason === 'bind-unlink'
+    ) {
       throw new Error(`Remote tmux kill-session failed on host ${host.alias}: ${message}`)
     }
   }
@@ -357,7 +362,12 @@ export async function probeRemoteTmuxSession(
   if (result.timedOut) return 'unreachable'
   if (result.code === 0) return 'present'
   const { reason } = classifySshExit({ exitCode: result.code, stderr: result.stderr })
-  if (reason === 'auth-failed' || reason === 'network' || reason === 'dep-missing') {
+  if (
+    reason === 'auth-failed' ||
+    reason === 'network' ||
+    reason === 'dep-missing' ||
+    reason === 'bind-unlink'
+  ) {
     return 'unreachable'
   }
   // Non-zero exit with no SSH-level failure marker is tmux's own "can't find

@@ -30,6 +30,8 @@ const NETWORK_MARKERS = [
   'connection closed by',
 ]
 
+const BIND_UNLINK_MARKERS = ['streamlocalbindunlink requires']
+
 function firstNonEmptyLine(stderr: string): string {
   for (const raw of stderr.split('\n')) {
     const line = raw.trim()
@@ -48,6 +50,10 @@ export function classifySshExit({ exitCode, stderr }: SshExitInput): SshExitClas
 
   if (AUTH_MARKERS.some((m) => haystack.includes(m))) {
     return { reason: 'auth-failed', message }
+  }
+
+  if (BIND_UNLINK_MARKERS.some((m) => haystack.includes(m))) {
+    return { reason: 'bind-unlink', message }
   }
 
   if (NETWORK_MARKERS.some((m) => haystack.includes(m))) {

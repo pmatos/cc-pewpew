@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
+import type { Host, SshLogEntry, ToastEvent } from '../shared/types'
 
 interface FakeResult {
   stdout: string
@@ -10,6 +11,8 @@ interface FakeResult {
 
 let nextResult: FakeResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
 const execFileCalls: { file: string; args: string[] }[] = []
+const recordedEntries: SshLogEntry[] = []
+const emittedToasts: Omit<ToastEvent, 'id'>[] = []
 
 vi.mock('child_process', () => ({
   execFile: (
@@ -30,11 +33,34 @@ vi.mock('child_process', () => ({
   },
 }))
 
-import { validateRemoteRepo } from './host-connection'
+vi.mock('./ssh-log-buffer', () => ({
+  recordSshInvocation: (entry: SshLogEntry) => {
+    recordedEntries.push(entry)
+  },
+  getSshLog: () => [],
+  clearSshLog: () => {},
+}))
+
+vi.mock('./notifications', () => ({
+  emitToast: (event: Omit<ToastEvent, 'id'>) => {
+    emittedToasts.push(event)
+  },
+}))
+
+vi.mock('./host-registry', () => ({
+  getHost: (hostId: string) =>
+    hostId === 'h1' ? { hostId: 'h1', alias: 'dev', label: 'Devbox' } : undefined,
+}))
+
+import { exec, validateRemoteRepo } from './host-connection'
+
+const HOST: Host = { hostId: 'h1', alias: 'dev', label: 'Devbox' }
 
 beforeEach(() => {
   nextResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
   execFileCalls.length = 0
+  recordedEntries.length = 0
+  emittedToasts.length = 0
 })
 
 describe('validateRemoteRepo', () => {
@@ -150,5 +176,70 @@ describe('validateRemoteRepo', () => {
     expect(call.args[call.args.length - 1]).toBe("'/pa'\"'\"'th'")
     expect(call.args).toContain('--')
     expect(call.args).toContain('dev')
+  })
+})
+
+describe('exec ring-buffer + toast wiring', () => {
+  it('records every ssh exec keyed by hostId and kind=exec', async () => {
+    nextResult = { stdout: 'ok', stderr: '', error: null, exitCode: 0 }
+    await exec(HOST, ['true'])
+    expect(recordedEntries).toHaveLength(1)
+    expect(recordedEntries[0].hostId).toBe('h1')
+    expect(recordedEntries[0].kind).toBe('exec')
+    expect(recordedEntries[0].exitCode).toBe(0)
+  })
+
+  it('does NOT record when called with a bare alias (no hostId)', async () => {
+    nextResult = { stdout: 'ok', stderr: '', error: null, exitCode: 0 }
+    await exec('dev', ['true'])
+    expect(recordedEntries).toHaveLength(0)
+  })
+
+  it('does NOT emit a toast on a successful exec (exit 0)', async () => {
+    nextResult = { stdout: 'ok', stderr: '', error: null, exitCode: 0 }
+    await exec(HOST, ['true'])
+    expect(emittedToasts).toHaveLength(0)
+  })
+
+  it('emits an auth-failed toast carrying the host label on Permission denied', async () => {
+    nextResult = {
+      stdout: '',
+      stderr: 'Permission denied (publickey).',
+      error: { name: 'Error', message: 'x', code: 255 } as unknown as NodeJS.ErrnoException,
+      exitCode: 255,
+    }
+    await exec(HOST, ['true'])
+    expect(emittedToasts).toHaveLength(1)
+    expect(emittedToasts[0].severity).toBe('error')
+    expect(emittedToasts[0].title).toContain('Devbox')
+    expect(emittedToasts[0].title).toMatch(/authentication failed/i)
+    expect(emittedToasts[0].hostLabel).toBe('Devbox')
+  })
+
+  it('emits a bind-unlink toast naming the StreamLocalBindUnlink fix', async () => {
+    nextResult = {
+      stdout: '',
+      stderr: 'StreamLocalBindUnlink requires StreamLocalBindUnlink yes on the server',
+      error: { name: 'Error', message: 'x', code: 255 } as unknown as NodeJS.ErrnoException,
+      exitCode: 255,
+    }
+    await exec(HOST, ['true'])
+    expect(emittedToasts).toHaveLength(1)
+    expect(emittedToasts[0].title).toMatch(/StreamLocalBindUnlink/)
+  })
+
+  it('does NOT emit a toast for an unrecognized exec failure (likely an app-level non-zero like tmux has-session "absent")', async () => {
+    nextResult = {
+      stdout: '',
+      stderr: '',
+      error: { name: 'Error', message: 'x', code: 1 } as unknown as NodeJS.ErrnoException,
+      exitCode: 1,
+    }
+    await exec(HOST, ['tmux', 'has-session', '-t', 'cc-pewpew-x'])
+    expect(emittedToasts).toHaveLength(0)
+    // The ring buffer still records the exec, so diagnostics retain it.
+    expect(recordedEntries).toHaveLength(1)
+    expect(recordedEntries[0].kind).toBe('exec')
+    expect(recordedEntries[0].exitCode).toBe(1)
   })
 })

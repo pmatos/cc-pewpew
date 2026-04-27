@@ -176,6 +176,7 @@ vi.mock('./host-connection', () => ({
   }),
   runtimeStateFor: (hostId: string) => state.runtimeStates.get(hostId),
   classifyConnectionFailure: (_code: number | null, _stderr: string) => 'offline',
+  startBootstrapWindow: () => () => {},
 }))
 
 // Import SUT after all mocks are registered.

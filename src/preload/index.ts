@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { ToastEvent } from '../shared/types'
 
 contextBridge.exposeInMainWorld('api', {
   scanProjects: () => ipcRenderer.invoke('projects:scan'),
@@ -89,4 +90,9 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('projects:add-remote', input),
   removeRemoteProject: (hostId: string, path: string) =>
     ipcRenderer.invoke('projects:remove-remote', hostId, path),
+  onToast: (callback: (event: ToastEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: ToastEvent) => callback(data)
+    ipcRenderer.on('toast:show', handler)
+    return () => ipcRenderer.removeListener('toast:show', handler)
+  },
 })

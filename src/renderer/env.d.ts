@@ -10,6 +10,7 @@ import type {
   ReviewDiffResult,
   Session,
   TestConnectionResult,
+  ToastEvent,
 } from '../shared/types'
 
 declare global {
@@ -77,6 +78,7 @@ declare global {
       testHostConnection: (hostId: string) => Promise<TestConnectionResult>
       addRemoteProject: (input: { hostId: string; path: string }) => Promise<RemoteProject>
       removeRemoteProject: (hostId: string, path: string) => Promise<void>
+      onToast: (callback: (event: ToastEvent) => void) => () => void
     }
   }
 }
