@@ -52,6 +52,19 @@ function atomicWrite(path: string, contents: string): void {
   renameSync(tmp, path)
 }
 
+// Read file contents or return a fallback if the file is absent. The
+// existsSync-then-readFileSync pattern is a classic TOCTOU race (the file
+// can vanish between the two calls); doing the read directly inside a
+// try/catch on ENOENT removes the gap.
+function tryReadFile(path: string, fallback: string | null = null): string | null {
+  try {
+    return readFileSync(path, 'utf-8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fallback
+    throw err
+  }
+}
+
 // JSON.parse can return any valid JSON value — null, primitives, arrays — so
 // callers that go on to read `.hooks` need to coerce non-object results back
 // to an empty object. Without this, a syntactically valid `null` or `"text"`
@@ -77,9 +90,8 @@ export async function installHooks(
 
   const settingsPath = join(claudeDir, 'settings.local.json')
 
-  const existing: Record<string, unknown> = existsSync(settingsPath)
-    ? parseAsObject(readFileSync(settingsPath, 'utf-8'))
-    : {}
+  const raw = tryReadFile(settingsPath)
+  const existing: Record<string, unknown> = raw === null ? {} : parseAsObject(raw)
 
   const newHooks = buildHooks(NOTIFY_SCRIPT)
   const existingHooks = (existing.hooks || {}) as Record<string, unknown[]>
@@ -174,7 +186,7 @@ export async function installCodexHooks(
   // Snapshot the prior file (or its absence) so a rollback after a partial
   // install can restore exactly what was there — including any unrelated
   // user-authored hooks that the merge step folded into the new file.
-  const priorContent = existsSync(hooksPath) ? readFileSync(hooksPath, 'utf-8') : null
+  const priorContent = tryReadFile(hooksPath)
 
   const existing: Record<string, unknown> = priorContent !== null ? parseAsObject(priorContent) : {}
 
@@ -340,10 +352,7 @@ export function mergeCodexHooksFlag(input: string): string {
 
 export function ensureCodexHooksFeatureFlag(): void {
   mkdirSync(join(homedir(), '.codex'), { recursive: true })
-  let current = ''
-  if (existsSync(CODEX_CONFIG_PATH)) {
-    current = readFileSync(CODEX_CONFIG_PATH, 'utf-8')
-  }
+  const current = tryReadFile(CODEX_CONFIG_PATH, '') ?? ''
   const next = mergeCodexHooksFlag(current)
   if (next === current) return
   atomicWrite(CODEX_CONFIG_PATH, next)
