@@ -821,6 +821,147 @@ async function createRemoteSession(
   return session
 }
 
+async function createRemotePrSession(
+  hostId: string,
+  projectPath: string,
+  prNumber: number
+): Promise<Session | string> {
+  const host = getRequiredHost(hostId)
+  const remoteProject = getRemoteProject(hostId, projectPath)
+
+  const worktreeName = `pr-${prNumber}`
+  const worktreePath = posix.join(projectPath, '.claude', 'worktrees', worktreeName)
+
+  for (const e of sessions.values()) {
+    if (e.session.hostId === hostId && e.session.worktreePath === worktreePath) {
+      return e.session
+    }
+  }
+
+  const { notifyScriptPath, availableAgents } = await prepareRemoteHost(host)
+
+  if (!(await probeRemoteGh(host))) {
+    await releaseHostConnection(hostId).catch(() => undefined)
+    return `gh CLI is not installed on host ${host.label || host.alias}.`
+  }
+
+  let prInfo: { headRefName: string; state: string; title: string }
+  try {
+    const stdout = await expectRemoteOk(
+      host,
+      [
+        'sh',
+        '-c',
+        'cd "$1" && gh pr view "$2" --json headRefName,state,title',
+        '_',
+        projectPath,
+        String(prNumber),
+      ],
+      'gh failed'
+    )
+    try {
+      prInfo = JSON.parse(stdout)
+    } catch {
+      await releaseHostConnection(hostId).catch(() => undefined)
+      return `Failed to parse PR metadata for #${prNumber}.`
+    }
+  } catch {
+    await releaseHostConnection(hostId).catch(() => undefined)
+    return `PR #${prNumber} not found in this repository.`
+  }
+
+  if (prInfo.state !== 'OPEN') {
+    await releaseHostConnection(hostId).catch(() => undefined)
+    return `PR #${prNumber} is ${prInfo.state.toLowerCase()}, not open.`
+  }
+
+  const effectiveTool: AgentTool = getConfig().defaultTool
+  if (!availableAgents[effectiveTool]) {
+    await releaseHostConnection(hostId).catch(() => undefined)
+    return `${effectiveTool} is not installed on host ${host.label || host.alias}.`
+  }
+
+  const branch = prInfo.headRefName
+  const id = randomUUID().slice(0, 8)
+  const tmuxSession = `cc-pewpew-${id}`
+
+  let resolvedBranch: string
+  try {
+    await execRemote(host, ['git', '-C', projectPath, 'fetch', 'origin', branch]).catch(
+      () => undefined
+    )
+
+    try {
+      await expectRemoteOk(
+        host,
+        ['git', '-C', projectPath, 'worktree', 'add', worktreePath, branch],
+        'Failed to create remote worktree'
+      )
+    } catch {
+      try {
+        await expectRemoteOk(
+          host,
+          [
+            'git',
+            '-C',
+            projectPath,
+            'worktree',
+            'add',
+            worktreePath,
+            '-b',
+            branch,
+            `origin/${branch}`,
+          ],
+          'Failed to create remote worktree'
+        )
+      } catch (err) {
+        await releaseHostConnection(hostId).catch(() => undefined)
+        return `Failed to create worktree for branch "${branch}": ${(err as Error).message}`
+      }
+    }
+
+    resolvedBranch =
+      (
+        await expectRemoteOk(
+          host,
+          ['git', '-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+          'Failed to resolve remote branch'
+        )
+      ).trim() || branch
+
+    await installRemoteAgentHooks(effectiveTool, host, worktreePath, notifyScriptPath)
+    await createRemotePty(id, worktreePath, host, { tool: effectiveTool })
+  } catch (err) {
+    await releaseHostConnection(hostId).catch(() => undefined)
+    throw err
+  }
+  await releaseHostConnection(hostId).catch(() => undefined)
+
+  const session: Session = {
+    id,
+    hostId,
+    projectPath,
+    projectName: remoteProject.name,
+    worktreeName,
+    worktreePath,
+    branch: resolvedBranch,
+    prNumber,
+    issueNumber: parseIssueNumber(worktreeName, resolvedBranch, prInfo.title),
+    pid: 0,
+    tmuxSession,
+    status: 'running',
+    connectionState: 'live',
+    lastActivity: Date.now(),
+    hookEvents: [],
+    tool: effectiveTool,
+    ...(remoteProject.repoFingerprint ? { repoFingerprint: remoteProject.repoFingerprint } : {}),
+  }
+
+  sessions.set(id, { session })
+  onSessionsChanged()
+  return session
+}
+
 export async function createSession(
   projectPath: string,
   name?: string,
@@ -1381,10 +1522,18 @@ async function promptCleanup(id: string): Promise<void> {
   }
 }
 
+async function probeRemoteGh(host: Host): Promise<boolean> {
+  const result = await execRemote(host, ['sh', '-c', 'command -v gh >/dev/null 2>&1'])
+  return result.code === 0 && !result.timedOut
+}
+
 export async function createPrSession(
   projectPath: string,
-  prNumber: number
+  prNumber: number,
+  hostId: string | null = null
 ): Promise<Session | string> {
+  if (hostId !== null) return createRemotePrSession(hostId, projectPath, prNumber)
+
   // Look up PR via gh CLI
   let prInfo: { headRefName: string; state: string; title: string }
   try {

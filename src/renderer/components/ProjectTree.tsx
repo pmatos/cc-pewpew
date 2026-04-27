@@ -33,6 +33,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const [baseFromOrigin, setBaseFromOrigin] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [pendingPrPath, setPendingPrPath] = useState<string | null>(null)
+  const [pendingPrHostId, setPendingPrHostId] = useState<string | null>(null)
   const [prNumberInput, setPrNumberInput] = useState('')
   const [prError, setPrError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -119,6 +120,15 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           await openNewSessionDialog(menu.projectPath, hostId)
         },
       })
+      items.push({
+        label: 'New PR session...',
+        onClick: () => {
+          setPendingPrPath(menu.projectPath)
+          setPendingPrHostId(hostId)
+          setPrNumberInput('')
+          setPrError(null)
+        },
+      })
       items.push({ label: '', separator: true, onClick: () => {} })
       items.push({
         label: 'Remove remote project',
@@ -148,6 +158,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
         label: 'New PR session...',
         onClick: () => {
           setPendingPrPath(menu.projectPath)
+          setPendingPrHostId(null)
           setPrNumberInput('')
           setPrError(null)
         },
@@ -248,11 +259,12 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     setCreating(true)
     setPrError(null)
     try {
-      const result = await window.api.createPrSession(pendingPrPath, num)
+      const result = await window.api.createPrSession(pendingPrPath, num, pendingPrHostId)
       if (typeof result === 'string') {
         setPrError(result)
       } else {
         setPendingPrPath(null)
+        setPendingPrHostId(null)
         setPrNumberInput('')
       }
     } finally {
@@ -346,6 +358,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
               if (e.key === 'Enter') handleCreatePrSession()
               if (e.key === 'Escape') {
                 setPendingPrPath(null)
+                setPendingPrHostId(null)
                 setPrError(null)
               }
             }}
@@ -360,6 +373,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
               className="create-btn cancel"
               onClick={() => {
                 setPendingPrPath(null)
+                setPendingPrHostId(null)
                 setPrError(null)
               }}
             >

@@ -284,9 +284,12 @@ app.whenReady().then(async () => {
     }
   )
 
-  ipcMain.handle('sessions:create-pr', async (_event, projectPath: string, prNumber: number) => {
-    return createPrSession(projectPath, prNumber)
-  })
+  ipcMain.handle(
+    'sessions:create-pr',
+    async (_event, projectPath: string, prNumber: number, hostId?: string | null) => {
+      return createPrSession(projectPath, prNumber, hostId ?? null)
+    }
+  )
 
   async function gitignoreWarning(
     projectPath: string,

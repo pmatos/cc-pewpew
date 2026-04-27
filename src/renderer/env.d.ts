@@ -30,7 +30,11 @@ declare global {
         hostId?: string | null,
         options?: CreateSessionOptions
       ) => Promise<Session>
-      createPrSession: (projectPath: string, prNumber: number) => Promise<Session | string>
+      createPrSession: (
+        projectPath: string,
+        prNumber: number,
+        hostId?: string | null
+      ) => Promise<Session | string>
       mirrorWorktree: (
         projectPath: string,
         worktreePath: string
