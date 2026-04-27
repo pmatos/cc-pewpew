@@ -146,19 +146,29 @@ function ensureGitignore(projectPath: string, entry: string): void {
 // Codex hook config is a JSON file at <project>/.codex/hooks.json. The shape
 // mirrors Claude's `hooks` block (event → matcher groups → handlers) but lives
 // in its own file rather than under a settings key.
+export interface CodexHooksInstallSnapshot {
+  hooksPath: string
+  priorContent: string | null
+}
+
 export async function installCodexHooks(
   projectPath: string,
   { skipGitignore = false }: { skipGitignore?: boolean } = {}
-): Promise<void> {
+): Promise<CodexHooksInstallSnapshot> {
   const codexDir = join(projectPath, '.codex')
   mkdirSync(codexDir, { recursive: true })
 
   const hooksPath = join(codexDir, 'hooks.json')
 
+  // Snapshot the prior file (or its absence) so a rollback after a partial
+  // install can restore exactly what was there — including any unrelated
+  // user-authored hooks that the merge step folded into the new file.
+  const priorContent = existsSync(hooksPath) ? readFileSync(hooksPath, 'utf-8') : null
+
   let existing: Record<string, unknown> = {}
-  if (existsSync(hooksPath)) {
+  if (priorContent !== null) {
     try {
-      existing = JSON.parse(readFileSync(hooksPath, 'utf-8'))
+      existing = JSON.parse(priorContent)
     } catch {
       existing = {}
     }
@@ -182,19 +192,36 @@ export async function installCodexHooks(
   if (!skipGitignore) {
     ensureGitignore(projectPath, '.codex/hooks.json')
   }
+
+  return { hooksPath, priorContent }
+}
+
+export interface RemoteCodexHooksSnapshot {
+  worktreePath: string
+  // True when a prior `.codex/hooks.json` existed and was backed up to
+  // `.codex/hooks.json.cc-pewpew.bak` before merge. Rollback restores from
+  // that backup. False means there was no prior file; rollback unlinks.
+  hadPrior: boolean
 }
 
 export async function installRemoteCodexHooks(
   execRemote: (argv: string[], opts?: { timeoutMs?: number }) => Promise<ExecResult>,
   worktreePath: string,
   notifyScriptPath: string
-): Promise<void> {
+): Promise<RemoteCodexHooksSnapshot> {
   const hooksJson = ccPewpewCodexHookJson(notifyScriptPath)
+  // Snapshot-and-merge in a single SSH round trip: `cp` the prior file to
+  // a known backup path (so rollback can restore unrelated user-authored
+  // hooks), then run the same merge logic as before. Echo a single line —
+  // "1" if a prior file existed, "0" otherwise — so the caller knows
+  // whether rollback should restore from the backup or unlink.
   const script =
     'set -e\n' +
     'codex_dir="$1/.codex"\n' +
     'hooks="$codex_dir/hooks.json"\n' +
+    'backup="$codex_dir/hooks.json.cc-pewpew.bak"\n' +
     'mkdir -p "$codex_dir"\n' +
+    'if [ -f "$hooks" ]; then cp "$hooks" "$backup"; printf "1"; else printf "0"; fi\n' +
     'if [ -s "$hooks" ]; then cat "$hooks"; else printf "{}"; fi |\n' +
     'jq --argjson newHooks "$2" \'\n' +
     '  .hooks = (.hooks // {}) |\n' +
@@ -210,13 +237,51 @@ export async function installRemoteCodexHooks(
     const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`
     throw new Error(`Failed to install remote codex hooks: ${detail}`)
   }
+  const hadPrior = result.stdout.trim() === '1'
+  return { worktreePath, hadPrior }
 }
 
-// Best-effort cleanup if the feature-flag enable step fails after we've already
-// written .codex/hooks.json. The caller re-throws the original error.
-export function rollbackCodexHooks(projectPath: string): void {
+export async function rollbackRemoteCodexHooks(
+  execRemote: (argv: string[], opts?: { timeoutMs?: number }) => Promise<ExecResult>,
+  snapshot: RemoteCodexHooksSnapshot
+): Promise<void> {
+  const script = snapshot.hadPrior
+    ? // Restore prior file from the backup; clean up the backup. If the
+      // backup mysteriously vanished, leave the post-merge file in place
+      // rather than deleting it (less destructive).
+      'set -e\n' +
+      'hooks="$1/.codex/hooks.json"\n' +
+      'backup="$1/.codex/hooks.json.cc-pewpew.bak"\n' +
+      'if [ -f "$backup" ]; then mv "$backup" "$hooks"; fi\n'
+    : 'set -e\n' + 'rm -f "$1/.codex/hooks.json"\n'
+  await execRemote(['sh', '-c', script, '_', snapshot.worktreePath], {
+    timeoutMs: 10000,
+  }).catch(() => undefined)
+}
+
+// Successful install: drop the .bak we left for rollback. Best-effort.
+export async function commitRemoteCodexHooks(
+  execRemote: (argv: string[], opts?: { timeoutMs?: number }) => Promise<ExecResult>,
+  snapshot: RemoteCodexHooksSnapshot
+): Promise<void> {
+  if (!snapshot.hadPrior) return
+  await execRemote(
+    ['sh', '-c', 'rm -f "$1/.codex/hooks.json.cc-pewpew.bak"', '_', snapshot.worktreePath],
+    { timeoutMs: 5000 }
+  ).catch(() => undefined)
+}
+
+// Best-effort restoration if the feature-flag enable step fails after we've
+// already written .codex/hooks.json. The snapshot lets us restore unrelated
+// user-authored hooks that the merge folded in — deleting unconditionally
+// would silently lose them. The caller re-throws the original error.
+export function rollbackCodexHooks(snapshot: CodexHooksInstallSnapshot): void {
   try {
-    rmSync(join(projectPath, '.codex', 'hooks.json'), { force: true })
+    if (snapshot.priorContent === null) {
+      rmSync(snapshot.hooksPath, { force: true })
+    } else {
+      atomicWrite(snapshot.hooksPath, snapshot.priorContent)
+    }
   } catch {
     // ignore — best-effort
   }

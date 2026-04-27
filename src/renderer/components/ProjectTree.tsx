@@ -27,6 +27,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(null)
   const [pendingSessionHostId, setPendingSessionHostId] = useState<string | null>(null)
   const [sessionNameInput, setSessionNameInput] = useState('')
+  const [defaultTool, setDefaultTool] = useState<AgentTool>('claude')
   const [pendingTool, setPendingTool] = useState<AgentTool>('claude')
   const [creating, setCreating] = useState(false)
   const [pendingPrPath, setPendingPrPath] = useState<string | null>(null)
@@ -42,6 +43,23 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   useEffect(() => {
     scanProjects()
   }, [scanProjects])
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.getDefaultTool().then((tool) => {
+      if (cancelled) return
+      setDefaultTool(tool)
+      // Only seed pendingTool if the dialog isn't already open with an
+      // explicit user choice — avoid clobbering an in-flight selection.
+      setPendingTool((cur) => (pendingSessionPath === null ? tool : cur))
+    })
+    return () => {
+      cancelled = true
+    }
+    // pendingSessionPath intentionally omitted: we only want the initial seed,
+    // not a re-fetch on every dialog open/close.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const toggle = (path: string) => {
     setExpanded((prev) => {
@@ -77,6 +95,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           setPendingSessionPath(menu.projectPath)
           setPendingSessionHostId(hostId)
           setSessionNameInput('')
+          setPendingTool(defaultTool)
         },
       })
       items.push({ label: '', separator: true, onClick: () => {} })
@@ -104,6 +123,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           setPendingSessionPath(menu.projectPath)
           setPendingSessionHostId(null)
           setSessionNameInput('')
+          setPendingTool(defaultTool)
         },
       })
       items.push({

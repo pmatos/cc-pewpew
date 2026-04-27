@@ -57,13 +57,47 @@ export interface HostBootstrapConnection {
 
 export type AgentAvailability = Record<AgentTool, boolean>
 
+// The cached portion of bootstrap — the parts that genuinely don't change
+// between calls (notify script install, socket path). Agent availability is
+// deliberately *not* cached because users install/remove `claude` or `codex`
+// out-of-band, and stale availability would block valid session creation.
+interface CachedBootstrap {
+  notifyScriptPath: string
+  remoteSocketPath: string
+}
+
 export interface HostBootstrapResult {
   notifyScriptPath: string
   remoteSocketPath: string
   availableAgents: AgentAvailability
 }
 
-const bootstrapped = new Map<string, HostBootstrapResult>()
+const bootstrapped = new Map<string, CachedBootstrap>()
+
+// Probe just the agent CLIs. Cheap — single SSH exec — so we re-run on every
+// bootstrapHost call to pick up codex/claude installs/removals that happened
+// after the first bootstrap. This is in the hot path of session creation,
+// not session attach, so the latency is bounded.
+export async function probeRemoteAgents(
+  connection: HostBootstrapConnection
+): Promise<AgentAvailability> {
+  const probe =
+    'missing=""; for dep in "$@"; do command -v "$dep" >/dev/null 2>&1 || missing="$missing $dep"; done; printf "%s\\n" "$missing"'
+  const result = await connection.exec(['sh', '-c', probe, '_', ...AGENT_DEPS], {
+    timeoutMs: 10000,
+  })
+  if (result.timedOut || result.code !== 0) {
+    // Fail closed: if we can't probe, treat both as unavailable so callers
+    // get a clear "not installed" error rather than silently spawning a
+    // session that immediately dies.
+    return { claude: false, codex: false }
+  }
+  const missing = new Set(result.stdout.trim().split(/\s+/).filter(Boolean))
+  return {
+    claude: !missing.has('claude'),
+    codex: !missing.has('codex'),
+  }
+}
 
 // Called when the SSH target for a host changes (alias edit). Drops the cached
 // bootstrap result so the next session re-probes dependencies and reinstalls
@@ -90,7 +124,12 @@ export async function bootstrapHost(
   remoteSocketPath: string
 ): Promise<HostBootstrapResult> {
   const cached = bootstrapped.get(hostId)
-  if (cached && cached.remoteSocketPath === remoteSocketPath) return cached
+  if (cached && cached.remoteSocketPath === remoteSocketPath) {
+    // Cache hit on the heavy work — but always re-probe agents to reflect
+    // out-of-band installs/removals.
+    const availableAgents = await probeRemoteAgents(connection)
+    return { ...cached, availableAgents }
+  }
 
   const allDeps = [...STRICT_DEPS, ...AGENT_DEPS]
   const depProbe =
@@ -165,7 +204,6 @@ export async function bootstrapHost(
   )
   await expectOk(install, 'install-failed', 'Unable to install remote notify hook')
 
-  const result: HostBootstrapResult = { notifyScriptPath, remoteSocketPath, availableAgents }
-  bootstrapped.set(hostId, result)
-  return result
+  bootstrapped.set(hostId, { notifyScriptPath, remoteSocketPath })
+  return { notifyScriptPath, remoteSocketPath, availableAgents }
 }

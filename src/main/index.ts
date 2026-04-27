@@ -560,6 +560,10 @@ app.whenReady().then(async () => {
     return getConfig().uiScale
   })
 
+  ipcMain.handle('config:get-default-tool', () => {
+    return getConfig().defaultTool
+  })
+
   ipcMain.handle('swim-lanes:open', (_event, sessionIds: string[]) => {
     const swimWindow = new BrowserWindow({
       width: 1200,

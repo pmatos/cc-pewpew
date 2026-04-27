@@ -179,16 +179,31 @@ describe('ensureCodexHooksFeatureFlag', () => {
 })
 
 describe('rollbackCodexHooks', () => {
-  it('removes .codex/hooks.json if present', async () => {
+  it('removes .codex/hooks.json when there was no prior file', async () => {
     const { installCodexHooks, rollbackCodexHooks } = await loadInstaller()
-    await installCodexHooks(state.tmpProject, { skipGitignore: true })
+    const snapshot = await installCodexHooks(state.tmpProject, { skipGitignore: true })
     expect(existsSync(join(state.tmpProject, '.codex', 'hooks.json'))).toBe(true)
-    rollbackCodexHooks(state.tmpProject)
+    rollbackCodexHooks(snapshot)
     expect(existsSync(join(state.tmpProject, '.codex', 'hooks.json'))).toBe(false)
   })
 
-  it('is a no-op when hooks.json is absent', async () => {
-    const { rollbackCodexHooks } = await loadInstaller()
-    expect(() => rollbackCodexHooks(state.tmpProject)).not.toThrow()
+  it('restores the prior file content (preserving unrelated user hooks)', async () => {
+    const codexDir = join(state.tmpProject, '.codex')
+    mkdirSync(codexDir, { recursive: true })
+    const priorJson = JSON.stringify({
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: '/usr/local/bin/other-hook.sh' }] }],
+      },
+    })
+    writeFileSync(join(codexDir, 'hooks.json'), priorJson)
+
+    const { installCodexHooks, rollbackCodexHooks } = await loadInstaller()
+    const snapshot = await installCodexHooks(state.tmpProject, { skipGitignore: true })
+
+    // Pretend the feature-flag step failed; rollback must put the original back.
+    rollbackCodexHooks(snapshot)
+
+    const restored = readFileSync(join(state.tmpProject, '.codex', 'hooks.json'), 'utf-8')
+    expect(restored).toBe(priorJson)
   })
 })

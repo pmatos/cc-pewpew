@@ -56,6 +56,7 @@ declare global {
       getSidebarWidth: () => Promise<number>
       saveSidebarWidth: (width: number) => Promise<void>
       getUiScale: () => Promise<number>
+      getDefaultTool: () => Promise<AgentTool>
       onTextThumbnails: (callback: (data: Record<string, string>) => void) => () => void
       pickDirectory: () => Promise<string | null>
       relocateProject: (oldPath: string, newPath: string) => Promise<{ migratedCount: number }>

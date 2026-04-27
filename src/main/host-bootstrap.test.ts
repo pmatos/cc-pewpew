@@ -91,4 +91,35 @@ describe('bootstrapHost', () => {
     expect(installCall?.[2]).toContain('grep -q "CC_PEWPEW_NOTIFY_VERSION=$5"')
     expect(installCall).toContain(String(NOTIFY_SCRIPT_VERSION))
   })
+
+  it('re-probes agent availability on cache hits (codex installed after first bootstrap)', async () => {
+    // First call: codex missing on remote.
+    let depsStdout = ' codex\n'
+    const calls: string[][] = []
+    const conn: HostBootstrapConnection = {
+      exec: async (argv) => {
+        calls.push(argv)
+        const script = argv[2]
+        if (script.includes('command -v')) return ok(depsStdout)
+        if (script === 'test -S "$1"') return ok()
+        if (script.includes('XDG_CONFIG_HOME')) return ok('/home/dev/.config')
+        return ok()
+      },
+    }
+
+    const first = await bootstrapHost('host-reprobe', conn, '/tmp/ipc')
+    expect(first.availableAgents).toEqual({ claude: true, codex: false })
+
+    // User installs codex out-of-band; second call must reflect it.
+    depsStdout = '\n'
+    const second = await bootstrapHost('host-reprobe', conn, '/tmp/ipc')
+    expect(second.availableAgents).toEqual({ claude: true, codex: true })
+
+    // Sanity: the heavy install path didn't run twice. The "notify-v" install
+    // command should appear at most once even though we bootstrapped twice.
+    const installCalls = calls.filter((argv) =>
+      argv.some((part) => part.includes(`notify-v${NOTIFY_SCRIPT_VERSION}.sh`))
+    )
+    expect(installCalls).toHaveLength(1)
+  })
 })

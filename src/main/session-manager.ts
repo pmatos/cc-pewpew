@@ -33,6 +33,8 @@ import {
   ensureCodexHooksFeatureFlag,
   ensureRemoteCodexHooksFeatureFlag,
   rollbackCodexHooks,
+  rollbackRemoteCodexHooks,
+  commitRemoteCodexHooks,
 } from './hook-installer'
 import { getHost } from './host-registry'
 import { listRemoteProjects } from './remote-project-registry'
@@ -444,11 +446,11 @@ export async function createSessionForWorktree(
 
 async function installAgentHooks(tool: AgentTool, worktreePath: string): Promise<void> {
   if (tool === 'codex') {
-    await installCodexHooks(worktreePath, { skipGitignore: true })
+    const snapshot = await installCodexHooks(worktreePath, { skipGitignore: true })
     try {
       ensureCodexHooksFeatureFlag()
     } catch (err) {
-      rollbackCodexHooks(worktreePath)
+      rollbackCodexHooks(snapshot)
       throw err
     }
     return
@@ -545,16 +547,14 @@ async function installRemoteAgentHooks(
 ): Promise<void> {
   const remote = (argv: string[], opts?: { timeoutMs?: number }) => execRemote(host, argv, opts)
   if (tool === 'codex') {
-    await installRemoteCodexHooks(remote, worktreePath, notifyScriptPath)
+    const snapshot = await installRemoteCodexHooks(remote, worktreePath, notifyScriptPath)
     try {
       await ensureRemoteCodexHooksFeatureFlag(remote)
     } catch (err) {
-      // Best-effort rollback of the just-written hooks.json
-      await remote(['sh', '-c', 'rm -f "$1/.codex/hooks.json"', '_', worktreePath]).catch(
-        () => undefined
-      )
+      await rollbackRemoteCodexHooks(remote, snapshot)
       throw err
     }
+    await commitRemoteCodexHooks(remote, snapshot)
     return
   }
   await installRemoteHooks(remote, worktreePath, notifyScriptPath)
