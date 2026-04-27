@@ -228,16 +228,18 @@ describe('exec ring-buffer + toast wiring', () => {
     expect(emittedToasts[0].title).toMatch(/StreamLocalBindUnlink/)
   })
 
-  it('falls back to a generic warning toast for unrecognized failures', async () => {
+  it('does NOT emit a toast for an unrecognized exec failure (likely an app-level non-zero like tmux has-session "absent")', async () => {
     nextResult = {
       stdout: '',
-      stderr: 'something weird',
-      error: { name: 'Error', message: 'x', code: 7 } as unknown as NodeJS.ErrnoException,
-      exitCode: 7,
+      stderr: '',
+      error: { name: 'Error', message: 'x', code: 1 } as unknown as NodeJS.ErrnoException,
+      exitCode: 1,
     }
-    await exec(HOST, ['true'])
-    expect(emittedToasts).toHaveLength(1)
-    expect(emittedToasts[0].severity).toBe('warning')
-    expect(emittedToasts[0].title).toMatch(/exit 7/)
+    await exec(HOST, ['tmux', 'has-session', '-t', 'cc-pewpew-x'])
+    expect(emittedToasts).toHaveLength(0)
+    // The ring buffer still records the exec, so diagnostics retain it.
+    expect(recordedEntries).toHaveLength(1)
+    expect(recordedEntries[0].kind).toBe('exec')
+    expect(recordedEntries[0].exitCode).toBe(1)
   })
 })

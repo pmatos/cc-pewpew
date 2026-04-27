@@ -86,6 +86,14 @@ function maybeEmitFailureToast(
   if (kind === 'probe' && bootstrapInProgress.has(host.hostId)) return
 
   const { reason, message } = classifySshExit({ exitCode, stderr })
+  // For exec invocations, an unrecognized non-zero exit is most often the
+  // remote command's own exit code (e.g. `tmux has-session` returning 1 when
+  // the session is absent). Surface only the four reasons we can attribute to
+  // SSH itself so legitimate "absent"/"empty" probe outcomes don't spam the
+  // user with "ssh failed: exit 1" warnings during reconnect / batch probes.
+  // Control-connection failures are different: any non-zero there *is* an
+  // SSH-level problem, so the generic toast still fires for kind='control'.
+  if (kind === 'exec' && reason === 'unknown') return
   const detail = firstStderrLine(stderr) || message
   const label = hostLabel(host)
   let severity: ToastSeverity = 'error'
@@ -356,6 +364,10 @@ async function startRuntime(runtime: HostRuntime): Promise<void> {
         errno.code === 'ENOENT'
           ? 'ssh: command not found'
           : `ssh failed to spawn: ${errno.message || errno.code || 'unknown'}`
+      // Spawn errors fire before child.stderr produces any data, so the outer
+      // `stderr` buffer is empty. Surface the synthesized errStderr there so
+      // the catch block's toast (and classifyConnectionFailure) see it.
+      stderr = errStderr
       logSshInvocation(
         { hostId: runtime.host.hostId, kind: 'control' },
         argv,
