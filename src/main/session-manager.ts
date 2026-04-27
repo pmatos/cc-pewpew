@@ -411,7 +411,14 @@ async function isGitWorktree(worktreePath: string): Promise<boolean> {
 // In-flight adoption promises keyed by canonical worktree path. Serializes
 // concurrent mirror requests for the same path (e.g. double-click on + Mirror,
 // racing against mirrorAllWorktrees) so only one session/PTY is created.
-const inflightAdoptions = new Map<string, Promise<Session>>()
+// Tracks the tool the in-flight adoption is using so a concurrent call with a
+// different tool gets a mixed-tool error rather than silently sharing the
+// wrong agent's session.
+interface InflightAdoption {
+  promise: Promise<Session>
+  tool: AgentTool
+}
+const inflightAdoptions = new Map<string, InflightAdoption>()
 
 export async function createSessionForWorktree(
   projectPath: string,
@@ -433,10 +440,17 @@ export async function createSessionForWorktree(
   }
 
   const inflight = inflightAdoptions.get(target)
-  if (inflight) return inflight
+  if (inflight) {
+    if (inflight.tool !== effectiveTool) {
+      throw new Error(
+        `Worktree already has a ${inflight.tool} session in-flight; mixed tools per worktree are not supported`
+      )
+    }
+    return inflight.promise
+  }
 
   const promise = adoptWorktree(projectPath, worktreePath, label, effectiveTool)
-  inflightAdoptions.set(target, promise)
+  inflightAdoptions.set(target, { promise, tool: effectiveTool })
   try {
     return await promise
   } finally {

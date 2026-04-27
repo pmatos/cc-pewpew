@@ -122,4 +122,45 @@ describe('bootstrapHost', () => {
     )
     expect(installCalls).toHaveLength(1)
   })
+
+  it('throws install-failed when the agent probe times out on a cache hit', async () => {
+    // Prime the cache with a successful first bootstrap.
+    const calls: string[][] = []
+    const okConn = fakeConnection(calls)
+    await bootstrapHost('host-probe-fail', okConn, '/tmp/ipc')
+
+    // Second call: probe times out. Must NOT silently report both agents
+    // unavailable — that would surface as a misleading "<tool> not installed"
+    // downstream.
+    const failingConn: HostBootstrapConnection = {
+      exec: async (argv) => {
+        const script = argv[2]
+        if (script.includes('command -v')) {
+          return { stdout: '', stderr: '', code: 0, timedOut: true }
+        }
+        return ok()
+      },
+    }
+    await expect(bootstrapHost('host-probe-fail', failingConn, '/tmp/ipc')).rejects.toMatchObject({
+      kind: 'install-failed',
+    })
+  })
+
+  it('throws install-failed when the agent probe exits non-zero on a cache hit', async () => {
+    const calls: string[][] = []
+    await bootstrapHost('host-probe-nonzero', fakeConnection(calls), '/tmp/ipc')
+
+    const failingConn: HostBootstrapConnection = {
+      exec: async (argv) => {
+        const script = argv[2]
+        if (script.includes('command -v')) {
+          return { stdout: '', stderr: 'permission denied', code: 1, timedOut: false }
+        }
+        return ok()
+      },
+    }
+    await expect(
+      bootstrapHost('host-probe-nonzero', failingConn, '/tmp/ipc')
+    ).rejects.toMatchObject({ kind: 'install-failed' })
+  })
 })

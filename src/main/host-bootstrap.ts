@@ -86,11 +86,16 @@ export async function probeRemoteAgents(
   const result = await connection.exec(['sh', '-c', probe, '_', ...AGENT_DEPS], {
     timeoutMs: 10000,
   })
-  if (result.timedOut || result.code !== 0) {
-    // Fail closed: if we can't probe, treat both as unavailable so callers
-    // get a clear "not installed" error rather than silently spawning a
-    // session that immediately dies.
-    return { claude: false, codex: false }
+  // Surface probe failures as a typed bootstrap error rather than masquerading
+  // as "agent not installed". A transient SSH timeout otherwise shows up as a
+  // misleading "<tool> is not installed on host X" message that leads users to
+  // reinstall a binary that's actually present.
+  if (result.timedOut) {
+    throw new HostBootstrapError('install-failed', 'Agent availability probe timed out')
+  }
+  if (result.code !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`
+    throw new HostBootstrapError('install-failed', `Agent availability probe failed: ${detail}`)
   }
   const missing = new Set(result.stdout.trim().split(/\s+/).filter(Boolean))
   return {

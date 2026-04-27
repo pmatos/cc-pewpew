@@ -231,6 +231,11 @@ export async function installRemoteCodexHooks(
   // hooks), then run the same merge logic as before. Echo a single line —
   // "1" if a prior file existed, "0" otherwise — so the caller knows
   // whether rollback should restore from the backup or unlink.
+  // Mirror the local installer's tolerance for a malformed/non-object prior
+  // file. Pre-validate with `jq -e empty`: if the existing hooks.json is
+  // unparseable (or not an object), feed `{}` to the merge step instead of
+  // letting `jq` abort the whole pipeline. The backup is still made so
+  // rollback can restore exactly what was there.
   const script =
     'set -e\n' +
     'codex_dir="$1/.codex"\n' +
@@ -238,7 +243,11 @@ export async function installRemoteCodexHooks(
     'backup="$codex_dir/hooks.json.cc-pewpew.bak"\n' +
     'mkdir -p "$codex_dir"\n' +
     'if [ -f "$hooks" ]; then cp "$hooks" "$backup"; printf "1"; else printf "0"; fi\n' +
-    'if [ -s "$hooks" ]; then cat "$hooks"; else printf "{}"; fi |\n' +
+    'if [ -s "$hooks" ] && jq -e \'type == "object"\' "$hooks" >/dev/null 2>&1; then\n' +
+    '  cat "$hooks"\n' +
+    'else\n' +
+    '  printf "{}"\n' +
+    'fi |\n' +
     'jq --argjson newHooks "$2" \'\n' +
     '  .hooks = (.hooks // {}) |\n' +
     '  reduce ($newHooks | keys[]) as $k (.;\n' +
