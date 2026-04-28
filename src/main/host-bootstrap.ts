@@ -5,7 +5,7 @@ import type { AgentTool } from '../shared/types'
 export const NOTIFY_SCRIPT_VERSION = 1
 
 const STRICT_DEPS = ['tmux', 'git', 'jq', 'socat'] as const
-const AGENT_DEPS: readonly AgentTool[] = ['claude', 'codex'] as const
+const AGENT_TOOLS: readonly AgentTool[] = ['claude', 'codex'] as const
 
 const notifyScript = `#!/usr/bin/env bash
 # cc-pewpew notify script v${NOTIFY_SCRIPT_VERSION}
@@ -55,12 +55,13 @@ export interface HostBootstrapConnection {
   exec(argv: string[], opts?: { timeoutMs?: number }): Promise<ExecResult>
 }
 
-export type AgentAvailability = Record<AgentTool, boolean>
+export type AgentResolution = Partial<Record<AgentTool, string>>
 
 // The cached portion of bootstrap — the parts that genuinely don't change
-// between calls (notify script install, socket path). Agent availability is
-// deliberately *not* cached because users install/remove `claude` or `codex`
-// out-of-band, and stale availability would block valid session creation.
+// between calls (notify script install, socket path). Agent paths are persisted
+// per-host on disk (Host.agentPaths) and threaded in via cachedAgentPaths so
+// resolveRemoteAgents can verify them cheaply with `[ -x ]` instead of a full
+// search.
 interface CachedBootstrap {
   notifyScriptPath: string
   remoteSocketPath: string
@@ -69,39 +70,75 @@ interface CachedBootstrap {
 export interface HostBootstrapResult {
   notifyScriptPath: string
   remoteSocketPath: string
-  availableAgents: AgentAvailability
+  agentPaths: AgentResolution
 }
 
 const bootstrapped = new Map<string, CachedBootstrap>()
 
-// Probe just the agent CLIs. Cheap — single SSH exec — so we re-run on every
-// bootstrapHost call to pick up codex/claude installs/removals that happened
-// after the first bootstrap. This is in the hot path of session creation,
-// not session attach, so the latency is bounded.
-export async function probeRemoteAgents(
-  connection: HostBootstrapConnection
-): Promise<AgentAvailability> {
-  const probe =
-    'missing=""; for dep in "$@"; do command -v "$dep" >/dev/null 2>&1 || missing="$missing $dep"; done; printf "%s\\n" "$missing"'
-  const result = await connection.exec(['sh', '-c', probe, '_', ...AGENT_DEPS], {
-    timeoutMs: 10000,
-  })
+// Resolve absolute paths to agent CLIs on the remote, in a single ssh round
+// trip. Per agent: trust the cached path if it's still executable, else search
+// with PATH augmented with common user-bin locations, else fall back to the
+// user's interactive login shell ($SHELL -ilc) to honour PATH set in their
+// shell rc (e.g. ~/.zshrc). The shell fallback is what makes us robust to
+// users who only export PATH in their interactive rc — sshd's non-interactive
+// command exec doesn't source those.
+//
+// Output is two lines (claude, then codex), each containing the absolute path
+// or empty.
+const RESOLVE_SCRIPT = `set +e
+augment_path() {
+  for d in "$HOME/.local/bin" "$HOME/.npm-global/bin" "$HOME/bin" "$HOME/.cargo/bin" "$HOME/.deno/bin" "$HOME/go/bin"; do
+    [ -d "$d" ] && PATH="$d:$PATH"
+  done
+  for d in "$HOME"/.nvm/versions/node/*/bin; do
+    [ -d "$d" ] || continue
+    PATH="$d:$PATH"
+  done
+}
+resolve_one() {
+  agent=$1
+  cached=$2
+  if [ -n "$cached" ] && [ -x "$cached" ]; then
+    printf '%s\\n' "$cached"
+    return
+  fi
+  augment_path
+  found=$(command -v "$agent" 2>/dev/null)
+  if [ -z "$found" ] && [ -n "$SHELL" ] && [ -x "$SHELL" ]; then
+    found=$("$SHELL" -ilc "command -v $agent" 2>/dev/null | grep '^/' | tail -n 1)
+  fi
+  printf '%s\\n' "$found"
+}
+resolve_one claude "$1"
+resolve_one codex "$2"
+`
+
+export async function resolveRemoteAgents(
+  connection: HostBootstrapConnection,
+  cachedAgentPaths: AgentResolution = {}
+): Promise<AgentResolution> {
+  const result = await connection.exec(
+    ['sh', '-c', RESOLVE_SCRIPT, '_', cachedAgentPaths.claude ?? '', cachedAgentPaths.codex ?? ''],
+    { timeoutMs: 15000 }
+  )
   // Surface probe failures as a typed bootstrap error rather than masquerading
   // as "agent not installed". A transient SSH timeout otherwise shows up as a
   // misleading "<tool> is not installed on host X" message that leads users to
   // reinstall a binary that's actually present.
   if (result.timedOut) {
-    throw new HostBootstrapError('install-failed', 'Agent availability probe timed out')
+    throw new HostBootstrapError('install-failed', 'Agent path resolution timed out')
   }
   if (result.code !== 0) {
     const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`
-    throw new HostBootstrapError('install-failed', `Agent availability probe failed: ${detail}`)
+    throw new HostBootstrapError('install-failed', `Agent path resolution failed: ${detail}`)
   }
-  const missing = new Set(result.stdout.trim().split(/\s+/).filter(Boolean))
-  return {
-    claude: !missing.has('claude'),
-    codex: !missing.has('codex'),
-  }
+  const lines = result.stdout.split('\n')
+  const resolved: AgentResolution = {}
+  AGENT_TOOLS.forEach((tool, i) => {
+    const path = (lines[i] ?? '').trim()
+    if (path) resolved[tool] = path
+  })
+  return resolved
 }
 
 // Called when the SSH target for a host changes (alias edit). Drops the cached
@@ -126,20 +163,22 @@ async function expectOk(
 export async function bootstrapHost(
   hostId: string,
   connection: HostBootstrapConnection,
-  remoteSocketPath: string
+  remoteSocketPath: string,
+  cachedAgentPaths: AgentResolution = {}
 ): Promise<HostBootstrapResult> {
   const cached = bootstrapped.get(hostId)
   if (cached && cached.remoteSocketPath === remoteSocketPath) {
-    // Cache hit on the heavy work — but always re-probe agents to reflect
-    // out-of-band installs/removals.
-    const availableAgents = await probeRemoteAgents(connection)
-    return { ...cached, availableAgents }
+    // Cache hit on the heavy work — still resolve agent paths so a freshly
+    // installed claude/codex (or one moved out from under the cached path) is
+    // picked up. The resolve script verifies the cached path with `[ -x ]`
+    // before falling back to a search, so the common case stays a single ssh.
+    const agentPaths = await resolveRemoteAgents(connection, cachedAgentPaths)
+    return { ...cached, agentPaths }
   }
 
-  const allDeps = [...STRICT_DEPS, ...AGENT_DEPS]
   const depProbe =
     'missing=""; for dep in "$@"; do command -v "$dep" >/dev/null 2>&1 || missing="$missing $dep"; done; printf "%s\\n" "$missing"'
-  const deps = await connection.exec(['sh', '-c', depProbe, '_', ...allDeps], {
+  const deps = await connection.exec(['sh', '-c', depProbe, '_', ...STRICT_DEPS], {
     timeoutMs: 15000,
   })
   await expectOk(deps, 'missing-deps', 'Dependency probe failed')
@@ -152,10 +191,8 @@ export async function bootstrapHost(
       missingStrict
     )
   }
-  const availableAgents: AgentAvailability = {
-    claude: !missing.has('claude'),
-    codex: !missing.has('codex'),
-  }
+
+  const agentPaths = await resolveRemoteAgents(connection, cachedAgentPaths)
 
   const socketProbe = await connection.exec(['sh', '-c', 'test -S "$1"', '_', remoteSocketPath], {
     timeoutMs: 5000,
@@ -210,5 +247,5 @@ export async function bootstrapHost(
   await expectOk(install, 'install-failed', 'Unable to install remote notify hook')
 
   bootstrapped.set(hostId, { notifyScriptPath, remoteSocketPath })
-  return { notifyScriptPath, remoteSocketPath, availableAgents }
+  return { notifyScriptPath, remoteSocketPath, agentPaths }
 }

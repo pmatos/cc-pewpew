@@ -18,22 +18,24 @@ interface SpawnOptions {
   continueSession?: boolean
   tool?: AgentTool
   agentSessionId?: string
+  // Absolute path to the agent binary on the target host. Required for remote
+  // sessions because non-interactive ssh PATH excludes user-bin dirs like
+  // ~/.local/bin; the resolver in host-bootstrap finds the path once and we
+  // pass it through here so tmux can exec it directly. Omitted for local
+  // sessions where the GUI process inherits a usable PATH.
+  agentPath?: string
 }
 
 export function buildAgentArgs(options?: SpawnOptions): string[] {
   const tool = options?.tool ?? 'claude'
+  const cmd = options?.agentPath ?? tool
   if (tool === 'codex') {
     if (options?.continueSession && options?.agentSessionId) {
-      return [
-        'codex',
-        'resume',
-        options.agentSessionId,
-        '--dangerously-bypass-approvals-and-sandbox',
-      ]
+      return [cmd, 'resume', options.agentSessionId, '--dangerously-bypass-approvals-and-sandbox']
     }
-    return ['codex', '--dangerously-bypass-approvals-and-sandbox']
+    return [cmd, '--dangerously-bypass-approvals-and-sandbox']
   }
-  const args = ['claude', '--dangerously-skip-permissions']
+  const args = [cmd, '--dangerously-skip-permissions']
   if (options?.continueSession) args.push('--continue')
   return args
 }

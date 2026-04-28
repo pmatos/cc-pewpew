@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { CONFIG_DIR, getConfig, saveConfig } from './config'
 import { hasRemoteProjectsBoundTo } from './remote-project-registry'
-import type { Host, HostId } from '../shared/types'
+import type { AgentTool, Host, HostId } from '../shared/types'
 
 const SESSIONS_PATH = join(CONFIG_DIR, 'sessions.json')
 
@@ -73,10 +73,49 @@ export function updateHost(hostId: HostId, input: { alias: string; label: string
       throw new Error('Cannot retarget host: sessions are still bound to it')
     }
   }
-  const updated: Host = { hostId, alias, label }
+  // Drop cached agent paths on alias retarget — the new endpoint may have
+  // claude/codex at different absolute paths, or not at all. Label-only edits
+  // preserve them.
+  const updated: Host = {
+    hostId,
+    alias,
+    label,
+    ...(previous.alias === alias && previous.agentPaths ? { agentPaths: previous.agentPaths } : {}),
+  }
   config.hosts = [...config.hosts.slice(0, idx), updated, ...config.hosts.slice(idx + 1)]
   saveConfig(config)
   return updated
+}
+
+// Merge resolved agent paths into the host's persisted record. No-op when the
+// merged result is identical to what's on disk (avoids gratuitous config
+// rewrites on every bootstrap).
+export function setHostAgentPaths(hostId: HostId, paths: Partial<Record<AgentTool, string>>): void {
+  const config = getConfig()
+  const idx = config.hosts.findIndex((h) => h.hostId === hostId)
+  if (idx === -1) return
+  const previous = config.hosts[idx]
+  const previousPaths = previous.agentPaths ?? {}
+  const merged: Partial<Record<AgentTool, string>> = { ...previousPaths }
+  for (const tool of ['claude', 'codex'] as const) {
+    if (paths[tool]) {
+      merged[tool] = paths[tool]
+    } else if (previousPaths[tool]) {
+      // Tool was previously cached but is now unresolved — drop it. Keeping
+      // a stale path would let session creation succeed past the availability
+      // gate only to fail at tmux exec time.
+      delete merged[tool]
+    }
+  }
+  const hasAny = Object.keys(merged).length > 0
+  const sameAsBefore =
+    Object.keys(merged).length === Object.keys(previousPaths).length &&
+    (Object.keys(merged) as AgentTool[]).every((t) => merged[t] === previousPaths[t])
+  if (sameAsBefore) return
+  const updated: Host = { ...previous, ...(hasAny ? { agentPaths: merged } : {}) }
+  if (!hasAny) delete updated.agentPaths
+  config.hosts = [...config.hosts.slice(0, idx), updated, ...config.hosts.slice(idx + 1)]
+  saveConfig(config)
 }
 
 // Forward-compat: checks persisted sessions for any binding to this host. In

@@ -36,7 +36,7 @@ import {
   rollbackRemoteCodexHooks,
   commitRemoteCodexHooks,
 } from './hook-installer'
-import { getHost } from './host-registry'
+import { getHost, setHostAgentPaths } from './host-registry'
 import { listRemoteProjects } from './remote-project-registry'
 import { listenHookServerForHost } from './hook-server'
 import {
@@ -49,7 +49,7 @@ import {
   startBootstrapWindow,
   type HostConnectionState,
 } from './host-connection'
-import { bootstrapHost, HostBootstrapError } from './host-bootstrap'
+import { bootstrapHost, HostBootstrapError, type AgentResolution } from './host-bootstrap'
 import { emitToast } from './notifications'
 import type {
   AgentTool,
@@ -220,7 +220,7 @@ function getRequiredHost(hostId: string): Host {
 // setOnHostConnectionStopped callback to do that.
 async function prepareRemoteHost(
   host: Host
-): Promise<{ notifyScriptPath: string; availableAgents: { claude: boolean; codex: boolean } }> {
+): Promise<{ notifyScriptPath: string; agentPaths: AgentResolution }> {
   const localSocketPath = listenHookServerForHost(host.hostId)
   let remoteSocketPath: string
   try {
@@ -251,11 +251,16 @@ async function prepareRemoteHost(
       {
         exec: (argv, opts) => execRemote(host, argv, opts),
       },
-      remoteSocketPath
+      remoteSocketPath,
+      host.agentPaths ?? {}
     )
+    // Persist deltas so the next bootstrap can skip the search and verify the
+    // path with a cheap `[ -x ]` instead. setHostAgentPaths is a no-op on
+    // unchanged values.
+    setHostAgentPaths(host.hostId, bootstrap.agentPaths)
     return {
       notifyScriptPath: bootstrap.notifyScriptPath,
-      availableAgents: bootstrap.availableAgents,
+      agentPaths: bootstrap.agentPaths,
     }
   } catch (err) {
     await releaseHostConnection(host.hostId).catch(() => undefined)
@@ -733,8 +738,9 @@ async function createRemoteSession(
   // prepareRemoteHost retains the SSH runtime on success; we own the ref and
   // release it at the end (or in catch). createRemotePty takes its own retain
   // on success, which is what keeps the connection alive past this function.
-  const { notifyScriptPath, availableAgents } = await prepareRemoteHost(host)
-  if (!availableAgents[effectiveTool]) {
+  const { notifyScriptPath, agentPaths } = await prepareRemoteHost(host)
+  const agentPath = agentPaths[effectiveTool]
+  if (!agentPath) {
     await releaseHostConnection(hostId).catch(() => undefined)
     throw new Error(`${effectiveTool} is not installed on host ${host.label || host.alias}`)
   }
@@ -790,7 +796,7 @@ async function createRemoteSession(
       ).trim() || branchName
 
     await installRemoteAgentHooks(effectiveTool, host, worktreePath, notifyScriptPath)
-    await createRemotePty(id, worktreePath, host, { tool: effectiveTool })
+    await createRemotePty(id, worktreePath, host, { tool: effectiveTool, agentPath })
   } catch (err) {
     await releaseHostConnection(hostId).catch(() => undefined)
     throw err
@@ -838,7 +844,7 @@ async function createRemotePrSession(
     }
   }
 
-  const { notifyScriptPath, availableAgents } = await prepareRemoteHost(host)
+  const { notifyScriptPath, agentPaths } = await prepareRemoteHost(host)
 
   if (!(await probeRemoteGh(host))) {
     await releaseHostConnection(hostId).catch(() => undefined)
@@ -876,7 +882,8 @@ async function createRemotePrSession(
   }
 
   const effectiveTool: AgentTool = getConfig().defaultTool
-  if (!availableAgents[effectiveTool]) {
+  const agentPath = agentPaths[effectiveTool]
+  if (!agentPath) {
     await releaseHostConnection(hostId).catch(() => undefined)
     return `${effectiveTool} is not installed on host ${host.label || host.alias}.`
   }
@@ -891,33 +898,29 @@ async function createRemotePrSession(
       () => undefined
     )
 
+    // Pick the worktree-add form by probing for the local branch first instead
+    // of try-then-fallback. The fallback masked real failures (e.g. branch
+    // already checked out in a stale worktree) by surfacing the second
+    // attempt's misleading "branch already exists" error.
+    const branchExistsLocally = await remoteBranchExists(host, projectPath, branch)
+    const addArgv = branchExistsLocally
+      ? ['git', '-C', projectPath, 'worktree', 'add', worktreePath, branch]
+      : [
+          'git',
+          '-C',
+          projectPath,
+          'worktree',
+          'add',
+          worktreePath,
+          '-b',
+          branch,
+          `origin/${branch}`,
+        ]
     try {
-      await expectRemoteOk(
-        host,
-        ['git', '-C', projectPath, 'worktree', 'add', worktreePath, branch],
-        'Failed to create remote worktree'
-      )
-    } catch {
-      try {
-        await expectRemoteOk(
-          host,
-          [
-            'git',
-            '-C',
-            projectPath,
-            'worktree',
-            'add',
-            worktreePath,
-            '-b',
-            branch,
-            `origin/${branch}`,
-          ],
-          'Failed to create remote worktree'
-        )
-      } catch (err) {
-        await releaseHostConnection(hostId).catch(() => undefined)
-        return `Failed to create worktree for branch "${branch}": ${(err as Error).message}`
-      }
+      await expectRemoteOk(host, addArgv, 'Failed to create remote worktree')
+    } catch (err) {
+      await releaseHostConnection(hostId).catch(() => undefined)
+      return `Failed to create worktree for branch "${branch}": ${(err as Error).message}`
     }
 
     resolvedBranch =
@@ -930,7 +933,7 @@ async function createRemotePrSession(
       ).trim() || branch
 
     await installRemoteAgentHooks(effectiveTool, host, worktreePath, notifyScriptPath)
-    await createRemotePty(id, worktreePath, host, { tool: effectiveTool })
+    await createRemotePty(id, worktreePath, host, { tool: effectiveTool, agentPath })
   } catch (err) {
     await releaseHostConnection(hostId).catch(() => undefined)
     throw err
@@ -1381,15 +1384,20 @@ export async function reviveSession(id: string): Promise<void> {
     // also resets connectionState instead of leaving it pinned at connecting.
     let retained = false
     try {
-      await prepareRemoteHost(host)
+      const { agentPaths } = await prepareRemoteHost(host)
       retained = true
       if (await hasRemoteTmuxSession(id, host)) {
         await reattachRemotePty(id, host)
       } else {
+        const agentPath = agentPaths[session.tool]
+        if (!agentPath) {
+          throw new Error(`${session.tool} is not installed on host ${host.label || host.alias}`)
+        }
         await createRemotePty(id, session.worktreePath, host, {
           continueSession: true,
           tool: session.tool,
           agentSessionId: session.agentSessionId,
+          agentPath,
         })
       }
     } catch (err) {

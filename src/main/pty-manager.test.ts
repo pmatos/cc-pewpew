@@ -37,4 +37,22 @@ describe('buildAgentArgs', () => {
       '--dangerously-bypass-approvals-and-sandbox',
     ])
   })
+
+  it('uses agentPath as argv[0] when provided (claude)', () => {
+    expect(buildAgentArgs({ agentPath: '/u/.local/bin/claude' })).toEqual([
+      '/u/.local/bin/claude',
+      '--dangerously-skip-permissions',
+    ])
+  })
+
+  it('uses agentPath as argv[0] when provided (codex resume)', () => {
+    expect(
+      buildAgentArgs({
+        tool: 'codex',
+        continueSession: true,
+        agentSessionId: 'abc-123',
+        agentPath: '/u/.npm/codex',
+      })
+    ).toEqual(['/u/.npm/codex', 'resume', 'abc-123', '--dangerously-bypass-approvals-and-sandbox'])
+  })
 })

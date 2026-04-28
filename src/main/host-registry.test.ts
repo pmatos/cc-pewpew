@@ -50,6 +50,7 @@ import {
   deleteHost,
   listHosts,
   getHost,
+  setHostAgentPaths,
 } from './host-registry'
 import { hasRemoteProjectsBoundTo } from './remote-project-registry'
 
@@ -204,5 +205,56 @@ describe('updateHost retarget guards', () => {
     vi.mocked(hasRemoteProjectsBoundTo).mockReturnValue(true)
     fsState.sessionsJson = JSON.stringify([{ session: { id: 's1', hostId: h.hostId } }])
     expect(() => updateHost(h.hostId, { alias: 'dev', label: 'new' })).not.toThrow()
+  })
+
+  it('preserves agentPaths on label-only edit', () => {
+    const h = addHost({ alias: 'dev', label: 'old' })
+    setHostAgentPaths(h.hostId, { claude: '/u/.local/bin/claude' })
+    updateHost(h.hostId, { alias: 'dev', label: 'new' })
+    expect(getHost(h.hostId)?.agentPaths).toEqual({ claude: '/u/.local/bin/claude' })
+  })
+
+  it('drops agentPaths on alias retarget', () => {
+    const h = addHost({ alias: 'dev', label: 'x' })
+    setHostAgentPaths(h.hostId, { claude: '/u/.local/bin/claude' })
+    updateHost(h.hostId, { alias: 'prod', label: 'x' })
+    expect(getHost(h.hostId)?.agentPaths).toBeUndefined()
+  })
+})
+
+describe('setHostAgentPaths', () => {
+  it('persists newly resolved paths', () => {
+    const h = addHost({ alias: 'dev', label: 'x' })
+    setHostAgentPaths(h.hostId, { claude: '/u/bin/claude', codex: '/u/bin/codex' })
+    expect(getHost(h.hostId)?.agentPaths).toEqual({
+      claude: '/u/bin/claude',
+      codex: '/u/bin/codex',
+    })
+  })
+
+  it('drops a previously cached tool when the resolver no longer finds it', () => {
+    const h = addHost({ alias: 'dev', label: 'x' })
+    setHostAgentPaths(h.hostId, { claude: '/u/bin/claude', codex: '/u/bin/codex' })
+    setHostAgentPaths(h.hostId, { claude: '/u/bin/claude' })
+    expect(getHost(h.hostId)?.agentPaths).toEqual({ claude: '/u/bin/claude' })
+  })
+
+  it('removes the agentPaths field entirely when nothing resolves', () => {
+    const h = addHost({ alias: 'dev', label: 'x' })
+    setHostAgentPaths(h.hostId, { claude: '/u/bin/claude' })
+    setHostAgentPaths(h.hostId, {})
+    expect(getHost(h.hostId)?.agentPaths).toBeUndefined()
+  })
+
+  it('is a no-op when the merged result equals what is on disk', () => {
+    const h = addHost({ alias: 'dev', label: 'x' })
+    setHostAgentPaths(h.hostId, { claude: '/u/bin/claude' })
+    saveConfigSpy.mockClear()
+    setHostAgentPaths(h.hostId, { claude: '/u/bin/claude' })
+    expect(saveConfigSpy).not.toHaveBeenCalled()
+  })
+
+  it('silently ignores unknown hostId', () => {
+    expect(() => setHostAgentPaths('nope', { claude: '/u/bin/claude' })).not.toThrow()
   })
 })

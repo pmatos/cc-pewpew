@@ -110,6 +110,11 @@ export interface Host {
   hostId: HostId
   alias: string
   label: string
+  // Absolute paths to agent binaries on the remote host, populated lazily by
+  // host bootstrap when first resolved. Persisting these avoids re-probing on
+  // every session create AND lets us launch via absolute path so we don't
+  // depend on the non-interactive ssh PATH (which excludes ~/.local/bin etc.).
+  agentPaths?: Partial<Record<AgentTool, string>>
 }
 
 export type SshExitReason = 'auth-failed' | 'network' | 'dep-missing' | 'bind-unlink' | 'unknown'

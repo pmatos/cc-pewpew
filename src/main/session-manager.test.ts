@@ -91,6 +91,7 @@ vi.mock('./hook-installer', () => ({
 
 vi.mock('./host-registry', () => ({
   getHost: (hostId: string) => state.hosts.find((h) => h.hostId === hostId),
+  setHostAgentPaths: vi.fn(),
 }))
 
 vi.mock('./remote-project-registry', () => ({
@@ -104,7 +105,7 @@ vi.mock('./hook-server', () => ({
 vi.mock('./host-bootstrap', () => ({
   bootstrapHost: vi.fn(async () => ({
     notifyScriptPath: '/tmp/notify-v1.sh',
-    availableAgents: { claude: true, codex: true },
+    agentPaths: { claude: '/r/bin/claude', codex: '/r/bin/codex' },
   })),
 }))
 

@@ -3,6 +3,8 @@ import {
   bootstrapHost,
   HostBootstrapError,
   NOTIFY_SCRIPT_VERSION,
+  resolveRemoteAgents,
+  type AgentResolution,
   type HostBootstrapConnection,
 } from './host-bootstrap'
 import type { ExecResult } from './host-connection'
@@ -11,12 +13,32 @@ function ok(stdout = ''): ExecResult {
   return { stdout, stderr: '', code: 0, timedOut: false }
 }
 
-function fakeConnection(calls: string[][], depsStdout = '\n'): HostBootstrapConnection {
+interface FakeOpts {
+  // Per-agent path the resolve script "discovers". '' means not found.
+  resolved?: { claude?: string; codex?: string }
+  // Override what the resolve script sees as cached input on each call.
+  onResolve?: (cachedClaude: string, cachedCodex: string) => { claude: string; codex: string }
+}
+
+function fakeConnection(calls: string[][], opts: FakeOpts = {}): HostBootstrapConnection {
+  const resolved = opts.resolved ?? { claude: '/usr/bin/claude', codex: '/usr/bin/codex' }
   return {
     exec: async (argv) => {
       calls.push(argv)
       const script = argv[2]
-      if (script.includes('command -v')) return ok(depsStdout)
+      // Strict-deps probe: nothing missing.
+      if (script.includes('command -v') && script.includes('missing="$missing $dep"')) {
+        return ok('\n')
+      }
+      // Agent path resolution script.
+      if (script.includes('resolve_one claude')) {
+        const cachedClaude = argv[4] ?? ''
+        const cachedCodex = argv[5] ?? ''
+        const out = opts.onResolve
+          ? opts.onResolve(cachedClaude, cachedCodex)
+          : { claude: resolved.claude ?? '', codex: resolved.codex ?? '' }
+        return ok(`${out.claude}\n${out.codex}\n`)
+      }
       if (script === 'test -S "$1"') return ok()
       if (script.includes('XDG_CONFIG_HOME')) return ok('/home/dev/.config')
       if (script.includes('notify-v')) return ok()
@@ -26,7 +48,7 @@ function fakeConnection(calls: string[][], depsStdout = '\n'): HostBootstrapConn
 }
 
 describe('bootstrapHost', () => {
-  it('probes deps, checks the remote socket, and installs notify-v1.sh', async () => {
+  it('probes deps, resolves agent paths, checks the socket, and installs notify-v1.sh', async () => {
     const calls: string[][] = []
     const result = await bootstrapHost(
       'host-bootstrap-all-present',
@@ -37,13 +59,9 @@ describe('bootstrapHost', () => {
     expect(result).toEqual({
       notifyScriptPath: '/home/dev/.config/cc-pewpew/hooks/notify-v1.sh',
       remoteSocketPath: '/tmp/ipc',
-      availableAgents: { claude: true, codex: true },
+      agentPaths: { claude: '/usr/bin/claude', codex: '/usr/bin/codex' },
     })
-    expect(
-      calls.some(
-        (argv) => argv.includes('tmux') && argv.includes('claude') && argv.includes('codex')
-      )
-    ).toBe(true)
+    expect(calls.some((argv) => argv.some((a) => a.includes('resolve_one claude')))).toBe(true)
     expect(calls.some((argv) => argv.includes('/tmp/ipc'))).toBe(true)
     expect(
       calls.some((argv) => argv.includes('/home/dev/.config/cc-pewpew/hooks/notify-v1.sh'))
@@ -52,32 +70,40 @@ describe('bootstrapHost', () => {
 
   it('hard-fails on missing strict deps but tolerates missing agent CLIs', async () => {
     const calls: string[][] = []
-    await expect(
-      bootstrapHost('host-bootstrap-missing', fakeConnection(calls, ' jq\n'), '/tmp/ipc')
-    ).rejects.toMatchObject({
+    const conn: HostBootstrapConnection = {
+      exec: async (argv) => {
+        calls.push(argv)
+        const script = argv[2]
+        if (script.includes('command -v') && script.includes('missing="$missing $dep"')) {
+          return ok(' jq\n')
+        }
+        return ok()
+      },
+    }
+    await expect(bootstrapHost('host-bootstrap-missing', conn, '/tmp/ipc')).rejects.toMatchObject({
       kind: 'missing-deps',
       missingDeps: ['jq'],
     } satisfies Partial<HostBootstrapError>)
   })
 
-  it('reports availableAgents.codex=false when only codex is missing', async () => {
+  it('omits codex from agentPaths when only codex is missing', async () => {
     const calls: string[][] = []
     const result = await bootstrapHost(
       'host-bootstrap-no-codex',
-      fakeConnection(calls, ' codex\n'),
+      fakeConnection(calls, { resolved: { claude: '/usr/bin/claude', codex: '' } }),
       '/tmp/ipc'
     )
-    expect(result.availableAgents).toEqual({ claude: true, codex: false })
+    expect(result.agentPaths).toEqual({ claude: '/usr/bin/claude' })
   })
 
-  it('reports availableAgents.claude=false when only claude is missing', async () => {
+  it('omits claude from agentPaths when only claude is missing', async () => {
     const calls: string[][] = []
     const result = await bootstrapHost(
       'host-bootstrap-no-claude',
-      fakeConnection(calls, ' claude\n'),
+      fakeConnection(calls, { resolved: { claude: '', codex: '/usr/bin/codex' } }),
       '/tmp/ipc'
     )
-    expect(result.availableAgents).toEqual({ claude: false, codex: true })
+    expect(result.agentPaths).toEqual({ codex: '/usr/bin/codex' })
   })
 
   it('installs through a version guard so already-installed notify scripts are kept', async () => {
@@ -92,15 +118,40 @@ describe('bootstrapHost', () => {
     expect(installCall).toContain(String(NOTIFY_SCRIPT_VERSION))
   })
 
-  it('re-probes agent availability on cache hits (codex installed after first bootstrap)', async () => {
-    // First call: codex missing on remote.
-    let depsStdout = ' codex\n'
+  it('passes cached agent paths into the resolve script on subsequent bootstraps', async () => {
     const calls: string[][] = []
+    const conn = fakeConnection(calls, {
+      resolved: { claude: '/u/.local/bin/claude', codex: '/u/.local/bin/codex' },
+    })
+    // First bootstrap: caller passes no cache; both paths resolved.
+    const first = await bootstrapHost('host-cache-pass', conn, '/tmp/ipc')
+    expect(first.agentPaths).toEqual({
+      claude: '/u/.local/bin/claude',
+      codex: '/u/.local/bin/codex',
+    })
+
+    // Second bootstrap: caller threads first.agentPaths back in. The resolve
+    // script must receive them as positional args $1/$2.
+    calls.length = 0
+    await bootstrapHost('host-cache-pass', conn, '/tmp/ipc', first.agentPaths)
+    const resolveCall = calls.find((argv) => argv.some((a) => a.includes('resolve_one claude')))
+    expect(resolveCall?.[4]).toBe('/u/.local/bin/claude')
+    expect(resolveCall?.[5]).toBe('/u/.local/bin/codex')
+  })
+
+  it('reflects out-of-band installs (codex appears after first bootstrap)', async () => {
+    const calls: string[][] = []
+    let codexPath = ''
     const conn: HostBootstrapConnection = {
       exec: async (argv) => {
         calls.push(argv)
         const script = argv[2]
-        if (script.includes('command -v')) return ok(depsStdout)
+        if (script.includes('command -v') && script.includes('missing="$missing $dep"')) {
+          return ok('\n')
+        }
+        if (script.includes('resolve_one claude')) {
+          return ok(`/u/.local/bin/claude\n${codexPath}\n`)
+        }
         if (script === 'test -S "$1"') return ok()
         if (script.includes('XDG_CONFIG_HOME')) return ok('/home/dev/.config')
         return ok()
@@ -108,34 +159,30 @@ describe('bootstrapHost', () => {
     }
 
     const first = await bootstrapHost('host-reprobe', conn, '/tmp/ipc')
-    expect(first.availableAgents).toEqual({ claude: true, codex: false })
+    expect(first.agentPaths).toEqual({ claude: '/u/.local/bin/claude' })
 
-    // User installs codex out-of-band; second call must reflect it.
-    depsStdout = '\n'
-    const second = await bootstrapHost('host-reprobe', conn, '/tmp/ipc')
-    expect(second.availableAgents).toEqual({ claude: true, codex: true })
+    codexPath = '/u/.npm/codex'
+    const second = await bootstrapHost('host-reprobe', conn, '/tmp/ipc', first.agentPaths)
+    expect(second.agentPaths).toEqual({
+      claude: '/u/.local/bin/claude',
+      codex: '/u/.npm/codex',
+    })
 
-    // Sanity: the heavy install path didn't run twice. The "notify-v" install
-    // command should appear at most once even though we bootstrapped twice.
+    // Heavy install path should have run only once.
     const installCalls = calls.filter((argv) =>
       argv.some((part) => part.includes(`notify-v${NOTIFY_SCRIPT_VERSION}.sh`))
     )
     expect(installCalls).toHaveLength(1)
   })
 
-  it('throws install-failed when the agent probe times out on a cache hit', async () => {
-    // Prime the cache with a successful first bootstrap.
+  it('throws install-failed when the agent resolution times out on a cache hit', async () => {
     const calls: string[][] = []
-    const okConn = fakeConnection(calls)
-    await bootstrapHost('host-probe-fail', okConn, '/tmp/ipc')
+    await bootstrapHost('host-probe-fail', fakeConnection(calls), '/tmp/ipc')
 
-    // Second call: probe times out. Must NOT silently report both agents
-    // unavailable — that would surface as a misleading "<tool> not installed"
-    // downstream.
     const failingConn: HostBootstrapConnection = {
       exec: async (argv) => {
         const script = argv[2]
-        if (script.includes('command -v')) {
+        if (script.includes('resolve_one claude')) {
           return { stdout: '', stderr: '', code: 0, timedOut: true }
         }
         return ok()
@@ -146,14 +193,14 @@ describe('bootstrapHost', () => {
     })
   })
 
-  it('throws install-failed when the agent probe exits non-zero on a cache hit', async () => {
+  it('throws install-failed when the agent resolution exits non-zero on a cache hit', async () => {
     const calls: string[][] = []
     await bootstrapHost('host-probe-nonzero', fakeConnection(calls), '/tmp/ipc')
 
     const failingConn: HostBootstrapConnection = {
       exec: async (argv) => {
         const script = argv[2]
-        if (script.includes('command -v')) {
+        if (script.includes('resolve_one claude')) {
           return { stdout: '', stderr: 'permission denied', code: 1, timedOut: false }
         }
         return ok()
@@ -162,5 +209,52 @@ describe('bootstrapHost', () => {
     await expect(
       bootstrapHost('host-probe-nonzero', failingConn, '/tmp/ipc')
     ).rejects.toMatchObject({ kind: 'install-failed' })
+  })
+})
+
+describe('resolveRemoteAgents', () => {
+  it('returns absolute paths for each tool the script resolves', async () => {
+    const calls: string[][] = []
+    const conn: HostBootstrapConnection = {
+      exec: async (argv) => {
+        calls.push(argv)
+        return ok('/u/bin/claude\n/u/bin/codex\n')
+      },
+    }
+    const result = await resolveRemoteAgents(conn)
+    expect(result).toEqual({ claude: '/u/bin/claude', codex: '/u/bin/codex' })
+    // Cached args default to empty.
+    expect(calls[0][4]).toBe('')
+    expect(calls[0][5]).toBe('')
+  })
+
+  it('omits agents the script returned empty for', async () => {
+    const conn: HostBootstrapConnection = {
+      exec: async () => ok('\n/u/bin/codex\n'),
+    }
+    const result = await resolveRemoteAgents(conn)
+    expect(result).toEqual({ codex: '/u/bin/codex' })
+  })
+
+  it('threads cached paths through to the script as positional args', async () => {
+    const calls: string[][] = []
+    const conn: HostBootstrapConnection = {
+      exec: async (argv) => {
+        calls.push(argv)
+        return ok('/cached/claude\n/cached/codex\n')
+      },
+    }
+    const cached: AgentResolution = { claude: '/cached/claude', codex: '/cached/codex' }
+    const result = await resolveRemoteAgents(conn, cached)
+    expect(calls[0][4]).toBe('/cached/claude')
+    expect(calls[0][5]).toBe('/cached/codex')
+    expect(result).toEqual(cached)
+  })
+
+  it('throws install-failed on timeout', async () => {
+    const conn: HostBootstrapConnection = {
+      exec: async () => ({ stdout: '', stderr: '', code: 0, timedOut: true }),
+    }
+    await expect(resolveRemoteAgents(conn)).rejects.toMatchObject({ kind: 'install-failed' })
   })
 })
