@@ -1431,6 +1431,32 @@ describe('openSessionsForOpenPrs', () => {
 
     expect(result).toBe('Failed to list open PRs: gh auth failed')
   })
+
+  it('surfaces remote SSH auth failures separately from missing gh', async () => {
+    const sm = await loadSessionManager()
+    state.execRemoteResults.set('sh -c command -v gh >/dev/null 2>&1', {
+      stdout: '',
+      stderr: 'Permission denied (publickey).\n',
+      code: 255,
+      timedOut: false,
+    })
+
+    const result = await sm.openSessionsForOpenPrs('/remote/proj', 'h1')
+    expect(result).toBe('SSH authentication failed on Dev: Permission denied (publickey).')
+  })
+
+  it('still reports missing gh when the remote probe runs and gh is absent', async () => {
+    const sm = await loadSessionManager()
+    state.execRemoteResults.set('sh -c command -v gh >/dev/null 2>&1', {
+      stdout: '',
+      stderr: '',
+      code: 1,
+      timedOut: false,
+    })
+
+    const result = await sm.openSessionsForOpenPrs('/remote/proj', 'h1')
+    expect(result).toBe('gh CLI is not installed on host Dev.')
+  })
 })
 
 describe('openSessionsForOpenIssues', () => {

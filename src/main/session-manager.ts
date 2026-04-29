@@ -39,6 +39,7 @@ import {
 import { getHost, setHostAgentPaths } from './host-registry'
 import { listRemoteProjects } from './remote-project-registry'
 import { listenHookServerForHost } from './hook-server'
+import { classifySshExit } from './ssh-exit-parser'
 import {
   ensureHostConnection,
   exec as execRemote,
@@ -847,9 +848,10 @@ async function createRemotePrSession(
 
   const { notifyScriptPath, agentPaths } = await prepareRemoteHost(host)
 
-  if (!(await probeRemoteGh(host))) {
+  const ghProbe = await probeRemoteGh(host)
+  if (!ghProbe.ok) {
     await releaseHostConnection(hostId).catch(() => undefined)
-    return `gh CLI is not installed on host ${host.label || host.alias}.`
+    return ghProbe.error
   }
 
   let prInfo: { headRefName: string; state: string; title: string }
@@ -1559,6 +1561,7 @@ type CreateNumberedSession = (
   number: number,
   hostId: string | null
 ) => Promise<Session | string>
+type RemoteGhProbe = { ok: true } | { ok: false; error: string }
 
 interface OpenSessionsDeps {
   listPrs?: ListNumberedItems
@@ -1637,9 +1640,8 @@ async function listRemoteOpenGhItems(
   kind: 'pr' | 'issue'
 ): Promise<NumberedGhItem[] | string> {
   const host = getRequiredHost(hostId)
-  if (!(await probeRemoteGh(host))) {
-    return `gh CLI is not installed on host ${host.label || host.alias}.`
-  }
+  const ghProbe = await probeRemoteGh(host)
+  if (!ghProbe.ok) return ghProbe.error
 
   try {
     const stdout = await expectRemoteOk(
@@ -1729,9 +1731,28 @@ async function openSessionsForNumberedItems(
   return { created, skipped: toSkip, failed }
 }
 
-async function probeRemoteGh(host: Host): Promise<boolean> {
+function describeRemoteGhProbeFailure(
+  host: Host,
+  result: { code: number; stderr: string; timedOut: boolean }
+): string {
+  const label = host.label || host.alias
+  if (result.timedOut) return `Cannot reach ${label}: ssh timed out while checking for gh.`
+
+  const { reason, message } = classifySshExit({ exitCode: result.code, stderr: result.stderr })
+  if (reason === 'auth-failed') return `SSH authentication failed on ${label}: ${message}`
+  if (reason === 'network') return `Cannot reach ${label}: ${message}`
+  if (reason === 'bind-unlink') {
+    return `${label}: remote sshd needs StreamLocalBindUnlink yes: ${message}`
+  }
+  if (reason === 'dep-missing') return `${label}: remote shell dependency missing: ${message}`
+
+  return `gh CLI is not installed on host ${label}.`
+}
+
+async function probeRemoteGh(host: Host): Promise<RemoteGhProbe> {
   const result = await execRemote(host, ['sh', '-c', 'command -v gh >/dev/null 2>&1'])
-  return result.code === 0 && !result.timedOut
+  if (result.code === 0 && !result.timedOut) return { ok: true }
+  return { ok: false, error: describeRemoteGhProbeFailure(host, result) }
 }
 
 export async function createPrSession(
