@@ -22,6 +22,10 @@ contextBridge.exposeInMainWorld('api', {
   ) => ipcRenderer.invoke('sessions:create', projectPath, name, hostId ?? null, options),
   createPrSession: (projectPath: string, prNumber: number, hostId?: string | null) =>
     ipcRenderer.invoke('sessions:create-pr', projectPath, prNumber, hostId ?? null),
+  openSessionsForOpenPrs: (projectPath: string, hostId?: string | null) =>
+    ipcRenderer.invoke('sessions:open-all-prs', projectPath, hostId ?? null),
+  openSessionsForOpenIssues: (projectPath: string, hostId?: string | null) =>
+    ipcRenderer.invoke('sessions:open-all-issues', projectPath, hostId ?? null),
   mirrorWorktree: (projectPath: string, worktreePath: string) =>
     ipcRenderer.invoke('sessions:mirror', projectPath, worktreePath),
   mirrorAllWorktrees: (projectPath: string) =>

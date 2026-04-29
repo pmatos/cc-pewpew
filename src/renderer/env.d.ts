@@ -5,6 +5,7 @@ import type {
   CreateSessionOptions,
   DiffMode,
   Host,
+  OpenSessionsSummary,
   Project,
   RemoteProject,
   ReviewBranchesResult,
@@ -35,6 +36,14 @@ declare global {
         prNumber: number,
         hostId?: string | null
       ) => Promise<Session | string>
+      openSessionsForOpenPrs: (
+        projectPath: string,
+        hostId?: string | null
+      ) => Promise<OpenSessionsSummary | string>
+      openSessionsForOpenIssues: (
+        projectPath: string,
+        hostId?: string | null
+      ) => Promise<OpenSessionsSummary | string>
       mirrorWorktree: (
         projectPath: string,
         worktreePath: string

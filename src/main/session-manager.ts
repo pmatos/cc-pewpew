@@ -55,6 +55,7 @@ import type {
   AgentTool,
   CreateSessionOptions,
   Host,
+  OpenSessionsSummary,
   RemoteProject,
   Session,
   SessionStatus,
@@ -1530,6 +1531,181 @@ async function promptCleanup(id: string): Promise<void> {
   }
 }
 
+export function selectNumbersToOpen<T extends { number: number }>(
+  items: T[],
+  existing: Set<number>
+): { toCreate: T[]; toSkip: number[] } {
+  const toCreate: T[] = []
+  const toSkip: number[] = []
+  const seen = new Set(existing)
+  for (const item of items) {
+    if (seen.has(item.number)) {
+      toSkip.push(item.number)
+    } else {
+      seen.add(item.number)
+      toCreate.push(item)
+    }
+  }
+  return { toCreate, toSkip }
+}
+
+type NumberedGhItem = { number: number }
+type ListNumberedItems = (
+  projectPath: string,
+  hostId: string | null
+) => Promise<NumberedGhItem[] | string>
+type CreateNumberedSession = (
+  projectPath: string,
+  number: number,
+  hostId: string | null
+) => Promise<Session | string>
+
+interface OpenSessionsDeps {
+  listPrs?: ListNumberedItems
+  listIssues?: ListNumberedItems
+  createPrSession?: CreateNumberedSession
+  createIssueSession?: CreateNumberedSession
+}
+
+interface CreateIssueSessionDeps {
+  runGit?: GitRunner
+  branchExists?: (projectPath: string, branchName: string) => Promise<boolean>
+  createSessionForWorktree?: (
+    projectPath: string,
+    worktreePath: string,
+    label?: string
+  ) => Promise<Session>
+}
+
+function describeGhError(err: unknown): string {
+  const detail =
+    typeof err === 'object' && err !== null && 'stderr' in err
+      ? String((err as { stderr?: unknown }).stderr ?? '').trim()
+      : ''
+  if (detail) return detail
+  if (err instanceof Error) return err.message.replace(/^Error:\s*/, '')
+  return String(err)
+}
+
+function parseNumberedGhItems(stdout: string, label: string): NumberedGhItem[] {
+  const parsed = JSON.parse(stdout) as unknown
+  if (!Array.isArray(parsed)) throw new Error(`Expected ${label} list JSON array.`)
+  return parsed
+    .map((item) => {
+      if (typeof item !== 'object' || item === null) return undefined
+      const number = (item as { number?: unknown }).number
+      return typeof number === 'number' && Number.isInteger(number) && number > 0
+        ? { number }
+        : undefined
+    })
+    .filter((item): item is NumberedGhItem => item !== undefined)
+}
+
+async function listLocalOpenGhItems(
+  projectPath: string,
+  kind: 'pr' | 'issue'
+): Promise<NumberedGhItem[] | string> {
+  try {
+    const { stdout } = await execFileAsync(
+      'gh',
+      [kind, 'list', '--state', 'open', '--json', 'number', '--limit', '100'],
+      { cwd: projectPath, timeout: 30000 }
+    )
+    return parseNumberedGhItems(String(stdout), kind === 'pr' ? 'PR' : 'issue')
+  } catch (err) {
+    return `Failed to list open ${kind === 'pr' ? 'PRs' : 'issues'}: ${describeGhError(err)}`
+  }
+}
+
+async function listRemoteOpenGhItems(
+  projectPath: string,
+  hostId: string,
+  kind: 'pr' | 'issue'
+): Promise<NumberedGhItem[] | string> {
+  const host = getRequiredHost(hostId)
+  if (!(await probeRemoteGh(host))) {
+    return `gh CLI is not installed on host ${host.label || host.alias}.`
+  }
+
+  try {
+    const stdout = await expectRemoteOk(
+      host,
+      [
+        'sh',
+        '-c',
+        'cd "$1" && gh "$2" list --state open --json number --limit 100',
+        '_',
+        projectPath,
+        kind,
+      ],
+      'gh failed'
+    )
+    return parseNumberedGhItems(stdout, kind === 'pr' ? 'PR' : 'issue')
+  } catch (err) {
+    return `Failed to list open ${kind === 'pr' ? 'PRs' : 'issues'}: ${describeGhError(err)}`
+  }
+}
+
+async function listOpenPrs(
+  projectPath: string,
+  hostId: string | null
+): Promise<NumberedGhItem[] | string> {
+  return hostId === null
+    ? listLocalOpenGhItems(projectPath, 'pr')
+    : listRemoteOpenGhItems(projectPath, hostId, 'pr')
+}
+
+async function listOpenIssues(
+  projectPath: string,
+  hostId: string | null
+): Promise<NumberedGhItem[] | string> {
+  return hostId === null
+    ? listLocalOpenGhItems(projectPath, 'issue')
+    : listRemoteOpenGhItems(projectPath, hostId, 'issue')
+}
+
+async function openSessionsForNumberedItems(
+  projectPath: string,
+  hostId: string | null,
+  field: 'prNumber' | 'issueNumber',
+  listItems: ListNumberedItems,
+  createSession: CreateNumberedSession
+): Promise<OpenSessionsSummary | string> {
+  let items: NumberedGhItem[] | string
+  try {
+    items = await listItems(projectPath, hostId)
+  } catch (err) {
+    return describeGhError(err)
+  }
+  if (typeof items === 'string') return items
+
+  const existing = new Set<number>()
+  for (const entry of sessions.values()) {
+    if (entry.session.hostId !== hostId || entry.session.projectPath !== projectPath) continue
+    const number = entry.session[field]
+    if (number !== undefined) existing.add(number)
+  }
+
+  const { toCreate, toSkip } = selectNumbersToOpen(items, existing)
+  const created: Session[] = []
+  const failed: { number: number; error: string }[] = []
+
+  for (const item of toCreate) {
+    try {
+      const result = await createSession(projectPath, item.number, hostId)
+      if (typeof result === 'string') {
+        failed.push({ number: item.number, error: result })
+      } else {
+        created.push(result)
+      }
+    } catch (err) {
+      failed.push({ number: item.number, error: describeGhError(err) })
+    }
+  }
+
+  return { created, skipped: toSkip, failed }
+}
+
 async function probeRemoteGh(host: Host): Promise<boolean> {
   const result = await execRemote(host, ['sh', '-c', 'command -v gh >/dev/null 2>&1'])
   return result.code === 0 && !result.timedOut
@@ -1601,6 +1777,202 @@ export async function createPrSession(
   }
   onSessionsChanged()
   return session
+}
+
+export async function createIssueSession(
+  projectPath: string,
+  issueNumber: number,
+  hostId: string | null = null,
+  deps: CreateIssueSessionDeps = {}
+): Promise<Session | string> {
+  if (hostId !== null) return createRemoteIssueSession(hostId, projectPath, issueNumber)
+
+  const branch = `issue-${issueNumber}`
+  const worktreeName = `issue-${issueNumber}`
+  const worktreePath = join(projectPath, '.claude', 'worktrees', worktreeName)
+
+  for (const e of sessions.values()) {
+    if (e.session.hostId === null && e.session.worktreePath === worktreePath) {
+      return e.session
+    }
+  }
+
+  const runGit =
+    deps.runGit ??
+    (async (argv: string[]) => {
+      const { stdout } = await execFileAsync('git', ['-C', projectPath, ...argv], {
+        timeout: 30000,
+      })
+      return { stdout: String(stdout) }
+    })
+  const hasBranch =
+    deps.branchExists ?? ((root: string, branchName: string) => branchExists(root, branchName))
+  const adopt = deps.createSessionForWorktree ?? createSessionForWorktree
+
+  let originRef: string
+  try {
+    originRef = await resolveOriginDefaultBase(runGit)
+  } catch (err) {
+    const msg = (err as Error).message
+    if (msg === 'no-origin-remote') return 'This project has no origin remote.'
+    if (msg === 'no-origin-default-branch') return "Could not determine origin's default branch."
+    return `Failed to resolve origin default: ${msg}`
+  }
+
+  try {
+    await runGit(['worktree', 'add', worktreePath, '-b', branch, originRef])
+  } catch (err) {
+    if (!(await hasBranch(projectPath, branch))) {
+      return `Failed to create worktree for branch "${branch}": ${(err as Error).message}`
+    }
+    try {
+      await runGit(['worktree', 'add', worktreePath, branch])
+    } catch (fallbackErr) {
+      return `Failed to create worktree for branch "${branch}": ${(fallbackErr as Error).message}`
+    }
+  }
+
+  const session = await adopt(projectPath, worktreePath, worktreeName)
+  session.issueNumber = issueNumber
+  onSessionsChanged()
+  return session
+}
+
+async function createRemoteIssueSession(
+  hostId: string,
+  projectPath: string,
+  issueNumber: number
+): Promise<Session | string> {
+  const host = getRequiredHost(hostId)
+  const remoteProject = getRemoteProject(hostId, projectPath)
+
+  const branch = `issue-${issueNumber}`
+  const worktreeName = `issue-${issueNumber}`
+  const worktreePath = posix.join(projectPath, '.claude', 'worktrees', worktreeName)
+
+  for (const e of sessions.values()) {
+    if (e.session.hostId === hostId && e.session.worktreePath === worktreePath) {
+      return e.session
+    }
+  }
+
+  const { notifyScriptPath, agentPaths } = await prepareRemoteHost(host)
+  const effectiveTool: AgentTool = getConfig().defaultTool
+  const agentPath = agentPaths[effectiveTool]
+  if (!agentPath) {
+    await releaseHostConnection(hostId).catch(() => undefined)
+    return `${effectiveTool} is not installed on host ${host.label || host.alias}.`
+  }
+
+  const id = randomUUID().slice(0, 8)
+  const tmuxSession = `cc-pewpew-${id}`
+  let resolvedBranch: string
+  try {
+    let originRef: string
+    try {
+      originRef = await resolveOriginDefaultBase((argv) =>
+        expectRemoteOk(host, ['git', '-C', projectPath, ...argv], 'git failed').then((stdout) => ({
+          stdout,
+        }))
+      )
+    } catch (err) {
+      const msg = (err as Error).message
+      await releaseHostConnection(hostId).catch(() => undefined)
+      if (msg === 'no-origin-remote') return 'This project has no origin remote.'
+      if (msg === 'no-origin-default-branch') return "Could not determine origin's default branch."
+      return `Failed to resolve origin default: ${msg}`
+    }
+
+    try {
+      await expectRemoteOk(
+        host,
+        ['git', '-C', projectPath, 'worktree', 'add', worktreePath, '-b', branch, originRef],
+        'Failed to create remote worktree'
+      )
+    } catch (err) {
+      if (!(await remoteBranchExists(host, projectPath, branch))) {
+        await releaseHostConnection(hostId).catch(() => undefined)
+        return `Failed to create worktree for branch "${branch}": ${(err as Error).message}`
+      }
+      try {
+        await expectRemoteOk(
+          host,
+          ['git', '-C', projectPath, 'worktree', 'add', worktreePath, branch],
+          'Failed to create remote worktree'
+        )
+      } catch (fallbackErr) {
+        await releaseHostConnection(hostId).catch(() => undefined)
+        return `Failed to create worktree for branch "${branch}": ${(fallbackErr as Error).message}`
+      }
+    }
+
+    resolvedBranch =
+      (
+        await expectRemoteOk(
+          host,
+          ['git', '-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+          'Failed to resolve remote branch'
+        )
+      ).trim() || branch
+
+    await installRemoteAgentHooks(effectiveTool, host, worktreePath, notifyScriptPath)
+    await createRemotePty(id, worktreePath, host, { tool: effectiveTool, agentPath })
+  } catch (err) {
+    await releaseHostConnection(hostId).catch(() => undefined)
+    throw err
+  }
+  await releaseHostConnection(hostId).catch(() => undefined)
+
+  const session: Session = {
+    id,
+    hostId,
+    projectPath,
+    projectName: remoteProject.name,
+    worktreeName,
+    worktreePath,
+    branch: resolvedBranch,
+    issueNumber,
+    pid: 0,
+    tmuxSession,
+    status: 'running',
+    connectionState: 'live',
+    lastActivity: Date.now(),
+    hookEvents: [],
+    tool: effectiveTool,
+    ...(remoteProject.repoFingerprint ? { repoFingerprint: remoteProject.repoFingerprint } : {}),
+  }
+
+  sessions.set(id, { session })
+  onSessionsChanged()
+  return session
+}
+
+export async function openSessionsForOpenPrs(
+  projectPath: string,
+  hostId: string | null = null,
+  deps: OpenSessionsDeps = {}
+): Promise<OpenSessionsSummary | string> {
+  return openSessionsForNumberedItems(
+    projectPath,
+    hostId,
+    'prNumber',
+    deps.listPrs ?? listOpenPrs,
+    deps.createPrSession ?? createPrSession
+  )
+}
+
+export async function openSessionsForOpenIssues(
+  projectPath: string,
+  hostId: string | null = null,
+  deps: OpenSessionsDeps = {}
+): Promise<OpenSessionsSummary | string> {
+  return openSessionsForNumberedItems(
+    projectPath,
+    hostId,
+    'issueNumber',
+    deps.listIssues ?? listOpenIssues,
+    deps.createIssueSession ?? createIssueSession
+  )
 }
 
 export function getSession(id: string): Session | undefined {

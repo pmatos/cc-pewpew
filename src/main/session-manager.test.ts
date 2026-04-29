@@ -1272,3 +1272,182 @@ describe('sanitizeBranchPrefix', () => {
     expect(sm.sanitizeBranchPrefix('')).toBe('cc-pewpew')
   })
 })
+
+describe('createIssueSession', () => {
+  it('creates a worktree on branch issue-<n> from origin default and sets issueNumber', async () => {
+    const sm = await loadSessionManager()
+    const runGit = vi.fn(async (argv: string[]) => {
+      const key = argv.join(' ')
+      if (key === 'remote get-url origin') return { stdout: 'git@example.com:org/repo.git\n' }
+      if (key === 'fetch origin --quiet') return { stdout: '' }
+      if (key === 'ls-remote --symref origin HEAD') {
+        return { stdout: 'ref: refs/heads/main\tHEAD\nabc123\tHEAD\n' }
+      }
+      if (key === 'symbolic-ref --short refs/remotes/origin/HEAD') {
+        return { stdout: 'origin/main\n' }
+      }
+      if (key === 'rev-parse --verify refs/remotes/origin/main') {
+        return { stdout: 'abc123\n' }
+      }
+      if (
+        key === 'worktree add /proj/.claude/worktrees/issue-42 -b issue-42 refs/remotes/origin/main'
+      ) {
+        return { stdout: '' }
+      }
+      throw new Error(`unexpected git ${key}`)
+    })
+    const createSessionForWorktree = vi.fn(async () =>
+      baseLocalSession({
+        id: 'issue-42',
+        projectPath: '/proj',
+        worktreeName: 'issue-42',
+        worktreePath: '/proj/.claude/worktrees/issue-42',
+        branch: 'issue-42',
+      })
+    )
+
+    const result = await sm.createIssueSession('/proj', 42, null, {
+      runGit,
+      createSessionForWorktree,
+    })
+
+    expect(typeof result).not.toBe('string')
+    if (typeof result === 'string') throw new Error(result)
+    expect(result.issueNumber).toBe(42)
+    expect(result.worktreeName).toBe('issue-42')
+    expect(createSessionForWorktree).toHaveBeenCalledWith(
+      '/proj',
+      '/proj/.claude/worktrees/issue-42',
+      'issue-42'
+    )
+    expect(runGit).toHaveBeenCalledWith([
+      'worktree',
+      'add',
+      '/proj/.claude/worktrees/issue-42',
+      '-b',
+      'issue-42',
+      'refs/remotes/origin/main',
+    ])
+  })
+
+  it('returns a user-facing error string when origin default is missing', async () => {
+    const sm = await loadSessionManager()
+    const runGit = vi.fn(async (argv: string[]) => {
+      const key = argv.join(' ')
+      if (key === 'remote get-url origin') return { stdout: 'git@example.com:org/repo.git\n' }
+      if (key === 'fetch origin --quiet') return { stdout: '' }
+      throw new Error(`missing ${key}`)
+    })
+
+    const result = await sm.createIssueSession('/proj', 99, null, { runGit })
+    expect(result).toBe("Could not determine origin's default branch.")
+  })
+})
+
+describe('selectNumbersToOpen', () => {
+  it('partitions items into toCreate (new) and toSkip (already present)', async () => {
+    const sm = await loadSessionManager()
+    const items = [{ number: 1 }, { number: 2 }, { number: 3 }]
+    const existing = new Set([2])
+    const result = sm.selectNumbersToOpen(items, existing)
+    expect(result.toCreate).toEqual([{ number: 1 }, { number: 3 }])
+    expect(result.toSkip).toEqual([2])
+  })
+
+  it('dedupes repeated items in the same list', async () => {
+    const sm = await loadSessionManager()
+    const result = sm.selectNumbersToOpen([{ number: 7 }, { number: 7 }], new Set())
+    expect(result.toCreate).toEqual([{ number: 7 }])
+    expect(result.toSkip).toEqual([7])
+  })
+
+  it('returns empty toCreate when everything matches', async () => {
+    const sm = await loadSessionManager()
+    const result = sm.selectNumbersToOpen([{ number: 1 }, { number: 2 }], new Set([1, 2]))
+    expect(result.toCreate).toEqual([])
+    expect(result.toSkip).toEqual([1, 2])
+  })
+})
+
+describe('openSessionsForOpenPrs', () => {
+  it('lists open PRs, skips ones that already have a session, creates the rest', async () => {
+    const sm = await loadSessionManager()
+    writeSessionsJson([baseLocalSession({ id: 's-existing', prNumber: 7, projectPath: '/proj' })])
+    sm.restoreSessions()
+
+    const listPrs = vi.fn(async () => [
+      { number: 7, title: 'old', headRefName: 'a' },
+      { number: 8, title: 'new', headRefName: 'b' },
+      { number: 9, title: 'newer', headRefName: 'c' },
+    ])
+    const createPrSession = vi.fn(
+      async (_projectPath: string, prNumber: number, _hostId: string | null) =>
+        baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session | string
+    )
+
+    const result = await sm.openSessionsForOpenPrs('/proj', null, { listPrs, createPrSession })
+    expect(typeof result).not.toBe('string')
+    if (typeof result === 'string') throw new Error(result)
+
+    expect(result.skipped).toEqual([7])
+    expect(result.created.map((s) => s.prNumber).sort()).toEqual([8, 9])
+    expect(result.failed).toEqual([])
+    expect(listPrs).toHaveBeenCalledWith('/proj', null)
+    expect(createPrSession).toHaveBeenCalledTimes(2)
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 8, null)
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 9, null)
+  })
+
+  it('surfaces gh list errors as a string', async () => {
+    const sm = await loadSessionManager()
+    const result = await sm.openSessionsForOpenPrs('/proj', null, {
+      listPrs: async () => 'Failed to list open PRs: gh auth failed',
+      createPrSession: vi.fn(),
+    })
+
+    expect(result).toBe('Failed to list open PRs: gh auth failed')
+  })
+})
+
+describe('openSessionsForOpenIssues', () => {
+  it('lists open issues, skips ones that already have a session, creates the rest', async () => {
+    const sm = await loadSessionManager()
+    writeSessionsJson([
+      baseLocalSession({ id: 's-existing', issueNumber: 3, projectPath: '/proj' }),
+    ])
+    sm.restoreSessions()
+
+    const listIssues = vi.fn(async () => [{ number: 3 }, { number: 4 }])
+    const createIssueSession = vi.fn(
+      async (_projectPath: string, issueNumber: number, _hostId: string | null) =>
+        baseLocalSession({ id: `s-${issueNumber}`, issueNumber }) as Session | string
+    )
+
+    const result = await sm.openSessionsForOpenIssues('/proj', null, {
+      listIssues,
+      createIssueSession,
+    })
+    expect(typeof result).not.toBe('string')
+    if (typeof result === 'string') throw new Error(result)
+
+    expect(result.skipped).toEqual([3])
+    expect(result.created.map((s) => s.issueNumber)).toEqual([4])
+    expect(result.failed).toEqual([])
+    expect(listIssues).toHaveBeenCalledWith('/proj', null)
+    expect(createIssueSession).toHaveBeenCalledTimes(1)
+    expect(createIssueSession).toHaveBeenCalledWith('/proj', 4, null)
+  })
+
+  it('records per-issue create failures in the summary', async () => {
+    const sm = await loadSessionManager()
+    const result = await sm.openSessionsForOpenIssues('/proj', null, {
+      listIssues: async () => [{ number: 5 }],
+      createIssueSession: async () => 'boom',
+    })
+    expect(typeof result).not.toBe('string')
+    if (typeof result === 'string') throw new Error(result)
+    expect(result.created).toEqual([])
+    expect(result.skipped).toEqual([])
+    expect(result.failed).toEqual([{ number: 5, error: 'boom' }])
+  })
+})

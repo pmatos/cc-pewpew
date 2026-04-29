@@ -30,6 +30,8 @@ import {
   createSessionForWorktree,
   mirrorAllWorktrees,
   createPrSession,
+  openSessionsForOpenPrs,
+  openSessionsForOpenIssues,
   getSession,
   getSessions,
   restoreSessions,
@@ -288,6 +290,20 @@ app.whenReady().then(async () => {
     'sessions:create-pr',
     async (_event, projectPath: string, prNumber: number, hostId?: string | null) => {
       return createPrSession(projectPath, prNumber, hostId ?? null)
+    }
+  )
+
+  ipcMain.handle(
+    'sessions:open-all-prs',
+    async (_event, projectPath: string, hostId?: string | null) => {
+      return openSessionsForOpenPrs(projectPath, hostId ?? null)
+    }
+  )
+
+  ipcMain.handle(
+    'sessions:open-all-issues',
+    async (_event, projectPath: string, hostId?: string | null) => {
+      return openSessionsForOpenIssues(projectPath, hostId ?? null)
     }
   )
 

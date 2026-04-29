@@ -52,6 +52,12 @@ export interface Session {
   agentSessionId?: string
 }
 
+export interface OpenSessionsSummary {
+  created: Session[]
+  skipped: number[]
+  failed: { number: number; error: string }[]
+}
+
 export interface HookEvent {
   method: string
   sessionId: string
