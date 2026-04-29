@@ -1587,18 +1587,27 @@ function describeGhError(err: unknown): string {
   return String(err)
 }
 
-function parseNumberedGhItems(stdout: string, label: string): NumberedGhItem[] {
-  const parsed = JSON.parse(stdout) as unknown
-  if (!Array.isArray(parsed)) throw new Error(`Expected ${label} list JSON array.`)
-  return parsed
-    .map((item) => {
-      if (typeof item !== 'object' || item === null) return undefined
-      const number = (item as { number?: unknown }).number
-      return typeof number === 'number' && Number.isInteger(number) && number > 0
-        ? { number }
-        : undefined
-    })
-    .filter((item): item is NumberedGhItem => item !== undefined)
+export function ghApiOpenItemsArgs(kind: 'pr' | 'issue', repo: string): string[] {
+  const endpoint =
+    kind === 'pr'
+      ? `repos/${repo}/pulls?state=open&per_page=100`
+      : `repos/${repo}/issues?state=open&per_page=100`
+  const jq = kind === 'pr' ? '.[].number' : '.[] | select(.pull_request | not) | .number'
+  return ['api', '--paginate', endpoint, '--jq', jq]
+}
+
+function parseNumberedGhLines(stdout: string, label: string): NumberedGhItem[] {
+  const items: NumberedGhItem[] = []
+  for (const raw of stdout.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line) continue
+    const number = Number(line)
+    if (!Number.isInteger(number) || number <= 0) {
+      throw new Error(`Expected ${label} number, got ${JSON.stringify(line)}.`)
+    }
+    items.push({ number })
+  }
+  return items
 }
 
 async function listLocalOpenGhItems(
@@ -1606,12 +1615,17 @@ async function listLocalOpenGhItems(
   kind: 'pr' | 'issue'
 ): Promise<NumberedGhItem[] | string> {
   try {
-    const { stdout } = await execFileAsync(
+    const { stdout: repoStdout } = await execFileAsync(
       'gh',
-      [kind, 'list', '--state', 'open', '--json', 'number', '--limit', '100'],
+      ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
       { cwd: projectPath, timeout: 30000 }
     )
-    return parseNumberedGhItems(String(stdout), kind === 'pr' ? 'PR' : 'issue')
+    const repo = String(repoStdout).trim()
+    const { stdout } = await execFileAsync('gh', ghApiOpenItemsArgs(kind, repo), {
+      cwd: projectPath,
+      timeout: 30000,
+    })
+    return parseNumberedGhLines(String(stdout), kind === 'pr' ? 'PR' : 'issue')
   } catch (err) {
     return `Failed to list open ${kind === 'pr' ? 'PRs' : 'issues'}: ${describeGhError(err)}`
   }
@@ -1633,14 +1647,23 @@ async function listRemoteOpenGhItems(
       [
         'sh',
         '-c',
-        'cd "$1" && gh "$2" list --state open --json number --limit 100',
+        [
+          'set -e',
+          'cd "$1"',
+          'repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)',
+          'if [ "$2" = pr ]; then',
+          '  gh api --paginate "repos/$repo/pulls?state=open&per_page=100" --jq ".[].number"',
+          'else',
+          '  gh api --paginate "repos/$repo/issues?state=open&per_page=100" --jq ".[] | select(.pull_request | not) | .number"',
+          'fi',
+        ].join('\n'),
         '_',
         projectPath,
         kind,
       ],
       'gh failed'
     )
-    return parseNumberedGhItems(stdout, kind === 'pr' ? 'PR' : 'issue')
+    return parseNumberedGhLines(stdout, kind === 'pr' ? 'PR' : 'issue')
   } catch (err) {
     return `Failed to list open ${kind === 'pr' ? 'PRs' : 'issues'}: ${describeGhError(err)}`
   }

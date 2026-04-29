@@ -1369,6 +1369,30 @@ describe('selectNumbersToOpen', () => {
   })
 })
 
+describe('ghApiOpenItemsArgs', () => {
+  it('uses paginated REST calls for PR numbers', async () => {
+    const sm = await loadSessionManager()
+    expect(sm.ghApiOpenItemsArgs('pr', 'owner/repo')).toEqual([
+      'api',
+      '--paginate',
+      'repos/owner/repo/pulls?state=open&per_page=100',
+      '--jq',
+      '.[].number',
+    ])
+  })
+
+  it('uses paginated REST calls for issue numbers without including PRs', async () => {
+    const sm = await loadSessionManager()
+    expect(sm.ghApiOpenItemsArgs('issue', 'owner/repo')).toEqual([
+      'api',
+      '--paginate',
+      'repos/owner/repo/issues?state=open&per_page=100',
+      '--jq',
+      '.[] | select(.pull_request | not) | .number',
+    ])
+  })
+})
+
 describe('openSessionsForOpenPrs', () => {
   it('lists open PRs, skips ones that already have a session, creates the rest', async () => {
     const sm = await loadSessionManager()
