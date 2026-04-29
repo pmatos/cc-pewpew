@@ -3,7 +3,7 @@ import { useProjectsStore } from '../stores/projects'
 import { useSessionsStore } from '../stores/sessions'
 import { useHostsStore } from '../stores/hosts'
 import ContextMenu, { type MenuItem } from './ContextMenu'
-import type { AgentTool } from '../../shared/types'
+import type { AgentTool, OpenSessionsSummary } from '../../shared/types'
 
 interface MenuState {
   x: number
@@ -108,6 +108,48 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     return message.replace(/^Error:\s*/, '') || 'Failed to create session.'
   }
 
+  const formatOpenAllSummary = (result: OpenSessionsSummary, label: 'PR' | 'issue'): string => {
+    const parts: string[] = []
+    const sessionLabel = label === 'PR' ? 'PR session' : 'issue session'
+    const itemLabel = label === 'PR' ? 'PR' : 'issue'
+    if (result.created.length > 0) {
+      parts.push(
+        `Opened ${result.created.length} ${sessionLabel}${result.created.length === 1 ? '' : 's'}`
+      )
+    }
+    if (result.skipped.length > 0) parts.push(`skipped ${result.skipped.length}`)
+    if (result.failed.length > 0) parts.push(`${result.failed.length} failed`)
+    return parts.length > 0
+      ? parts.join(', ')
+      : `No open ${itemLabel === 'PR' ? 'PRs' : 'issues'} to open`
+  }
+
+  const handleOpenAllPrs = async (projectPath: string, hostId: string | null) => {
+    if (creating) return
+    setCreating(true)
+    try {
+      const result = await window.api.openSessionsForOpenPrs(projectPath, hostId)
+      showToast(typeof result === 'string' ? result : formatOpenAllSummary(result, 'PR'))
+    } catch (err) {
+      showToast(`Failed to open PR sessions: ${String(err)}`)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleOpenAllIssues = async (projectPath: string, hostId: string | null) => {
+    if (creating) return
+    setCreating(true)
+    try {
+      const result = await window.api.openSessionsForOpenIssues(projectPath, hostId)
+      showToast(typeof result === 'string' ? result : formatOpenAllSummary(result, 'issue'))
+    } catch (err) {
+      showToast(`Failed to open issue sessions: ${String(err)}`)
+    } finally {
+      setCreating(false)
+    }
+  }
+
   const getMenuItems = (): MenuItem[] => {
     if (!menu) return []
     const items: MenuItem[] = []
@@ -128,6 +170,16 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           setPrNumberInput('')
           setPrError(null)
         },
+      })
+      items.push({
+        label: 'Open sessions for all open PRs',
+        disabled: creating,
+        onClick: () => void handleOpenAllPrs(menu.projectPath, hostId),
+      })
+      items.push({
+        label: 'Open sessions for all open issues',
+        disabled: creating,
+        onClick: () => void handleOpenAllIssues(menu.projectPath, hostId),
       })
       items.push({ label: '', separator: true, onClick: () => {} })
       items.push({
@@ -162,6 +214,16 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           setPrNumberInput('')
           setPrError(null)
         },
+      })
+      items.push({
+        label: 'Open sessions for all open PRs',
+        disabled: creating,
+        onClick: () => void handleOpenAllPrs(menu.projectPath, null),
+      })
+      items.push({
+        label: 'Open sessions for all open issues',
+        disabled: creating,
+        onClick: () => void handleOpenAllIssues(menu.projectPath, null),
       })
 
       const project = projects.find((p) => p.path === menu.projectPath)
