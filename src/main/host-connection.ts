@@ -307,8 +307,11 @@ async function controlCheck(runtime: HostRuntime): Promise<boolean> {
 
 async function waitForControl(runtime: HostRuntime): Promise<void> {
   const deadline = Date.now() + 5000
+  // Don't bail on child.exitCode being set: ControlPersist daemonizes the
+  // foreground ssh, so exitCode flips to 0 once setup completes while the
+  // control socket lives on in the daemon. A non-zero exit is signaled by
+  // exitPromise in startRuntime, which wins the Promise.race.
   while (Date.now() < deadline) {
-    if (!runtime.child || runtime.child.exitCode !== null) break
     if (await controlCheck(runtime)) return
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
@@ -344,9 +347,12 @@ async function startRuntime(runtime: HostRuntime): Promise<void> {
     stderr += data.toString()
   })
 
+  // ControlPersist=10m + ControlMaster=yes forks the foreground ssh into the
+  // background once the master socket is set up; the parent then exits 0 while
+  // the daemon keeps the control socket alive. Treat code 0 as successful
+  // daemonization and let waitForControl detect the live socket.
   const exitPromise = new Promise<never>((_, reject) => {
     child.once('exit', (code) => {
-      runtime.child = null
       logSshInvocation(
         { hostId: runtime.host.hostId, kind: 'control' },
         argv,
@@ -354,6 +360,8 @@ async function startRuntime(runtime: HostRuntime): Promise<void> {
         stderr,
         Date.now() - t0
       )
+      if (code === 0) return
+      runtime.child = null
       runtime.state = classifyConnectionFailure(code, stderr)
       reject(new Error(stderr.trim() || `ssh control connection exited: ${code ?? 'signal'}`))
     })
@@ -409,7 +417,10 @@ export async function ensureHostConnection(
   localSocketPath: string
 ): Promise<{ remoteSocketPath: string; controlPath: string }> {
   const runtime = runtimeFor(host, localSocketPath)
-  if (runtime.state === 'live' && runtime.child) {
+  // After ControlPersist daemonization the foreground child has exited but the
+  // master daemon owns the control socket, so 'live' alone is the source of
+  // truth for liveness here.
+  if (runtime.state === 'live') {
     return { remoteSocketPath: runtime.remoteSocketPath, controlPath: runtime.controlPath }
   }
   if (!runtime.ready) {
@@ -438,21 +449,24 @@ export async function stopHostConnection(hostId: HostId): Promise<void> {
   const runtime = runtimes.get(hostId)
   if (!runtime) return
 
+  // Always send `-O exit`: after ControlPersist daemonization the master is
+  // owned by a forked child we no longer track, so the control socket is the
+  // only handle on it. Falls through harmlessly if the socket is already gone.
+  await runSsh(
+    [
+      '-o',
+      'BatchMode=yes',
+      '-o',
+      `ControlPath=${runtime.controlPath}`,
+      '-O',
+      'exit',
+      '--',
+      runtime.host.alias,
+    ],
+    2000,
+    { hostId: runtime.host.hostId, kind: 'control-exit' }
+  ).catch(() => undefined)
   if (runtime.child) {
-    await runSsh(
-      [
-        '-o',
-        'BatchMode=yes',
-        '-o',
-        `ControlPath=${runtime.controlPath}`,
-        '-O',
-        'exit',
-        '--',
-        runtime.host.alias,
-      ],
-      2000,
-      { hostId: runtime.host.hostId, kind: 'control-exit' }
-    ).catch(() => undefined)
     try {
       runtime.child.kill()
     } catch {
