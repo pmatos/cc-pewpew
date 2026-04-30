@@ -9,10 +9,18 @@ interface FakeResult {
   exitCode: number | null
 }
 
+interface FakeChild extends EventEmitter {
+  stderr: EventEmitter
+  exitCode: number | null
+  kill: () => boolean
+}
+
 let nextResult: FakeResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
+let resultResolver: ((args: string[]) => FakeResult) | null = null
 const execFileCalls: { file: string; args: string[] }[] = []
 const recordedEntries: SshLogEntry[] = []
 const emittedToasts: Omit<ToastEvent, 'id'>[] = []
+let pendingSpawn: { child: FakeChild; args: string[] } | null = null
 
 vi.mock('child_process', () => ({
   execFile: (
@@ -26,12 +34,29 @@ vi.mock('child_process', () => ({
     ) => void
   ) => {
     execFileCalls.push({ file, args })
+    const result = resultResolver ? resultResolver(args) : nextResult
     const child = new EventEmitter() as EventEmitter & { exitCode: number | null }
-    child.exitCode = nextResult.exitCode
-    setImmediate(() => cb(nextResult.error, nextResult.stdout, nextResult.stderr))
+    child.exitCode = result.exitCode
+    setImmediate(() => cb(result.error, result.stdout, result.stderr))
+    return child
+  },
+  spawn: (_file: string, args: string[]) => {
+    const child = new EventEmitter() as FakeChild
+    child.stderr = new EventEmitter()
+    child.exitCode = null
+    child.kill = () => true
+    pendingSpawn = { child, args }
     return child
   },
 }))
+
+vi.mock('./config', async () => {
+  const { tmpdir: getTmpDir } = await import('os')
+  const { join: pathJoin } = await import('path')
+  return {
+    CONFIG_DIR: pathJoin(getTmpDir(), `cc-pewpew-host-connection-test-${process.pid}`),
+  }
+})
 
 vi.mock('./ssh-log-buffer', () => ({
   recordSshInvocation: (entry: SshLogEntry) => {
@@ -52,15 +77,23 @@ vi.mock('./host-registry', () => ({
     hostId === 'h1' ? { hostId: 'h1', alias: 'dev', label: 'Devbox' } : undefined,
 }))
 
-import { exec, validateRemoteRepo } from './host-connection'
+import {
+  exec,
+  validateRemoteRepo,
+  ensureHostConnection,
+  stopHostConnection,
+  runtimeStateFor,
+} from './host-connection'
 
 const HOST: Host = { hostId: 'h1', alias: 'dev', label: 'Devbox' }
 
 beforeEach(() => {
   nextResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
+  resultResolver = null
   execFileCalls.length = 0
   recordedEntries.length = 0
   emittedToasts.length = 0
+  pendingSpawn = null
 })
 
 describe('validateRemoteRepo', () => {
@@ -241,5 +274,101 @@ describe('exec ring-buffer + toast wiring', () => {
     expect(recordedEntries).toHaveLength(1)
     expect(recordedEntries[0].kind).toBe('exec')
     expect(recordedEntries[0].exitCode).toBe(1)
+  })
+})
+
+describe('ensureHostConnection / startRuntime', () => {
+  // ControlPersist=10m forks the foreground ssh into the background once the
+  // master is up; the parent then exits with code 0. The master daemon owns
+  // the control socket and serves subsequent ssh invocations. These tests pin
+  // that the runtime treats code-0 parent exit as success rather than a
+  // misleading "ssh control connection exited: 0" failure.
+
+  beforeEach(async () => {
+    await stopHostConnection(HOST.hostId).catch(() => undefined)
+  })
+
+  it('reaches live state when the parent ssh exits 0 after daemonization', async () => {
+    // controlCheck always succeeds — the daemon is serving the socket.
+    nextResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
+    const promise = ensureHostConnection(HOST, '/tmp/cc-pewpew-test-local.sock')
+    expect(pendingSpawn).not.toBeNull()
+    // Simulate the foreground parent forking to the background and exiting 0.
+    pendingSpawn!.child.exitCode = 0
+    pendingSpawn!.child.emit('exit', 0)
+    const result = await promise
+    expect(result.controlPath).toContain(HOST.hostId)
+    expect(runtimeStateFor(HOST.hostId)).toBe('live')
+    await stopHostConnection(HOST.hostId)
+  })
+
+  it('still reaches live state when parent exits 0 between poll attempts', async () => {
+    // Race scenario: controlCheck fails the first time (socket not yet
+    // ready), parent ssh then daemonizes (exit 0) before the next poll, and
+    // controlCheck succeeds afterwards. The runtime must NOT bail out just
+    // because the foreground child has exited — the daemon owns the socket.
+    let checkCalls = 0
+    resultResolver = (args) => {
+      const isControlCheck = args.includes('-O') && args.includes('check')
+      if (isControlCheck) {
+        checkCalls += 1
+        if (checkCalls === 1) {
+          return {
+            stdout: '',
+            stderr: 'Control socket connect: No such file or directory',
+            error: { name: 'Error', message: 'x', code: 1 } as unknown as NodeJS.ErrnoException,
+            exitCode: 1,
+          }
+        }
+        return { stdout: '', stderr: '', error: null, exitCode: 0 }
+      }
+      return { stdout: '', stderr: '', error: null, exitCode: 0 }
+    }
+
+    const promise = ensureHostConnection(HOST, '/tmp/cc-pewpew-test-local.sock')
+    expect(pendingSpawn).not.toBeNull()
+    // Wait for the first failed controlCheck to resolve, then simulate the
+    // parent ssh forking to background and exiting cleanly. The next poll
+    // attempt must still proceed and succeed.
+    await new Promise((r) => setImmediate(r))
+    pendingSpawn!.child.exitCode = 0
+    pendingSpawn!.child.emit('exit', 0)
+    const result = await promise
+    expect(result.controlPath).toContain(HOST.hostId)
+    expect(runtimeStateFor(HOST.hostId)).toBe('live')
+    expect(checkCalls).toBeGreaterThanOrEqual(2)
+    await stopHostConnection(HOST.hostId)
+  })
+
+  it('returns immediately on subsequent calls once the runtime is live', async () => {
+    nextResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
+    const first = ensureHostConnection(HOST, '/tmp/cc-pewpew-test-local.sock')
+    pendingSpawn!.child.exitCode = 0
+    pendingSpawn!.child.emit('exit', 0)
+    await first
+    expect(runtimeStateFor(HOST.hostId)).toBe('live')
+    // Second call must not spawn another ssh master — it should reuse the
+    // daemonized control socket. After daemonization the parent process
+    // handle has already exited, so the live fast-path cannot rely on a
+    // running parent process to detect liveness.
+    pendingSpawn = null
+    const second = await ensureHostConnection(HOST, '/tmp/cc-pewpew-test-local.sock')
+    expect(pendingSpawn).toBeNull()
+    expect(second.controlPath).toContain(HOST.hostId)
+    await stopHostConnection(HOST.hostId)
+  })
+
+  it('rejects with a real failure when the parent ssh exits non-zero', async () => {
+    // controlCheck would succeed — but the parent exits with auth failure
+    // before the live socket gets used. exitPromise must win the race.
+    nextResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
+    const promise = ensureHostConnection(HOST, '/tmp/cc-pewpew-test-local.sock')
+    expect(pendingSpawn).not.toBeNull()
+    pendingSpawn!.child.stderr.emit('data', Buffer.from('Permission denied (publickey).\n'))
+    pendingSpawn!.child.exitCode = 255
+    pendingSpawn!.child.emit('exit', 255)
+    await expect(promise).rejects.toThrow(/Permission denied/)
+    expect(runtimeStateFor(HOST.hostId)).toBe('auth-failed')
+    await stopHostConnection(HOST.hostId)
   })
 })
