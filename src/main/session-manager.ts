@@ -1689,21 +1689,13 @@ async function listOpenIssues(
     : listRemoteOpenGhItems(projectPath, hostId, 'issue')
 }
 
-async function openSessionsForNumberedItems(
+async function createSessionsForNumbers(
   projectPath: string,
   hostId: string | null,
   field: 'prNumber' | 'issueNumber',
-  listItems: ListNumberedItems,
+  numbers: number[],
   createSession: CreateNumberedSession
-): Promise<OpenSessionsSummary | string> {
-  let items: NumberedGhItem[] | string
-  try {
-    items = await listItems(projectPath, hostId)
-  } catch (err) {
-    return describeGhError(err)
-  }
-  if (typeof items === 'string') return items
-
+): Promise<OpenSessionsSummary> {
   const existing = new Set<number>()
   for (const entry of sessions.values()) {
     if (entry.session.hostId !== hostId || entry.session.projectPath !== projectPath) continue
@@ -1711,7 +1703,10 @@ async function openSessionsForNumberedItems(
     if (number !== undefined) existing.add(number)
   }
 
-  const { toCreate, toSkip } = selectNumbersToOpen(items, existing)
+  const { toCreate, toSkip } = selectNumbersToOpen(
+    numbers.map((n) => ({ number: n })),
+    existing
+  )
   const created: Session[] = []
   const failed: { number: number; error: string }[] = []
 
@@ -1729,6 +1724,30 @@ async function openSessionsForNumberedItems(
   }
 
   return { created, skipped: toSkip, failed }
+}
+
+async function openSessionsForNumberedItems(
+  projectPath: string,
+  hostId: string | null,
+  field: 'prNumber' | 'issueNumber',
+  listItems: ListNumberedItems,
+  createSession: CreateNumberedSession
+): Promise<OpenSessionsSummary | string> {
+  let items: NumberedGhItem[] | string
+  try {
+    items = await listItems(projectPath, hostId)
+  } catch (err) {
+    return describeGhError(err)
+  }
+  if (typeof items === 'string') return items
+
+  return createSessionsForNumbers(
+    projectPath,
+    hostId,
+    field,
+    items.map((i) => i.number),
+    createSession
+  )
 }
 
 function describeRemoteGhProbeFailure(
@@ -1821,6 +1840,22 @@ export async function createPrSession(
   }
   onSessionsChanged()
   return session
+}
+
+export async function createPrSessions(
+  projectPath: string,
+  prNumbers: number[],
+  hostId: string | null = null,
+  deps: { createPrSession?: CreateNumberedSession } = {}
+): Promise<OpenSessionsSummary | string> {
+  const deduped = Array.from(new Set(prNumbers)).sort((a, b) => a - b)
+  return createSessionsForNumbers(
+    projectPath,
+    hostId,
+    'prNumber',
+    deduped,
+    deps.createPrSession ?? createPrSession
+  )
 }
 
 export async function createIssueSession(

@@ -4,6 +4,7 @@ import { useSessionsStore } from '../stores/sessions'
 import { useHostsStore } from '../stores/hosts'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 import type { AgentTool, OpenSessionsSummary } from '../../shared/types'
+import { parsePrSpec } from '../utils/pr-spec-parser'
 
 interface MenuState {
   x: number
@@ -106,6 +107,18 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
       return "Could not determine origin's default branch."
     }
     return message.replace(/^Error:\s*/, '') || 'Failed to create session.'
+  }
+
+  const formatPrSpecSummary = (result: OpenSessionsSummary): string => {
+    const parts: string[] = []
+    if (result.created.length > 0) {
+      parts.push(
+        `Opened ${result.created.length} PR session${result.created.length === 1 ? '' : 's'}`
+      )
+    }
+    if (result.skipped.length > 0) parts.push(`skipped ${result.skipped.length}`)
+    if (result.failed.length > 0) parts.push(`${result.failed.length} failed`)
+    return parts.length > 0 ? parts.join(', ') : 'No PR sessions created'
   }
 
   const formatOpenAllSummary = (result: OpenSessionsSummary, label: 'PR' | 'issue'): string => {
@@ -313,22 +326,41 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
 
   const handleCreatePrSession = async () => {
     if (!pendingPrPath || creating) return
-    const num = parseInt(prNumberInput.trim(), 10)
-    if (isNaN(num) || num <= 0) {
-      setPrError('Enter a valid PR number.')
+    const parsed = parsePrSpec(prNumberInput)
+    if ('error' in parsed) {
+      setPrError(parsed.error)
       return
     }
     setCreating(true)
     setPrError(null)
     try {
-      const result = await window.api.createPrSession(pendingPrPath, num, pendingPrHostId)
+      const result = await window.api.createPrSessions(
+        pendingPrPath,
+        parsed.numbers,
+        pendingPrHostId
+      )
       if (typeof result === 'string') {
         setPrError(result)
-      } else {
+        return
+      }
+      if (parsed.numbers.length === 1) {
+        if (result.failed.length === 1) {
+          setPrError(result.failed[0].error)
+          return
+        }
+        if (result.skipped.length === 1) {
+          setPrError(`PR #${result.skipped[0]} already has a session.`)
+          return
+        }
         setPendingPrPath(null)
         setPendingPrHostId(null)
         setPrNumberInput('')
+        return
       }
+      showToast(formatPrSpecSummary(result))
+      setPendingPrPath(null)
+      setPendingPrHostId(null)
+      setPrNumberInput('')
     } finally {
       setCreating(false)
     }
@@ -409,11 +441,11 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
       )}
       {pendingPrPath && (
         <div className="session-name-dialog">
-          <div className="session-name-label">PR number:</div>
+          <div className="session-name-label">PR number(s):</div>
           <input
             type="text"
             className="create-input"
-            placeholder="e.g. 42"
+            placeholder="e.g. 42 or 1,2,22-28"
             value={prNumberInput}
             onChange={(e) => setPrNumberInput(e.target.value)}
             onKeyDown={(e) => {

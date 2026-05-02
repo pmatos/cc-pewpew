@@ -1501,3 +1501,82 @@ describe('openSessionsForOpenIssues', () => {
     expect(result.failed).toEqual([{ number: 5, error: 'boom' }])
   })
 })
+
+describe('createPrSessions', () => {
+  it('skips numbers that already have a session and creates the rest', async () => {
+    const sm = await loadSessionManager()
+    writeSessionsJson([baseLocalSession({ id: 's-existing', prNumber: 7, projectPath: '/proj' })])
+    sm.restoreSessions()
+
+    const createPrSession = vi.fn(
+      async (_projectPath: string, prNumber: number, _hostId: string | null) =>
+        baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session | string
+    )
+
+    const result = await sm.createPrSessions('/proj', [7, 8, 9], null, { createPrSession })
+    expect(typeof result).not.toBe('string')
+    if (typeof result === 'string') throw new Error(result)
+
+    expect(result.skipped).toEqual([7])
+    expect(result.created.map((s) => s.prNumber).sort()).toEqual([8, 9])
+    expect(result.failed).toEqual([])
+    expect(createPrSession).toHaveBeenCalledTimes(2)
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 8, null)
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 9, null)
+  })
+
+  it('aggregates per-number failures into the summary', async () => {
+    const sm = await loadSessionManager()
+    const createPrSession = vi.fn(
+      async (_projectPath: string, prNumber: number, _hostId: string | null) =>
+        prNumber === 5
+          ? `PR #${prNumber} not found.`
+          : (baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session)
+    )
+    const result = await sm.createPrSessions('/proj', [4, 5, 6], null, { createPrSession })
+    if (typeof result === 'string') throw new Error(result)
+    expect(result.created.map((s) => s.prNumber).sort()).toEqual([4, 6])
+    expect(result.failed).toEqual([{ number: 5, error: 'PR #5 not found.' }])
+    expect(result.skipped).toEqual([])
+  })
+
+  it('dedupes duplicate inputs before invoking createPrSession', async () => {
+    const sm = await loadSessionManager()
+    const createPrSession = vi.fn(
+      async (_projectPath: string, prNumber: number, _hostId: string | null) =>
+        baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session | string
+    )
+    const result = await sm.createPrSessions('/proj', [3, 3, 3], null, { createPrSession })
+    if (typeof result === 'string') throw new Error(result)
+    expect(createPrSession).toHaveBeenCalledTimes(1)
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 3, null)
+    expect(result.created.map((s) => s.prNumber)).toEqual([3])
+  })
+
+  it('does not skip numbers from sessions belonging to a different project', async () => {
+    const sm = await loadSessionManager()
+    writeSessionsJson([
+      baseLocalSession({ id: 's-other', prNumber: 5, projectPath: '/other-proj' }),
+    ])
+    sm.restoreSessions()
+
+    const createPrSession = vi.fn(
+      async (_projectPath: string, prNumber: number, _hostId: string | null) =>
+        baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session | string
+    )
+    const result = await sm.createPrSessions('/proj', [5], null, { createPrSession })
+    if (typeof result === 'string') throw new Error(result)
+    expect(result.skipped).toEqual([])
+    expect(result.created.map((s) => s.prNumber)).toEqual([5])
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 5, null)
+  })
+
+  it('returns an empty summary for an empty number list', async () => {
+    const sm = await loadSessionManager()
+    const createPrSession = vi.fn()
+    const result = await sm.createPrSessions('/proj', [], null, { createPrSession })
+    if (typeof result === 'string') throw new Error(result)
+    expect(result).toEqual({ created: [], skipped: [], failed: [] })
+    expect(createPrSession).not.toHaveBeenCalled()
+  })
+})
