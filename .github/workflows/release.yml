@@ -136,6 +136,15 @@ jobs:
             "${args[@]}" \
             ./release-upload/*
 
+      - name: Open next dev cycle
+        if: ${{ inputs.draft != true && inputs.prerelease != true }}
+        run: |
+          set -euo pipefail
+          NEXT="$(npm version prepatch --preid=pre --no-git-tag-version)"
+          git add package.json package-lock.json
+          git commit -m "chore: open ${NEXT#v} dev cycle"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
       - name: Upload build artifacts (for debugging / reruns)
         if: always()
         uses: actions/upload-artifact@v7
