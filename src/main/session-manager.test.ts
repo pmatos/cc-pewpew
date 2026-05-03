@@ -77,6 +77,7 @@ vi.mock('./tray', () => ({
 
 vi.mock('./notifications', () => ({
   notifyNeedsInput: vi.fn(),
+  emitToast: vi.fn(),
 }))
 
 vi.mock('./project-scanner', () => ({
@@ -103,6 +104,16 @@ vi.mock('./hook-server', () => ({
 }))
 
 vi.mock('./host-bootstrap', () => ({
+  HostBootstrapError: class HostBootstrapError extends Error {
+    kind: string
+    missingDeps: string[]
+
+    constructor(kind: string, message: string, missingDeps: string[] = []) {
+      super(message)
+      this.kind = kind
+      this.missingDeps = missingDeps
+    }
+  },
   bootstrapHost: vi.fn(async () => ({
     notifyScriptPath: '/tmp/notify-v1.sh',
     agentPaths: { claude: '/r/bin/claude', codex: '/r/bin/codex' },
@@ -867,11 +878,11 @@ describe('reconnectRemoteSession', () => {
   })
 
   it('releases host retain when session is removed mid-reconnect', async () => {
-    // doReconnectRemoteSession returns retainedForBatch=true; the outer caller
-    // owns releasing it. If `sessions.get(id)` is read after the await without
-    // a fallback, a concurrent removeSession() would leave hostId undefined
-    // and neither the batch nor the direct release path would run — the
-    // ControlMaster would leak for the lifetime of the app.
+    // doReconnectRemoteSession returns a prepared-host lease; the outer caller
+    // owns releasing it after sibling reconciliation. If `sessions.get(id)` is
+    // read after the await without a fallback, a concurrent removeSession()
+    // would leave hostId undefined and the ControlMaster could leak for the
+    // lifetime of the app.
     writeSessionsJson([baseRemoteSession({ id: 'r1', status: 'idle' })] as Session[])
     state.probeRemoteTmuxResult.set('r1', 'absent')
     let gateResolve!: () => void

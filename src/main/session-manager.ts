@@ -36,23 +36,12 @@ import {
   rollbackRemoteCodexHooks,
   commitRemoteCodexHooks,
 } from './hook-installer'
-import { getHost, setHostAgentPaths } from './host-registry'
+import { getHost } from './host-registry'
 import { listRemoteProjects } from './remote-project-registry'
-import { listenHookServerForHost } from './hook-server'
 import { classifySshExit } from './ssh-exit-parser'
 import { applyHookEvent, type SideEffectIntent } from './session-state-machine'
-import {
-  ensureHostConnection,
-  exec as execRemote,
-  retainHostConnection,
-  releaseHostConnection,
-  stopHostConnection,
-  runtimeStateFor,
-  startBootstrapWindow,
-  type HostConnectionState,
-} from './host-connection'
-import { bootstrapHost, HostBootstrapError, type AgentResolution } from './host-bootstrap'
-import { emitToast } from './notifications'
+import { exec as execRemote, runtimeStateFor, type HostConnectionState } from './host-connection'
+import { remoteHostRuntime, type PreparedRemoteHostLease } from './remote-host-runtime'
 import type {
   AgentTool,
   CreateSessionOptions,
@@ -213,102 +202,6 @@ function getRequiredHost(hostId: string): Host {
   const host = getHost(hostId)
   if (!host) throw new Error('Unknown host')
   return host
-}
-
-// Contract: on success the caller owns an incremented refcount on the host
-// SSH runtime and must call releaseHostConnection eventually. Retaining after
-// ensureHostConnection also covers bootstrap failures. An ensureHostConnection
-// failure still has to tear down the hook listener we started first (the
-// reverse-forward target); stopHostConnection triggers the
-// setOnHostConnectionStopped callback to do that.
-async function prepareRemoteHost(
-  host: Host
-): Promise<{ notifyScriptPath: string; agentPaths: AgentResolution }> {
-  const localSocketPath = listenHookServerForHost(host.hostId)
-  let remoteSocketPath: string
-  try {
-    ;({ remoteSocketPath } = await ensureHostConnection(host, localSocketPath))
-  } catch (err) {
-    // SSH couldn't start. Capture the runtime state BEFORE the teardown wipes
-    // the entry so callers can still classify auth-failed / unreachable —
-    // stopHostConnection does `runtimes.delete(hostId)` and a later
-    // `runtimeStateFor` would otherwise return `undefined`.
-    const capturedState = runtimeStateFor(host.hostId)
-    // Tear down the host runtime (which runtimeFor already registered) so the
-    // hook-server teardown callback fires and we don't leak the per-host
-    // listener across repeated failed startups.
-    await stopHostConnection(host.hostId).catch(() => undefined)
-    if (capturedState === 'auth-failed' || capturedState === 'unreachable') {
-      const wrapped = err instanceof Error ? err : new Error(String(err))
-      ;(wrapped as Error & { hostConnectionState?: HostConnectionState }).hostConnectionState =
-        capturedState
-      throw wrapped
-    }
-    throw err
-  }
-  retainHostConnection(host.hostId)
-  const endBootstrapWindow = startBootstrapWindow(host.hostId)
-  try {
-    const bootstrap = await bootstrapHost(
-      host.hostId,
-      {
-        exec: (argv, opts) => execRemote(host, argv, opts),
-      },
-      remoteSocketPath,
-      host.agentPaths ?? {}
-    )
-    // Persist deltas so the next bootstrap can skip the search and verify the
-    // path with a cheap `[ -x ]` instead. setHostAgentPaths is a no-op on
-    // unchanged values.
-    setHostAgentPaths(host.hostId, bootstrap.agentPaths)
-    return {
-      notifyScriptPath: bootstrap.notifyScriptPath,
-      agentPaths: bootstrap.agentPaths,
-    }
-  } catch (err) {
-    await releaseHostConnection(host.hostId).catch(() => undefined)
-    if (err instanceof HostBootstrapError) {
-      const label = host.label || host.alias
-      // bootstrapHost re-uses kind='missing-deps' for two scenarios: the
-      // dep-probe ssh command itself failing (auth/network/timeout — empty
-      // missingDeps) and the probe succeeding with an actually-missing tool
-      // (populated missingDeps). Only the second deserves the "missing
-      // required tools" remediation toast; the first should surface the
-      // underlying err.message so the user sees the real ssh failure.
-      if (err.kind === 'missing-deps' && err.missingDeps.length > 0) {
-        emitToast({
-          severity: 'error',
-          title: `${label}: missing required tools`,
-          detail: err.missingDeps.join(', '),
-          hostLabel: label,
-        })
-      } else if (err.kind === 'missing-deps') {
-        emitToast({
-          severity: 'error',
-          title: `${label}: bootstrap probe failed`,
-          detail: err.message,
-          hostLabel: label,
-        })
-      } else if (err.kind === 'stream-local-bind') {
-        emitToast({
-          severity: 'error',
-          title: `${label}: hook socket missing`,
-          detail: err.message,
-          hostLabel: label,
-        })
-      } else {
-        emitToast({
-          severity: 'error',
-          title: `${label}: failed to install hook script`,
-          detail: err.message,
-          hostLabel: label,
-        })
-      }
-    }
-    throw err
-  } finally {
-    endBootstrapWindow()
-  }
 }
 
 async function expectRemoteOk(host: Host, argv: string[], message: string): Promise<string> {
@@ -738,73 +631,80 @@ async function createRemoteSession(
   const branchName = `${sanitizeBranchPrefix(remoteProject.name)}/${worktreeName}`
   const baseRef = effectiveWorktreeBase(options)
 
-  // prepareRemoteHost retains the SSH runtime on success; we own the ref and
-  // release it at the end (or in catch). createRemotePty takes its own retain
-  // on success, which is what keeps the connection alive past this function.
-  const { notifyScriptPath, agentPaths } = await prepareRemoteHost(host)
-  const agentPath = agentPaths[effectiveTool]
-  if (!agentPath) {
-    await releaseHostConnection(hostId).catch(() => undefined)
-    throw new Error(`${effectiveTool} is not installed on host ${host.label || host.alias}`)
-  }
-  let branch: string
-  try {
-    if (baseRef === 'origin-default') {
-      const originRef = await resolveOriginDefaultBase((argv) =>
-        expectRemoteOk(host, ['git', '-C', projectPath, ...argv], 'git failed').then((stdout) => ({
-          stdout,
-        }))
-      )
-      try {
-        await expectRemoteOk(
-          host,
-          ['git', '-C', projectPath, 'worktree', 'add', worktreePath, '-b', branchName, originRef],
-          'Failed to create remote worktree'
-        )
-      } catch (err) {
-        if (!(await remoteBranchExists(host, projectPath, branchName))) throw err
-        await expectRemoteOk(
-          host,
-          ['git', '-C', projectPath, 'worktree', 'add', worktreePath, branchName],
-          'Failed to create remote worktree'
-        )
+  const branch = await remoteHostRuntime.withPreparedHost(
+    host,
+    async ({ notifyScriptPath, agentPaths }) => {
+      const agentPath = agentPaths[effectiveTool]
+      if (!agentPath) {
+        throw new Error(`${effectiveTool} is not installed on host ${host.label || host.alias}`)
       }
-    } else {
-      const addWithBranch = await execRemote(host, [
-        'git',
-        '-C',
-        projectPath,
-        'worktree',
-        'add',
-        worktreePath,
-        '-b',
-        branchName,
-      ])
-      if (addWithBranch.timedOut || addWithBranch.code !== 0) {
-        await expectRemoteOk(
-          host,
-          ['git', '-C', projectPath, 'worktree', 'add', worktreePath],
-          'Failed to create remote worktree'
+
+      if (baseRef === 'origin-default') {
+        const originRef = await resolveOriginDefaultBase((argv) =>
+          expectRemoteOk(host, ['git', '-C', projectPath, ...argv], 'git failed').then(
+            (stdout) => ({
+              stdout,
+            })
+          )
         )
+        try {
+          await expectRemoteOk(
+            host,
+            [
+              'git',
+              '-C',
+              projectPath,
+              'worktree',
+              'add',
+              worktreePath,
+              '-b',
+              branchName,
+              originRef,
+            ],
+            'Failed to create remote worktree'
+          )
+        } catch (err) {
+          if (!(await remoteBranchExists(host, projectPath, branchName))) throw err
+          await expectRemoteOk(
+            host,
+            ['git', '-C', projectPath, 'worktree', 'add', worktreePath, branchName],
+            'Failed to create remote worktree'
+          )
+        }
+      } else {
+        const addWithBranch = await execRemote(host, [
+          'git',
+          '-C',
+          projectPath,
+          'worktree',
+          'add',
+          worktreePath,
+          '-b',
+          branchName,
+        ])
+        if (addWithBranch.timedOut || addWithBranch.code !== 0) {
+          await expectRemoteOk(
+            host,
+            ['git', '-C', projectPath, 'worktree', 'add', worktreePath],
+            'Failed to create remote worktree'
+          )
+        }
       }
+
+      const resolvedBranch =
+        (
+          await expectRemoteOk(
+            host,
+            ['git', '-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+            'Failed to resolve remote branch'
+          )
+        ).trim() || branchName
+
+      await installRemoteAgentHooks(effectiveTool, host, worktreePath, notifyScriptPath)
+      await createRemotePty(id, worktreePath, host, { tool: effectiveTool, agentPath })
+      return resolvedBranch
     }
-
-    branch =
-      (
-        await expectRemoteOk(
-          host,
-          ['git', '-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
-          'Failed to resolve remote branch'
-        )
-      ).trim() || branchName
-
-    await installRemoteAgentHooks(effectiveTool, host, worktreePath, notifyScriptPath)
-    await createRemotePty(id, worktreePath, host, { tool: effectiveTool, agentPath })
-  } catch (err) {
-    await releaseHostConnection(hostId).catch(() => undefined)
-    throw err
-  }
-  await releaseHostConnection(hostId).catch(() => undefined)
+  )
 
   const session: Session = {
     id,
@@ -847,57 +747,49 @@ async function createRemotePrSession(
     }
   }
 
-  const { notifyScriptPath, agentPaths } = await prepareRemoteHost(host)
-
-  const ghProbe = await probeRemoteGh(host)
-  if (!ghProbe.ok) {
-    await releaseHostConnection(hostId).catch(() => undefined)
-    return ghProbe.error
-  }
-
-  let prInfo: { headRefName: string; state: string; title: string }
-  try {
-    const stdout = await expectRemoteOk(
-      host,
-      [
-        'sh',
-        '-c',
-        'cd "$1" && gh pr view "$2" --json headRefName,state,title',
-        '_',
-        projectPath,
-        String(prNumber),
-      ],
-      'gh failed'
-    )
-    try {
-      prInfo = JSON.parse(stdout)
-    } catch {
-      await releaseHostConnection(hostId).catch(() => undefined)
-      return `Failed to parse PR metadata for #${prNumber}.`
+  return remoteHostRuntime.withPreparedHost(host, async ({ notifyScriptPath, agentPaths }) => {
+    const ghProbe = await probeRemoteGh(host)
+    if (!ghProbe.ok) {
+      return ghProbe.error
     }
-  } catch {
-    await releaseHostConnection(hostId).catch(() => undefined)
-    return `PR #${prNumber} not found in this repository.`
-  }
 
-  if (prInfo.state !== 'OPEN') {
-    await releaseHostConnection(hostId).catch(() => undefined)
-    return `PR #${prNumber} is ${prInfo.state.toLowerCase()}, not open.`
-  }
+    let prInfo: { headRefName: string; state: string; title: string }
+    try {
+      const stdout = await expectRemoteOk(
+        host,
+        [
+          'sh',
+          '-c',
+          'cd "$1" && gh pr view "$2" --json headRefName,state,title',
+          '_',
+          projectPath,
+          String(prNumber),
+        ],
+        'gh failed'
+      )
+      try {
+        prInfo = JSON.parse(stdout)
+      } catch {
+        return `Failed to parse PR metadata for #${prNumber}.`
+      }
+    } catch {
+      return `PR #${prNumber} not found in this repository.`
+    }
 
-  const effectiveTool: AgentTool = getConfig().defaultTool
-  const agentPath = agentPaths[effectiveTool]
-  if (!agentPath) {
-    await releaseHostConnection(hostId).catch(() => undefined)
-    return `${effectiveTool} is not installed on host ${host.label || host.alias}.`
-  }
+    if (prInfo.state !== 'OPEN') {
+      return `PR #${prNumber} is ${prInfo.state.toLowerCase()}, not open.`
+    }
 
-  const branch = prInfo.headRefName
-  const id = randomUUID().slice(0, 8)
-  const tmuxSession = `cc-pewpew-${id}`
+    const effectiveTool: AgentTool = getConfig().defaultTool
+    const agentPath = agentPaths[effectiveTool]
+    if (!agentPath) {
+      return `${effectiveTool} is not installed on host ${host.label || host.alias}.`
+    }
 
-  let resolvedBranch: string
-  try {
+    const branch = prInfo.headRefName
+    const id = randomUUID().slice(0, 8)
+    const tmuxSession = `cc-pewpew-${id}`
+
     await execRemote(host, ['git', '-C', projectPath, 'fetch', 'origin', branch]).catch(
       () => undefined
     )
@@ -923,11 +815,10 @@ async function createRemotePrSession(
     try {
       await expectRemoteOk(host, addArgv, 'Failed to create remote worktree')
     } catch (err) {
-      await releaseHostConnection(hostId).catch(() => undefined)
       return `Failed to create worktree for branch "${branch}": ${(err as Error).message}`
     }
 
-    resolvedBranch =
+    const resolvedBranch =
       (
         await expectRemoteOk(
           host,
@@ -938,35 +829,31 @@ async function createRemotePrSession(
 
     await installRemoteAgentHooks(effectiveTool, host, worktreePath, notifyScriptPath)
     await createRemotePty(id, worktreePath, host, { tool: effectiveTool, agentPath })
-  } catch (err) {
-    await releaseHostConnection(hostId).catch(() => undefined)
-    throw err
-  }
-  await releaseHostConnection(hostId).catch(() => undefined)
 
-  const session: Session = {
-    id,
-    hostId,
-    projectPath,
-    projectName: remoteProject.name,
-    worktreeName,
-    worktreePath,
-    branch: resolvedBranch,
-    prNumber,
-    issueNumber: parseIssueNumber(worktreeName, resolvedBranch, prInfo.title),
-    pid: 0,
-    tmuxSession,
-    status: 'running',
-    connectionState: 'live',
-    lastActivity: Date.now(),
-    hookEvents: [],
-    tool: effectiveTool,
-    ...(remoteProject.repoFingerprint ? { repoFingerprint: remoteProject.repoFingerprint } : {}),
-  }
+    const session: Session = {
+      id,
+      hostId,
+      projectPath,
+      projectName: remoteProject.name,
+      worktreeName,
+      worktreePath,
+      branch: resolvedBranch,
+      prNumber,
+      issueNumber: parseIssueNumber(worktreeName, resolvedBranch, prInfo.title),
+      pid: 0,
+      tmuxSession,
+      status: 'running',
+      connectionState: 'live',
+      lastActivity: Date.now(),
+      hookEvents: [],
+      tool: effectiveTool,
+      ...(remoteProject.repoFingerprint ? { repoFingerprint: remoteProject.repoFingerprint } : {}),
+    }
 
-  sessions.set(id, { session })
-  onSessionsChanged()
-  return session
+    sessions.set(id, { session })
+    onSessionsChanged()
+    return session
+  })
 }
 
 export async function createSession(
@@ -1082,13 +969,7 @@ export async function killSession(id: string): Promise<void> {
 
 interface ReconnectOutcome {
   state: HostConnectionState | undefined
-  // True when the caller inherits an outstanding retain on the host runtime —
-  // the sibling batch probe consumes it and releases at the end. This keeps
-  // the ControlMaster alive across the doReconnect → batch boundary so each
-  // sibling probe reuses the existing ControlPath instead of spawning a
-  // fresh SSH handshake (which would also fail independently on a flaky
-  // host).
-  retainedForBatch: boolean
+  lease: PreparedRemoteHostLease
 }
 
 // In-flight reconnect promises keyed by session id. Two concurrent clicks on
@@ -1130,7 +1011,7 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
     inflightReconnects.delete(id)
   }
   const successState = outcome?.state
-  const retainedForBatch = outcome?.retainedForBatch ?? false
+  const leaseForBatch = outcome?.lease
   // Fire-and-forget the sibling batch probe — the caller should not block on
   // it. `probePendingSessionsOnHost` is idempotent so concurrent clicks on
   // multiple cards of the same host still collapse to a single batch.
@@ -1149,25 +1030,19 @@ export async function reconnectRemoteSession(id: string): Promise<void> {
   const stateHint = successState ?? tagged ?? (hostId ? runtimeStateFor(hostId) : undefined)
   if (hostId && stateHint) {
     // Fire-and-forget: user's first click should not wait for sibling
-    // reconciliation. When doReconnect left us an outstanding retain, the
-    // batch consumes it and releases at the end — that keeps the
-    // ControlMaster alive across the probe so siblings reuse one SSH
-    // handshake instead of spawning one per card.
+    // reconciliation. The prepared-host lease is released after the batch,
+    // keeping the ControlMaster alive while siblings reuse one SSH handshake.
     ;(async () => {
       try {
         await probePendingSessionsOnHost(hostId, stateHint)
       } catch (err) {
         console.error(`probePendingSessionsOnHost(${hostId}) failed:`, err)
       } finally {
-        if (retainedForBatch) {
-          await releaseHostConnection(hostId).catch(() => undefined)
-        }
+        await leaseForBatch?.release()
       }
     })()
-  } else if (hostId && retainedForBatch) {
-    // No batch to run but doReconnect handed us an outstanding retain — must
-    // release or we leak the runtime.
-    await releaseHostConnection(hostId).catch(() => undefined)
+  } else {
+    await leaseForBatch?.release()
   }
   if (reconnectError !== undefined) throw reconnectError
 }
@@ -1189,10 +1064,9 @@ async function doReconnectRemoteSession(id: string): Promise<ReconnectOutcome> {
   session.connectionState = 'connecting'
   onSessionsChanged()
 
-  let retained = false
+  let lease: PreparedRemoteHostLease | null = null
   try {
-    await prepareRemoteHost(host)
-    retained = true
+    lease = await remoteHostRuntime.acquirePreparedHost(host)
     const probe = await probeRemoteTmuxSession(id, host)
     if (probe === 'present') {
       await reattachRemotePty(id, host)
@@ -1215,9 +1089,9 @@ async function doReconnectRemoteSession(id: string): Promise<ReconnectOutcome> {
       onSessionsChanged()
     }
   } catch (err) {
-    // Prefer the state captured by prepareRemoteHost (attached to the error
+    // Prefer the state captured by remote-host-runtime (attached to the error
     // before stopHostConnection wipes the runtime entry). Fall back to the
-    // live runtime when the failure happened after prepareRemoteHost returned
+    // live runtime when the failure happened after the host was prepared
     // (e.g. bootstrap / PTY attach step).
     const tagged = (err as { hostConnectionState?: HostConnectionState } | null)
       ?.hostConnectionState
@@ -1230,24 +1104,12 @@ async function doReconnectRemoteSession(id: string): Promise<ReconnectOutcome> {
       session.connectionState = 'offline'
     }
     onSessionsChanged()
-    if (retained) {
-      await releaseHostConnection(hostId).catch(() => undefined)
-    }
+    await lease?.release()
     throw err
   }
-  // `retained` is unconditionally true at this point — the only path that
-  // leaves it false throws inside prepareRemoteHost and goes through the
-  // catch block's `throw err`.
-  //
-  // Do NOT release here: the caller (reconnectRemoteSession) owns the retain
-  // and transfers it to the sibling batch probe, which releases at the end.
-  // This keeps the ControlMaster alive across the boundary so per-sibling
-  // `tmux has-session` calls reuse the existing ControlPath instead of
-  // spawning fresh SSH handshakes (which would also fail independently on a
-  // flaky host). The snapshot of runtime state captured here is still
-  // accurate — the release hasn't happened yet.
   const finalState = runtimeStateFor(hostId)
-  return { state: finalState, retainedForBatch: true }
+  if (!lease) throw new Error(`Session ${id} did not acquire a remote host lease`)
+  return { state: finalState, lease }
 }
 
 // Eager batch probe for remaining `pending` sessions on a host that just
@@ -1348,40 +1210,30 @@ export async function reviveSession(id: string): Promise<void> {
 
   if (session.hostId) {
     const host = getRequiredHost(session.hostId)
-    const hostId = session.hostId
     session.connectionState = 'connecting'
     onSessionsChanged()
-    // prepareRemoteHost retains the SSH runtime on success; we release it at
-    // the end/in catch. createRemotePty/reattachRemotePty take over on success.
-    // The prepareRemoteHost await is inside the try so a bootstrap failure
-    // also resets connectionState instead of leaving it pinned at connecting.
-    let retained = false
     try {
-      const { agentPaths } = await prepareRemoteHost(host)
-      retained = true
-      if (await hasRemoteTmuxSession(id, host)) {
-        await reattachRemotePty(id, host)
-      } else {
-        const agentPath = agentPaths[session.tool]
-        if (!agentPath) {
-          throw new Error(`${session.tool} is not installed on host ${host.label || host.alias}`)
+      await remoteHostRuntime.withPreparedHost(host, async ({ agentPaths }) => {
+        if (await hasRemoteTmuxSession(id, host)) {
+          await reattachRemotePty(id, host)
+        } else {
+          const agentPath = agentPaths[session.tool]
+          if (!agentPath) {
+            throw new Error(`${session.tool} is not installed on host ${host.label || host.alias}`)
+          }
+          await createRemotePty(id, session.worktreePath, host, {
+            continueSession: true,
+            tool: session.tool,
+            agentSessionId: session.agentSessionId,
+            agentPath,
+          })
         }
-        await createRemotePty(id, session.worktreePath, host, {
-          continueSession: true,
-          tool: session.tool,
-          agentSessionId: session.agentSessionId,
-          agentPath,
-        })
-      }
+      })
     } catch (err) {
       session.connectionState = 'offline'
       onSessionsChanged()
-      if (retained) {
-        await releaseHostConnection(hostId).catch(() => undefined)
-      }
       throw err
     }
-    await releaseHostConnection(hostId).catch(() => undefined)
     session.connectionState = 'live'
     updateSession(id, 'idle')
     return
@@ -1905,18 +1757,15 @@ async function createRemoteIssueSession(
     }
   }
 
-  const { notifyScriptPath, agentPaths } = await prepareRemoteHost(host)
-  const effectiveTool: AgentTool = getConfig().defaultTool
-  const agentPath = agentPaths[effectiveTool]
-  if (!agentPath) {
-    await releaseHostConnection(hostId).catch(() => undefined)
-    return `${effectiveTool} is not installed on host ${host.label || host.alias}.`
-  }
+  return remoteHostRuntime.withPreparedHost(host, async ({ notifyScriptPath, agentPaths }) => {
+    const effectiveTool: AgentTool = getConfig().defaultTool
+    const agentPath = agentPaths[effectiveTool]
+    if (!agentPath) {
+      return `${effectiveTool} is not installed on host ${host.label || host.alias}.`
+    }
 
-  const id = randomUUID().slice(0, 8)
-  const tmuxSession = `cc-pewpew-${id}`
-  let resolvedBranch: string
-  try {
+    const id = randomUUID().slice(0, 8)
+    const tmuxSession = `cc-pewpew-${id}`
     let originRef: string
     try {
       originRef = await resolveOriginDefaultBase((argv) =>
@@ -1926,7 +1775,6 @@ async function createRemoteIssueSession(
       )
     } catch (err) {
       const msg = (err as Error).message
-      await releaseHostConnection(hostId).catch(() => undefined)
       if (msg === 'no-origin-remote') return 'This project has no origin remote.'
       if (msg === 'no-origin-default-branch') return "Could not determine origin's default branch."
       return `Failed to resolve origin default: ${msg}`
@@ -1940,7 +1788,6 @@ async function createRemoteIssueSession(
       )
     } catch (err) {
       if (!(await remoteBranchExists(host, projectPath, branch))) {
-        await releaseHostConnection(hostId).catch(() => undefined)
         return `Failed to create worktree for branch "${branch}": ${(err as Error).message}`
       }
       try {
@@ -1950,12 +1797,11 @@ async function createRemoteIssueSession(
           'Failed to create remote worktree'
         )
       } catch (fallbackErr) {
-        await releaseHostConnection(hostId).catch(() => undefined)
         return `Failed to create worktree for branch "${branch}": ${(fallbackErr as Error).message}`
       }
     }
 
-    resolvedBranch =
+    const resolvedBranch =
       (
         await expectRemoteOk(
           host,
@@ -1966,34 +1812,30 @@ async function createRemoteIssueSession(
 
     await installRemoteAgentHooks(effectiveTool, host, worktreePath, notifyScriptPath)
     await createRemotePty(id, worktreePath, host, { tool: effectiveTool, agentPath })
-  } catch (err) {
-    await releaseHostConnection(hostId).catch(() => undefined)
-    throw err
-  }
-  await releaseHostConnection(hostId).catch(() => undefined)
 
-  const session: Session = {
-    id,
-    hostId,
-    projectPath,
-    projectName: remoteProject.name,
-    worktreeName,
-    worktreePath,
-    branch: resolvedBranch,
-    issueNumber,
-    pid: 0,
-    tmuxSession,
-    status: 'running',
-    connectionState: 'live',
-    lastActivity: Date.now(),
-    hookEvents: [],
-    tool: effectiveTool,
-    ...(remoteProject.repoFingerprint ? { repoFingerprint: remoteProject.repoFingerprint } : {}),
-  }
+    const session: Session = {
+      id,
+      hostId,
+      projectPath,
+      projectName: remoteProject.name,
+      worktreeName,
+      worktreePath,
+      branch: resolvedBranch,
+      issueNumber,
+      pid: 0,
+      tmuxSession,
+      status: 'running',
+      connectionState: 'live',
+      lastActivity: Date.now(),
+      hookEvents: [],
+      tool: effectiveTool,
+      ...(remoteProject.repoFingerprint ? { repoFingerprint: remoteProject.repoFingerprint } : {}),
+    }
 
-  sessions.set(id, { session })
-  onSessionsChanged()
-  return session
+    sessions.set(id, { session })
+    onSessionsChanged()
+    return session
+  })
 }
 
 export async function openSessionsForOpenPrs(
