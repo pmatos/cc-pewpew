@@ -40,6 +40,7 @@ import { getHost, setHostAgentPaths } from './host-registry'
 import { listRemoteProjects } from './remote-project-registry'
 import { listenHookServerForHost } from './hook-server'
 import { classifySshExit } from './ssh-exit-parser'
+import { applyHookEvent, type SideEffectIntent } from './session-state-machine'
 import {
   ensureHostConnection,
   exec as execRemote,
@@ -1023,76 +1024,45 @@ export async function createSession(
   return createSessionForWorktree(projectPath, worktreePath, worktreeName, options.tool)
 }
 
+function realizeIntent(intent: SideEffectIntent): void {
+  switch (intent.kind) {
+    case 'notifyNeedsInput': {
+      const e = sessions.get(intent.sessionId)
+      if (e) notifyNeedsInput(e.session)
+      return
+    }
+    case 'promptCleanup':
+      // Fire-and-forget, but attach a catch so a remote removeSession failure
+      // doesn't become an unhandled rejection in the main process.
+      promptCleanup(intent.sessionId).catch((err) => {
+        console.error(`promptCleanup(${intent.sessionId}) failed:`, err)
+      })
+      return
+  }
+}
+
 export function handleHookEvent(
   method: string,
   params: Record<string, unknown>,
   originHostId: string | null = null
 ): boolean {
-  // Match hook event to our session. CC's session_id differs from our internal id,
-  // so match by cwd (worktree path) which is unique per session.
-  const cwd = params.cwd as string | undefined
-  const ccSessionId = (params.session_id ?? params.sessionId) as string | undefined
+  const currentState = new Map<string, Session>()
+  for (const e of sessions.values()) currentState.set(e.session.id, e.session)
 
-  // Filter by origin first so local and remote sessions with the same worktree
-  // path don't shadow each other — picking the wrong one would drop the event.
-  let entry: SessionEntry | undefined
-  for (const e of sessions.values()) {
-    if ((e.session.hostId ?? null) !== originHostId) continue
-    // Primary match: cwd matches our worktreePath
-    if (cwd && e.session.worktreePath && cwd.startsWith(e.session.worktreePath)) {
-      entry = e
-      break
-    }
-    // Fallback: exact id match (in case we somehow share IDs)
-    if (ccSessionId && e.session.id === ccSessionId) {
-      entry = e
-      break
+  const result = applyHookEvent(currentState, { method, params, originHostId }, Date.now())
+  if (!result.matched) return false
+
+  let mutated = false
+  for (const [id, nextSession] of result.state) {
+    const entry = sessions.get(id)
+    if (entry && entry.session !== nextSession) {
+      entry.session = nextSession
+      mutated = true
     }
   }
-  if (!entry) return false
+  for (const intent of result.intents) realizeIntent(intent)
 
-  switch (method) {
-    case 'session.start':
-      entry.session.status = 'running'
-      entry.session.connectionState = originHostId ? 'live' : entry.session.connectionState
-      // Capture codex's session_id so `codex resume <id>` can recover the same
-      // conversation after restart. Claude resumes via `--continue` and doesn't
-      // need this.
-      if (entry.session.tool === 'codex' && ccSessionId && !entry.session.agentSessionId) {
-        entry.session.agentSessionId = ccSessionId
-      }
-      break
-    case 'session.stop':
-      entry.session.status = 'needs_input'
-      entry.session.connectionState = originHostId ? 'live' : entry.session.connectionState
-      notifyNeedsInput(entry.session)
-      break
-    case 'session.activity':
-      entry.session.status = 'running'
-      entry.session.connectionState = originHostId ? 'live' : entry.session.connectionState
-      break
-    case 'session.end':
-      // Fire-and-forget, but attach a catch so a remote removeSession failure
-      // doesn't become an unhandled rejection in the main process.
-      promptCleanup(entry.session.id).catch((err) => {
-        console.error(`promptCleanup(${entry.session.id}) failed:`, err)
-      })
-      return true
-    case 'session.notification':
-      entry.session.hookEvents.push({
-        method,
-        sessionId: ccSessionId || entry.session.id,
-        timestamp: Date.now(),
-        originHostId,
-        data: params,
-      })
-      break
-    default:
-      return false
-  }
-
-  entry.session.lastActivity = Date.now()
-  onSessionsChanged()
+  if (mutated) onSessionsChanged()
   return true
 }
 
