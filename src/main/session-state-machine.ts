@@ -45,7 +45,7 @@ export function applyHookEvent(
       next.status = 'running'
       next.lastActivity = now
       if (event.originHostId) next.connectionState = 'live'
-      const incoming = event.params.session_id as string | undefined
+      const incoming = (event.params.session_id ?? event.params.sessionId) as string | undefined
       if (next.tool === 'codex' && incoming && !next.agentSessionId) {
         next.agentSessionId = incoming
       }
@@ -69,7 +69,7 @@ export function applyHookEvent(
         matched: true,
       }
     case 'session.notification': {
-      const incoming = event.params.session_id as string | undefined
+      const incoming = (event.params.session_id ?? event.params.sessionId) as string | undefined
       next.hookEvents = [
         ...next.hookEvents,
         {

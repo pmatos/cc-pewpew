@@ -93,6 +93,20 @@ describe('applyHookEvent — session.start', () => {
     )
     expect(result.state.get('cx2')?.agentSessionId).toBe('first')
   })
+
+  it('captures camelCase sessionId alias as agentSessionId for codex sessions', () => {
+    const session = makeSession({ id: 'cx3', worktreePath: '/cx/wt', tool: 'codex' })
+    const result = applyHookEvent(
+      stateOf(session),
+      {
+        method: 'session.start',
+        params: { cwd: '/cx/wt', sessionId: 'codex-uuid-camel' },
+        originHostId: null,
+      },
+      1
+    )
+    expect(result.state.get('cx3')?.agentSessionId).toBe('codex-uuid-camel')
+  })
 })
 
 describe('applyHookEvent — session.activity', () => {
@@ -157,6 +171,20 @@ describe('applyHookEvent — session.notification', () => {
       1
     )
     expect(result.state.get('s2')!.hookEvents[0].sessionId).toBe('s2')
+  })
+
+  it('uses camelCase sessionId alias for the appended hook-event sessionId', () => {
+    const session = makeSession({ id: 's3', hookEvents: [] })
+    const result = applyHookEvent(
+      stateOf(session),
+      {
+        method: 'session.notification',
+        params: { cwd: '/p/w', sessionId: 'cc-uuid-camel' },
+        originHostId: null,
+      },
+      1
+    )
+    expect(result.state.get('s3')!.hookEvents[0].sessionId).toBe('cc-uuid-camel')
   })
 })
 
