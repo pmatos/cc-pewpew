@@ -21,9 +21,19 @@ export const useThemeStore = create<ThemeStore>((set, get) => ({
   loaded: false,
   init: async () => {
     if (get().loaded) return
+    // Set `loaded` synchronously so a concurrent init() (StrictMode double
+    // mount, second window) bails at the guard above instead of racing on
+    // the same await.
+    const initialTheme = get().theme
+    set({ loaded: true })
     const persisted = await window.api.getTheme()
+    // If the user toggled during the await, setTheme has already applied
+    // and persisted their choice — don't clobber it with the stale value
+    // we just fetched.
+    if (get().theme !== initialTheme) return
+    if (persisted === initialTheme) return
     applyTheme(persisted)
-    set({ theme: persisted, loaded: true })
+    set({ theme: persisted })
   },
   setTheme: (theme) => {
     if (get().theme === theme) return
