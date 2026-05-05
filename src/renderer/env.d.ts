@@ -13,6 +13,7 @@ import type {
   ReviewDiffResult,
   Session,
   TestConnectionResult,
+  Theme,
   ToastEvent,
   WorktreeBase,
 } from '../shared/types'
@@ -78,6 +79,8 @@ declare global {
       getUiScale: () => Promise<number>
       getDefaultTool: () => Promise<AgentTool>
       getWorktreeBase: () => Promise<WorktreeBase>
+      getTheme: () => Promise<Theme>
+      saveTheme: (theme: Theme) => Promise<void>
       onTextThumbnails: (callback: (data: Record<string, string>) => void) => () => void
       pickDirectory: () => Promise<string | null>
       relocateProject: (oldPath: string, newPath: string) => Promise<{ migratedCount: number }>

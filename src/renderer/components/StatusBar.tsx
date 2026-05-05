@@ -1,13 +1,18 @@
 import { useSessionsStore } from '../stores/sessions'
 import { useCanvasStore } from '../stores/canvas'
+import { useThemeStore } from '../stores/theme'
 
 export default function StatusBar() {
   const { sessions } = useSessionsStore()
   const panToCluster = useCanvasStore((s) => s.panToCluster)
+  const theme = useThemeStore((s) => s.theme)
+  const toggleTheme = useThemeStore((s) => s.toggle)
 
   const running = sessions.filter((s) => s.status === 'running').length
   const needsInput = sessions.filter((s) => s.status === 'needs_input')
   const completed = sessions.filter((s) => s.status === 'completed').length
+
+  const nextTheme = theme === 'dark' ? 'light' : 'dark'
 
   return (
     <footer className="statusbar">
@@ -33,6 +38,15 @@ export default function StatusBar() {
           ))}
         </div>
       )}
+      <button
+        type="button"
+        className="theme-toggle-btn"
+        onClick={toggleTheme}
+        title={`Switch to ${nextTheme} mode`}
+        aria-label={`Switch to ${nextTheme} mode`}
+      >
+        {theme === 'dark' ? '☾' : '☀'}
+      </button>
     </footer>
   )
 }

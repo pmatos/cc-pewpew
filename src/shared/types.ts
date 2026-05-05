@@ -30,6 +30,8 @@ export interface Worktree {
 
 export type AgentTool = 'claude' | 'codex'
 
+export type Theme = 'dark' | 'light'
+
 export interface Session {
   id: string
   hostId: string | null

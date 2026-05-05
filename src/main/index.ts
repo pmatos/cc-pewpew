@@ -603,6 +603,16 @@ app.whenReady().then(async () => {
     return getConfig().worktreeBase
   })
 
+  ipcMain.handle('config:get-theme', () => {
+    return getConfig().theme
+  })
+
+  ipcMain.handle('config:save-theme', (_event, theme: 'dark' | 'light') => {
+    const config = getConfig()
+    config.theme = theme
+    saveConfig(config)
+  })
+
   ipcMain.handle('swim-lanes:open', (_event, sessionIds: string[]) => {
     const swimWindow = new BrowserWindow({
       width: 1200,
