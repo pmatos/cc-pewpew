@@ -289,15 +289,27 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'sessions:create-pr',
-    async (_event, projectPath: string, prNumber: number, hostId?: string | null) => {
-      return createPrSession(projectPath, prNumber, hostId ?? null)
+    async (
+      _event,
+      projectPath: string,
+      prNumber: number,
+      hostId?: string | null,
+      options?: CreateSessionOptions
+    ) => {
+      return createPrSession(projectPath, prNumber, hostId ?? null, options ?? {})
     }
   )
 
   ipcMain.handle(
     'sessions:create-prs',
-    async (_event, projectPath: string, prNumbers: number[], hostId?: string | null) => {
-      return createPrSessions(projectPath, prNumbers, hostId ?? null)
+    async (
+      _event,
+      projectPath: string,
+      prNumbers: number[],
+      hostId?: string | null,
+      options?: CreateSessionOptions
+    ) => {
+      return createPrSessions(projectPath, prNumbers, hostId ?? null, options ?? {})
     }
   )
 

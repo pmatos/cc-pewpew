@@ -34,12 +34,14 @@ declare global {
       createPrSession: (
         projectPath: string,
         prNumber: number,
-        hostId?: string | null
+        hostId?: string | null,
+        options?: CreateSessionOptions
       ) => Promise<Session | string>
       createPrSessions: (
         projectPath: string,
         prNumbers: number[],
-        hostId?: string | null
+        hostId?: string | null,
+        options?: CreateSessionOptions
       ) => Promise<OpenSessionsSummary | string>
       openSessionsForOpenPrs: (
         projectPath: string,
