@@ -505,6 +505,21 @@ describe('createSession origin-default base', () => {
       const originTip = git(project, ['rev-parse', 'origin/main']).trim()
       const worktreeTip = git(session.worktreePath, ['rev-parse', 'HEAD']).trim()
       expect(worktreeTip).toBe(originTip)
+
+      // The new branch must NOT track origin/main — pushes from this worktree
+      // would otherwise overwrite origin/main instead of creating origin/<branch>.
+      // `git rev-parse @{u}` exits non-zero when no upstream is configured.
+      let upstreamRef = ''
+      try {
+        upstreamRef = execFileSync(
+          'git',
+          ['-C', session.worktreePath, 'rev-parse', '--abbrev-ref', '@{u}'],
+          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+        ).trim()
+      } catch {
+        upstreamRef = ''
+      }
+      expect(upstreamRef).toBe('')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -541,6 +556,7 @@ describe('createSession origin-default base', () => {
         'worktree',
         'add',
         worktreePath,
+        '--no-track',
         '-b',
         branchName,
         'refs/remotes/origin/main',
@@ -1301,7 +1317,8 @@ describe('createIssueSession', () => {
         return { stdout: 'abc123\n' }
       }
       if (
-        key === 'worktree add /proj/.claude/worktrees/issue-42 -b issue-42 refs/remotes/origin/main'
+        key ===
+        'worktree add /proj/.claude/worktrees/issue-42 --no-track -b issue-42 refs/remotes/origin/main'
       ) {
         return { stdout: '' }
       }
@@ -1335,6 +1352,7 @@ describe('createIssueSession', () => {
       'worktree',
       'add',
       '/proj/.claude/worktrees/issue-42',
+      '--no-track',
       '-b',
       'issue-42',
       'refs/remotes/origin/main',
