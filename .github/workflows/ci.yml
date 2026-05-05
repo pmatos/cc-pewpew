@@ -43,8 +43,8 @@ jobs:
       - name: TypeScript (noEmit)
         run: npx tsc --noEmit
 
-      - name: Unit tests (vitest)
-        run: npx vitest run --reporter=default --reporter=junit --outputFile=./test-report.junit.xml
+      - name: Unit tests (vitest, with coverage)
+        run: npx vitest run --coverage --reporter=default --reporter=junit --outputFile=./test-report.junit.xml
 
       - name: Upload test report
         if: always()
@@ -53,6 +53,16 @@ jobs:
           name: vitest-report
           path: test-report.junit.xml
           if-no-files-found: ignore
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4
+        with:
+          files: ./coverage/lcov.info
+          flags: unittests
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: npm audit (high severity)
         # Informational — don't fail the build on transitive advisories we can't fix today.
