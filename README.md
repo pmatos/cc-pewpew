@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/pmatos/cc-pewpew/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pmatos/cc-pewpew/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/pmatos/cc-pewpew/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/pmatos/cc-pewpew/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/pmatos/cc-pewpew/branch/main/graph/badge.svg)](https://codecov.io/gh/pmatos/cc-pewpew)
 
 A desktop GUI for launching, monitoring, and visualizing Claude Code sessions with embedded terminals across your git projects.
 

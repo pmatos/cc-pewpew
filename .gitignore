@@ -3,6 +3,7 @@ dist/
 dist-electron/
 out/
 release/
+coverage/
 *.tsbuildinfo
 .env
 CLAUDE.local.md

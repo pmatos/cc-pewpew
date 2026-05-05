@@ -1,0 +1,28 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        informational: true
+    patch:
+      default:
+        target: 80%
+        threshold: 5%
+        informational: true
+
+comment:
+  layout: 'reach, diff, flags, files'
+  behavior: default
+  require_changes: true
+
+ignore:
+  - 'src/**/*.test.ts'
+  - 'src/**/*.test.tsx'
+  - 'src/**/*.d.ts'
+  - 'dist'
+  - 'dist-electron'
+  - 'release'
+  - '.github'
+  - 'hooks'
+  - 'plans'
