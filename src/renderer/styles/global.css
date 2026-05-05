@@ -6,7 +6,12 @@
   box-sizing: border-box;
 }
 
-:root {
+/* Theme tokens. Two themes are hardcoded today (dark, light); add a new
+   [data-theme="..."] block to register more. The :root values mirror the
+   dark theme so first paint (before the persisted theme attribute is
+   applied) matches what the user last saw. */
+:root,
+:root[data-theme='dark'] {
   --bg-main: #1a1a2e;
   --bg-sidebar: #16162a;
   --bg-statusbar: #12122a;
@@ -20,7 +25,17 @@
   --accent-yellow: #facc15;
   --accent-red: #f87171;
   --accent-blue: #60a5fa;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --accent-orange: #f59e0b;
+  --accent-error: #e07070;
+
+  --shadow-md: rgba(0, 0, 0, 0.4);
+  --shadow-lg: rgba(0, 0, 0, 0.5);
+  --shadow-sm: rgba(0, 0, 0, 0.3);
+  --modal-overlay-bg: rgba(0, 0, 0, 0.5);
+  --terminal-overlay-bg: rgba(14, 14, 30, 0.82);
+  --terminal-overlay-error-bg: rgba(64, 18, 24, 0.85);
+  --terminal-overlay-warn-bg: rgba(64, 56, 18, 0.85);
+  --connection-dot-border: rgba(14, 14, 30, 0.85);
 
   --review-bg: #12122a;
   --review-addition: rgba(74, 222, 128, 0.12);
@@ -31,6 +46,45 @@
   --review-approved: #4ade80;
   --review-commented: #facc15;
   --review-rejected: #f87171;
+
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+}
+
+:root[data-theme='light'] {
+  --bg-main: #f5f5fb;
+  --bg-sidebar: #ebebf2;
+  --bg-statusbar: #e0e0ea;
+  --bg-terminal: #ffffff;
+  --bg-context-menu: #ffffff;
+  --text-primary: #1a1a2e;
+  --text-secondary: #5a5a72;
+  --text-on-accent: #ffffff;
+  --border: #cfcfdb;
+  --accent-green: #16a34a;
+  --accent-yellow: #b45309;
+  --accent-red: #dc2626;
+  --accent-blue: #2563eb;
+  --accent-orange: #c2410c;
+  --accent-error: #b91c1c;
+
+  --shadow-md: rgba(15, 23, 42, 0.12);
+  --shadow-lg: rgba(15, 23, 42, 0.18);
+  --shadow-sm: rgba(15, 23, 42, 0.08);
+  --modal-overlay-bg: rgba(15, 23, 42, 0.35);
+  --terminal-overlay-bg: rgba(255, 255, 255, 0.82);
+  --terminal-overlay-error-bg: rgba(254, 226, 226, 0.92);
+  --terminal-overlay-warn-bg: rgba(254, 243, 199, 0.92);
+  --connection-dot-border: rgba(255, 255, 255, 0.85);
+
+  --review-bg: #f0f0f7;
+  --review-addition: rgba(22, 163, 74, 0.14);
+  --review-deletion: rgba(220, 38, 38, 0.12);
+  --review-addition-text: #166534;
+  --review-deletion-text: #991b1b;
+  --review-hunk-header: #e0e0ea;
+  --review-approved: #16a34a;
+  --review-commented: #b45309;
+  --review-rejected: #dc2626;
 }
 
 *:focus-visible {
@@ -260,8 +314,8 @@ body,
 }
 
 .cluster-header--orphaned {
-  color: #f59e0b;
-  border-bottom: 1px dashed #f59e0b;
+  color: var(--accent-orange);
+  border-bottom: 1px dashed var(--accent-orange);
 }
 
 .cluster-cards {
@@ -466,7 +520,7 @@ body,
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  border: 1px solid rgba(14, 14, 30, 0.85);
+  border: 1px solid var(--connection-dot-border);
   flex-shrink: 0;
 }
 
@@ -507,15 +561,15 @@ body,
 
 .connection-overlay--pending,
 .connection-overlay--connecting {
-  background: rgba(14, 14, 30, 0.82);
+  background: var(--terminal-overlay-bg);
 }
 
 .connection-overlay--auth-failed {
-  background: rgba(64, 18, 24, 0.85);
+  background: var(--terminal-overlay-error-bg);
 }
 
 .connection-overlay--unreachable {
-  background: rgba(64, 56, 18, 0.85);
+  background: var(--terminal-overlay-warn-bg);
 }
 
 .session-card-time {
@@ -686,7 +740,7 @@ body,
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 13px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px var(--shadow-md);
   z-index: 100;
 }
 
@@ -715,7 +769,7 @@ body,
   border-radius: 6px;
   padding: 10px 12px;
   font-size: 13px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 12px var(--shadow-lg);
   pointer-events: auto;
 }
 
@@ -770,7 +824,7 @@ body,
   border-radius: 6px;
   padding: 4px 0;
   min-width: 180px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px var(--shadow-md);
   z-index: 1000;
 }
 
@@ -893,7 +947,7 @@ body,
 }
 
 .pr-error {
-  color: #f87171;
+  color: var(--accent-red);
   font-size: 12px;
   padding: 4px 0;
 }
@@ -1059,10 +1113,28 @@ body,
   color: var(--text-on-accent);
 }
 
+.theme-toggle-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
 .broadcast-dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--modal-overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1083,7 +1155,7 @@ body,
 .hosts-dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--modal-overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1141,7 +1213,6 @@ body,
   font-size: 12px;
 }
 
-/* TODO: replace hardcoded #e07070 with a theme error-colour token once defined. */
 .host-test-result {
   font-size: 12px;
   margin-top: 2px;
@@ -1152,7 +1223,7 @@ body,
 }
 
 .host-test-result.err {
-  color: #e07070;
+  color: var(--accent-error);
 }
 
 .host-actions {
@@ -1162,7 +1233,7 @@ body,
 }
 
 .hosts-error {
-  color: #e07070;
+  color: var(--accent-error);
   font-size: 12px;
   padding: 4px 8px;
 }
@@ -1689,7 +1760,7 @@ body,
   background: var(--bg-context-menu);
   border: 1px solid var(--border);
   border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px var(--shadow-sm);
 }
 
 .rv-toolbar-btn {
@@ -1937,7 +2008,7 @@ body,
 .rv-confirm-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--modal-overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;

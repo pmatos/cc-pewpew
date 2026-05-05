@@ -3,9 +3,20 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
+import { onThemeChanged } from '../stores/theme'
 
 interface Props {
   sessionId: string
+}
+
+function readTerminalTheme() {
+  const styles = getComputedStyle(document.documentElement)
+  return {
+    background: styles.getPropertyValue('--bg-terminal').trim() || '#0e0e1e',
+    foreground: styles.getPropertyValue('--text-primary').trim() || '#e0e0e0',
+    cursor: styles.getPropertyValue('--accent-green').trim() || '#4ade80',
+    selectionBackground: styles.getPropertyValue('--border').trim() || '#2a2a4a',
+  }
 }
 
 export default function Terminal({ sessionId }: Props) {
@@ -18,15 +29,15 @@ export default function Terminal({ sessionId }: Props) {
     const container = containerRef.current
 
     const term = new XTerm({
-      theme: {
-        background: '#0e0e1e',
-        foreground: '#e0e0e0',
-        cursor: '#4ade80',
-        selectionBackground: '#2a2a4a',
-      },
+      theme: readTerminalTheme(),
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
       fontSize: 14,
       cursorBlink: true,
+    })
+
+    const themeUnsubscribe = onThemeChanged(() => {
+      term.options.theme = readTerminalTheme()
+      term.refresh(0, term.rows - 1)
     })
 
     const fitAddon = new FitAddon()
@@ -194,6 +205,7 @@ export default function Terminal({ sessionId }: Props) {
     return () => {
       aborted = true
       observer.disconnect()
+      themeUnsubscribe()
       window.removeEventListener('focus', handleWindowFocus)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       selectionDisposable.dispose()

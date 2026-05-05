@@ -4,6 +4,7 @@ import BroadcastBar from './components/BroadcastBar'
 import LaneHeader from './components/LaneHeader'
 import Terminal from './components/Terminal'
 import ReviewOverlay from './components/ReviewOverlay'
+import { useThemeStore } from './stores/theme'
 
 function parseSessionIds(): string[] {
   const params = new URLSearchParams(window.location.search)
@@ -18,6 +19,10 @@ export default function SwimLanesApp() {
   // Per-lane monotonic flip count: each toggle increments by 1, rotating +180deg.
   // Keeps the return flip in the same direction as the opening flip.
   const [laneFlipCounts, setLaneFlipCounts] = useState<Map<string, number>>(new Map())
+
+  useEffect(() => {
+    void useThemeStore.getState().init()
+  }, [])
 
   useEffect(() => {
     window.api.getSessions().then((all) => {

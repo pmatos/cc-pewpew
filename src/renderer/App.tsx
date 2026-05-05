@@ -11,6 +11,7 @@ import { useProjectsStore } from './stores/projects'
 import { useSessionsStore } from './stores/sessions'
 import { useHostsStore } from './stores/hosts'
 import { useToastsStore } from './stores/toasts'
+import { useThemeStore } from './stores/theme'
 
 export default function App() {
   const { scanProjects, filterReady, toggleFilterReady } = useProjectsStore()
@@ -33,6 +34,10 @@ export default function App() {
   }, [])
   const resizing = useRef(false)
   const resizeStart = useRef({ x: 0, width: 0 })
+
+  useEffect(() => {
+    void useThemeStore.getState().init()
+  }, [])
 
   useEffect(() => {
     void fetchHosts()

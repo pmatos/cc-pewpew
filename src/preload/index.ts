@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AgentTool, CreateSessionOptions, ToastEvent } from '../shared/types'
+import type { AgentTool, CreateSessionOptions, Theme, ToastEvent } from '../shared/types'
 
 contextBridge.exposeInMainWorld('api', {
   scanProjects: () => ipcRenderer.invoke('projects:scan'),
@@ -71,6 +71,13 @@ contextBridge.exposeInMainWorld('api', {
   getUiScale: () => ipcRenderer.invoke('config:get-ui-scale'),
   getDefaultTool: () => ipcRenderer.invoke('config:get-default-tool') as Promise<AgentTool>,
   getWorktreeBase: () => ipcRenderer.invoke('config:get-worktree-base'),
+  getTheme: () => ipcRenderer.invoke('config:get-theme') as Promise<Theme>,
+  saveTheme: (theme: Theme) => ipcRenderer.invoke('config:save-theme', theme),
+  onThemeBroadcast: (callback: (theme: Theme) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, theme: Theme) => callback(theme)
+    ipcRenderer.on('theme:changed', handler)
+    return () => ipcRenderer.removeListener('theme:changed', handler)
+  },
   onTextThumbnails: (callback: (data: Record<string, string>) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: Record<string, string>) =>
       callback(data)

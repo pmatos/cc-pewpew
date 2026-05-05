@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo, useLayoutEffect } fr
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
 import { useCanvasStore } from '../stores/canvas'
+import { useThemeStore } from '../stores/theme'
 import SessionCluster from './SessionCluster'
 import EdgeIndicators from './EdgeIndicators'
 import BroadcastDialog from './BroadcastDialog'
@@ -11,7 +12,6 @@ const RESTING_MAX_ZOOM = 1.0
 const ZOOM_SENSITIVITY = 0.001
 const KEYBOARD_ZOOM_STEP = 0.1
 const DOT_SPACING = 30
-const DOT_COLOR = '#2a2a4a'
 const DOT_RADIUS = 1.5
 
 // Source of truth in SessionCluster.tsx — keep in sync.
@@ -68,6 +68,7 @@ interface CanvasProps {
 export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }: CanvasProps) {
   const { sessions, thumbnails, toggleSelect, rangeSelect, clearSelection } = useSessionsStore()
   const broadcastDialogOpen = useSessionsStore((s) => s.broadcastDialogOpen)
+  const theme = useThemeStore((s) => s.theme)
   const projects = useProjectsStore((s) => s.projects)
   const knownPaths = useMemo(() => new Set(projects.map((p) => p.path)), [projects])
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -277,7 +278,9 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
     if (!ctx) return
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.fillStyle = DOT_COLOR
+    const dotColor =
+      getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#2a2a4a'
+    ctx.fillStyle = dotColor
 
     const spacing = DOT_SPACING * zoom
     const offsetX = ((panX % spacing) + spacing) % spacing
@@ -290,7 +293,9 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
         ctx.fill()
       }
     }
-  }, [zoom, panX, panY, sessions.length])
+    // theme is intentionally in the dep array so the dot grid repaints when
+    // the user switches between dark and light mode.
+  }, [zoom, panX, panY, sessions.length, theme])
 
   // Resize observer
   useEffect(() => {
