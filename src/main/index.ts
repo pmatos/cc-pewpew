@@ -611,6 +611,14 @@ app.whenReady().then(async () => {
     const config = getConfig()
     config.theme = theme
     saveConfig(config)
+    // Broadcast to every renderer so secondary windows (Swim Lanes etc.)
+    // pick up the new theme without needing to reload. The sender no-ops
+    // on its own broadcast because state.theme already matches.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('theme:changed', theme)
+      }
+    }
   })
 
   ipcMain.handle('swim-lanes:open', (_event, sessionIds: string[]) => {

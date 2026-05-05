@@ -21,20 +21,34 @@ interface ThemeStore {
   toggle: () => void
 }
 
+let broadcastListenerInstalled = false
+
 export const useThemeStore = create<ThemeStore>((set, get) => ({
   theme: 'dark',
   loaded: false,
   mutationCount: 0,
   init: async () => {
     if (get().loaded) return
+    // Subscribe to cross-window theme broadcasts before the IPC await so
+    // a change pushed by main during init isn't dropped. Doesn't go
+    // through setTheme — setTheme would re-save and trigger another
+    // broadcast.
+    if (!broadcastListenerInstalled) {
+      broadcastListenerInstalled = true
+      window.api.onThemeBroadcast((theme) => {
+        if (get().theme === theme) return
+        applyTheme(theme)
+        set({ theme, mutationCount: get().mutationCount + 1 })
+      })
+    }
     // Set `loaded` synchronously so a concurrent init() (StrictMode double
     // mount, second window) bails at the guard above instead of racing on
     // the same await.
     const initialMutation = get().mutationCount
     set({ loaded: true })
     const persisted = await window.api.getTheme()
-    // If setTheme ran during the await, the user's choice is already
-    // applied and persisted; do not clobber it with the value we fetched.
+    // If setTheme or a broadcast ran during the await, the latest theme
+    // is already applied; do not clobber it with the value we fetched.
     if (get().mutationCount !== initialMutation) return
     if (persisted === get().theme) return
     applyTheme(persisted)
