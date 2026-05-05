@@ -11,6 +11,11 @@ function applyTheme(theme: Theme): void {
 interface ThemeStore {
   theme: Theme
   loaded: boolean
+  // Monotonic counter incremented by setTheme on every actual state change.
+  // init() captures it before its IPC await and bails if it changed,
+  // catching a user toggle even when the net theme equals the initial value
+  // (e.g. dark → light → dark during a slow getTheme()).
+  mutationCount: number
   init: () => Promise<void>
   setTheme: (theme: Theme) => void
   toggle: () => void
@@ -19,26 +24,26 @@ interface ThemeStore {
 export const useThemeStore = create<ThemeStore>((set, get) => ({
   theme: 'dark',
   loaded: false,
+  mutationCount: 0,
   init: async () => {
     if (get().loaded) return
     // Set `loaded` synchronously so a concurrent init() (StrictMode double
     // mount, second window) bails at the guard above instead of racing on
     // the same await.
-    const initialTheme = get().theme
+    const initialMutation = get().mutationCount
     set({ loaded: true })
     const persisted = await window.api.getTheme()
-    // If the user toggled during the await, setTheme has already applied
-    // and persisted their choice — don't clobber it with the stale value
-    // we just fetched.
-    if (get().theme !== initialTheme) return
-    if (persisted === initialTheme) return
+    // If setTheme ran during the await, the user's choice is already
+    // applied and persisted; do not clobber it with the value we fetched.
+    if (get().mutationCount !== initialMutation) return
+    if (persisted === get().theme) return
     applyTheme(persisted)
     set({ theme: persisted })
   },
   setTheme: (theme) => {
     if (get().theme === theme) return
     applyTheme(theme)
-    set({ theme })
+    set({ theme, mutationCount: get().mutationCount + 1 })
     void window.api.saveTheme(theme)
   },
   toggle: () => {
