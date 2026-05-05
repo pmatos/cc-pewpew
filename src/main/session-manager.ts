@@ -657,6 +657,7 @@ async function createRemoteSession(
               'worktree',
               'add',
               worktreePath,
+              '--no-track',
               '-b',
               branchName,
               originRef,
@@ -883,6 +884,7 @@ export async function createSession(
         'worktree',
         'add',
         worktreePath,
+        '--no-track',
         '-b',
         branchName,
         originRef,
@@ -1721,7 +1723,7 @@ export async function createIssueSession(
   }
 
   try {
-    await runGit(['worktree', 'add', worktreePath, '-b', branch, originRef])
+    await runGit(['worktree', 'add', worktreePath, '--no-track', '-b', branch, originRef])
   } catch (err) {
     if (!(await hasBranch(projectPath, branch))) {
       return `Failed to create worktree for branch "${branch}": ${(err as Error).message}`
@@ -1783,7 +1785,18 @@ async function createRemoteIssueSession(
     try {
       await expectRemoteOk(
         host,
-        ['git', '-C', projectPath, 'worktree', 'add', worktreePath, '-b', branch, originRef],
+        [
+          'git',
+          '-C',
+          projectPath,
+          'worktree',
+          'add',
+          worktreePath,
+          '--no-track',
+          '-b',
+          branch,
+          originRef,
+        ],
         'Failed to create remote worktree'
       )
     } catch (err) {
