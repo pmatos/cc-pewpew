@@ -1317,10 +1317,13 @@ describe('createIssueSession', () => {
       })
     )
 
-    const result = await sm.createIssueSession('/proj', 42, null, {
-      runGit,
-      createSessionForWorktree,
-    })
+    const result = await sm.createIssueSession(
+      '/proj',
+      42,
+      null,
+      {},
+      { runGit, createSessionForWorktree }
+    )
 
     expect(typeof result).not.toBe('string')
     if (typeof result === 'string') throw new Error(result)
@@ -1329,7 +1332,8 @@ describe('createIssueSession', () => {
     expect(createSessionForWorktree).toHaveBeenCalledWith(
       '/proj',
       '/proj/.claude/worktrees/issue-42',
-      'issue-42'
+      'issue-42',
+      undefined
     )
     expect(runGit).toHaveBeenCalledWith([
       'worktree',
@@ -1350,7 +1354,7 @@ describe('createIssueSession', () => {
       throw new Error(`missing ${key}`)
     })
 
-    const result = await sm.createIssueSession('/proj', 99, null, { runGit })
+    const result = await sm.createIssueSession('/proj', 99, null, {}, { runGit })
     expect(result).toBe("Could not determine origin's default branch.")
   })
 })
@@ -1429,8 +1433,8 @@ describe('openSessionsForOpenPrs', () => {
     expect(result.failed).toEqual([])
     expect(listPrs).toHaveBeenCalledWith('/proj', null)
     expect(createPrSession).toHaveBeenCalledTimes(2)
-    expect(createPrSession).toHaveBeenCalledWith('/proj', 8, null)
-    expect(createPrSession).toHaveBeenCalledWith('/proj', 9, null)
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 8, null, {})
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 9, null, {})
   })
 
   it('surfaces gh list errors as a string', async () => {
@@ -1496,7 +1500,7 @@ describe('openSessionsForOpenIssues', () => {
     expect(result.failed).toEqual([])
     expect(listIssues).toHaveBeenCalledWith('/proj', null)
     expect(createIssueSession).toHaveBeenCalledTimes(1)
-    expect(createIssueSession).toHaveBeenCalledWith('/proj', 4, null)
+    expect(createIssueSession).toHaveBeenCalledWith('/proj', 4, null, {})
   })
 
   it('records per-issue create failures in the summary', async () => {
@@ -1524,7 +1528,7 @@ describe('createPrSessions', () => {
         baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session | string
     )
 
-    const result = await sm.createPrSessions('/proj', [7, 8, 9], null, { createPrSession })
+    const result = await sm.createPrSessions('/proj', [7, 8, 9], null, {}, { createPrSession })
     expect(typeof result).not.toBe('string')
     if (typeof result === 'string') throw new Error(result)
 
@@ -1532,8 +1536,8 @@ describe('createPrSessions', () => {
     expect(result.created.map((s) => s.prNumber).sort()).toEqual([8, 9])
     expect(result.failed).toEqual([])
     expect(createPrSession).toHaveBeenCalledTimes(2)
-    expect(createPrSession).toHaveBeenCalledWith('/proj', 8, null)
-    expect(createPrSession).toHaveBeenCalledWith('/proj', 9, null)
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 8, null, {})
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 9, null, {})
   })
 
   it('aggregates per-number failures into the summary', async () => {
@@ -1544,7 +1548,7 @@ describe('createPrSessions', () => {
           ? `PR #${prNumber} not found.`
           : (baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session)
     )
-    const result = await sm.createPrSessions('/proj', [4, 5, 6], null, { createPrSession })
+    const result = await sm.createPrSessions('/proj', [4, 5, 6], null, {}, { createPrSession })
     if (typeof result === 'string') throw new Error(result)
     expect(result.created.map((s) => s.prNumber).sort()).toEqual([4, 6])
     expect(result.failed).toEqual([{ number: 5, error: 'PR #5 not found.' }])
@@ -1557,10 +1561,10 @@ describe('createPrSessions', () => {
       async (_projectPath: string, prNumber: number, _hostId: string | null) =>
         baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session | string
     )
-    const result = await sm.createPrSessions('/proj', [3, 3, 3], null, { createPrSession })
+    const result = await sm.createPrSessions('/proj', [3, 3, 3], null, {}, { createPrSession })
     if (typeof result === 'string') throw new Error(result)
     expect(createPrSession).toHaveBeenCalledTimes(1)
-    expect(createPrSession).toHaveBeenCalledWith('/proj', 3, null)
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 3, null, {})
     expect(result.created.map((s) => s.prNumber)).toEqual([3])
   })
 
@@ -1575,19 +1579,29 @@ describe('createPrSessions', () => {
       async (_projectPath: string, prNumber: number, _hostId: string | null) =>
         baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session | string
     )
-    const result = await sm.createPrSessions('/proj', [5], null, { createPrSession })
+    const result = await sm.createPrSessions('/proj', [5], null, {}, { createPrSession })
     if (typeof result === 'string') throw new Error(result)
     expect(result.skipped).toEqual([])
     expect(result.created.map((s) => s.prNumber)).toEqual([5])
-    expect(createPrSession).toHaveBeenCalledWith('/proj', 5, null)
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 5, null, {})
   })
 
   it('returns an empty summary for an empty number list', async () => {
     const sm = await loadSessionManager()
     const createPrSession = vi.fn()
-    const result = await sm.createPrSessions('/proj', [], null, { createPrSession })
+    const result = await sm.createPrSessions('/proj', [], null, {}, { createPrSession })
     if (typeof result === 'string') throw new Error(result)
     expect(result).toEqual({ created: [], skipped: [], failed: [] })
     expect(createPrSession).not.toHaveBeenCalled()
+  })
+
+  it('forwards the selected tool through options to createPrSession', async () => {
+    const sm = await loadSessionManager()
+    const createPrSession = vi.fn(
+      async (_projectPath: string, prNumber: number, _hostId: string | null) =>
+        baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session | string
+    )
+    await sm.createPrSessions('/proj', [11], null, { tool: 'codex' }, { createPrSession })
+    expect(createPrSession).toHaveBeenCalledWith('/proj', 11, null, { tool: 'codex' })
   })
 })

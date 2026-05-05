@@ -733,7 +733,8 @@ async function createRemoteSession(
 async function createRemotePrSession(
   hostId: string,
   projectPath: string,
-  prNumber: number
+  prNumber: number,
+  options: CreateSessionOptions = {}
 ): Promise<Session | string> {
   const host = getRequiredHost(hostId)
   const remoteProject = getRemoteProject(hostId, projectPath)
@@ -780,7 +781,7 @@ async function createRemotePrSession(
       return `PR #${prNumber} is ${prInfo.state.toLowerCase()}, not open.`
     }
 
-    const effectiveTool: AgentTool = getConfig().defaultTool
+    const effectiveTool: AgentTool = options.tool ?? getConfig().defaultTool
     const agentPath = agentPaths[effectiveTool]
     if (!agentPath) {
       return `${effectiveTool} is not installed on host ${host.label || host.alias}.`
@@ -1381,7 +1382,8 @@ type ListNumberedItems = (
 type CreateNumberedSession = (
   projectPath: string,
   number: number,
-  hostId: string | null
+  hostId: string | null,
+  options?: CreateSessionOptions
 ) => Promise<Session | string>
 type RemoteGhProbe = { ok: true } | { ok: false; error: string }
 
@@ -1398,7 +1400,8 @@ interface CreateIssueSessionDeps {
   createSessionForWorktree?: (
     projectPath: string,
     worktreePath: string,
-    label?: string
+    label?: string,
+    tool?: AgentTool
   ) => Promise<Session>
 }
 
@@ -1516,7 +1519,8 @@ async function createSessionsForNumbers(
   hostId: string | null,
   field: 'prNumber' | 'issueNumber',
   numbers: number[],
-  createSession: CreateNumberedSession
+  createSession: CreateNumberedSession,
+  options: CreateSessionOptions = {}
 ): Promise<OpenSessionsSummary> {
   const existing = new Set<number>()
   for (const entry of sessions.values()) {
@@ -1534,7 +1538,7 @@ async function createSessionsForNumbers(
 
   for (const item of toCreate) {
     try {
-      const result = await createSession(projectPath, item.number, hostId)
+      const result = await createSession(projectPath, item.number, hostId, options)
       if (typeof result === 'string') {
         failed.push({ number: item.number, error: result })
       } else {
@@ -1599,9 +1603,10 @@ async function probeRemoteGh(host: Host): Promise<RemoteGhProbe> {
 export async function createPrSession(
   projectPath: string,
   prNumber: number,
-  hostId: string | null = null
+  hostId: string | null = null,
+  options: CreateSessionOptions = {}
 ): Promise<Session | string> {
-  if (hostId !== null) return createRemotePrSession(hostId, projectPath, prNumber)
+  if (hostId !== null) return createRemotePrSession(hostId, projectPath, prNumber, options)
 
   // Look up PR via gh CLI
   let prInfo: { headRefName: string; state: string; title: string }
@@ -1652,7 +1657,12 @@ export async function createPrSession(
     }
   }
 
-  const session = await createSessionForWorktree(projectPath, worktreePath, worktreeName)
+  const session = await createSessionForWorktree(
+    projectPath,
+    worktreePath,
+    worktreeName,
+    options.tool
+  )
   // We already know the PR number; set it directly so it shows immediately
   // (the async lookup fired by adoptWorktree will no-op since prNumber is set).
   session.prNumber = prNumber
@@ -1668,6 +1678,7 @@ export async function createPrSessions(
   projectPath: string,
   prNumbers: number[],
   hostId: string | null = null,
+  options: CreateSessionOptions = {},
   deps: { createPrSession?: CreateNumberedSession } = {}
 ): Promise<OpenSessionsSummary | string> {
   const deduped = Array.from(new Set(prNumbers)).sort((a, b) => a - b)
@@ -1676,7 +1687,8 @@ export async function createPrSessions(
     hostId,
     'prNumber',
     deduped,
-    deps.createPrSession ?? createPrSession
+    deps.createPrSession ?? createPrSession,
+    options
   )
 }
 
@@ -1684,9 +1696,10 @@ export async function createIssueSession(
   projectPath: string,
   issueNumber: number,
   hostId: string | null = null,
+  options: CreateSessionOptions = {},
   deps: CreateIssueSessionDeps = {}
 ): Promise<Session | string> {
-  if (hostId !== null) return createRemoteIssueSession(hostId, projectPath, issueNumber)
+  if (hostId !== null) return createRemoteIssueSession(hostId, projectPath, issueNumber, options)
 
   const branch = `issue-${issueNumber}`
   const worktreeName = `issue-${issueNumber}`
@@ -1733,7 +1746,7 @@ export async function createIssueSession(
     }
   }
 
-  const session = await adopt(projectPath, worktreePath, worktreeName)
+  const session = await adopt(projectPath, worktreePath, worktreeName, options.tool)
   session.issueNumber = issueNumber
   onSessionsChanged()
   return session
@@ -1742,7 +1755,8 @@ export async function createIssueSession(
 async function createRemoteIssueSession(
   hostId: string,
   projectPath: string,
-  issueNumber: number
+  issueNumber: number,
+  options: CreateSessionOptions = {}
 ): Promise<Session | string> {
   const host = getRequiredHost(hostId)
   const remoteProject = getRemoteProject(hostId, projectPath)
@@ -1758,7 +1772,7 @@ async function createRemoteIssueSession(
   }
 
   return remoteHostRuntime.withPreparedHost(host, async ({ notifyScriptPath, agentPaths }) => {
-    const effectiveTool: AgentTool = getConfig().defaultTool
+    const effectiveTool: AgentTool = options.tool ?? getConfig().defaultTool
     const agentPath = agentPaths[effectiveTool]
     if (!agentPath) {
       return `${effectiveTool} is not installed on host ${host.label || host.alias}.`
