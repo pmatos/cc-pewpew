@@ -85,6 +85,19 @@ export default function Terminal({ sessionId }: Props) {
     let aborted = false
     let dataCleanup: (() => void) | null = null
     let webglAddon: WebglAddon | null = null
+    let readyForPtyData = false
+    let pendingPtyData = ''
+    let sawLiveData = false
+
+    dataCleanup = window.api.onPtyData((event) => {
+      if (event.sessionId !== sessionId) return
+      sawLiveData = true
+      if (readyForPtyData) {
+        term.write(event.data)
+      } else {
+        pendingPtyData += event.data
+      }
+    })
 
     const syncTerminal = async (invalidateAtlas = false) => {
       if (aborted) return
@@ -152,15 +165,14 @@ export default function Terminal({ sessionId }: Props) {
         fitRef.current = fitAddon
 
         await syncTerminal(true)
-
-        let sawLiveData = false
-
-        dataCleanup = window.api.onPtyData((event) => {
-          if (event.sessionId === sessionId) {
-            sawLiveData = true
-            term.write(event.data)
-          }
-        })
+        if (aborted) return
+        while (pendingPtyData) {
+          const data = pendingPtyData
+          pendingPtyData = ''
+          await new Promise<void>((resolve) => term.write(data, resolve))
+          if (aborted) return
+        }
+        readyForPtyData = true
 
         await new Promise((r) => setTimeout(r, 120))
         if (aborted) return
