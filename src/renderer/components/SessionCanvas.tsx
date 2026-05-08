@@ -30,7 +30,9 @@ function computeMaxZoom(viewportW: number, viewportH: number): number {
 const FILL_THRESHOLD = 0.95
 const DWELL_MS = 120
 
-const ACCENT_COLORS = [
+// Cluster identity hues. Light-theme palette uses deeper, more saturated
+// counterparts so dashed borders read as identity on white instead of dust.
+const ACCENT_COLORS_DARK = [
   '#4ade80',
   '#60a5fa',
   '#f472b6',
@@ -41,12 +43,24 @@ const ACCENT_COLORS = [
   '#e879f9',
 ]
 
-function hashColor(path: string): string {
+const ACCENT_COLORS_LIGHT = [
+  '#15803d',
+  '#1d4ed8',
+  '#be185d',
+  '#a16207',
+  '#6d28d9',
+  '#c2410c',
+  '#0f766e',
+  '#86198f',
+]
+
+function hashColor(path: string, theme: 'dark' | 'light'): string {
+  const palette = theme === 'light' ? ACCENT_COLORS_LIGHT : ACCENT_COLORS_DARK
   let hash = 0
   for (let i = 0; i < path.length; i++) {
     hash = (hash + path.charCodeAt(i)) * 31
   }
-  return ACCENT_COLORS[Math.abs(hash) % ACCENT_COLORS.length]
+  return palette[Math.abs(hash) % palette.length]
 }
 
 const CLUSTER_WIDTH = 510
@@ -279,7 +293,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     const dotColor =
-      getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#2a2a4a'
+      getComputedStyle(document.documentElement).getPropertyValue('--dot-grid').trim() || '#2a2a4a'
     ctx.fillStyle = dotColor
 
     const spacing = DOT_SPACING * zoom
@@ -513,7 +527,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
             projectName={clusterSessions[0].projectName}
             sessions={clusterSessions}
             thumbnails={thumbnails}
-            accentColor={hashColor(projectPath)}
+            accentColor={hashColor(projectPath, theme)}
             position={resolvedClusterPositions[projectPath] || { x: 0, y: 0 }}
             zoom={zoom}
             isOrphaned={!knownPaths.has(projectPath)}
@@ -529,7 +543,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
           projectPath,
           projectName: clusterSessions[0].projectName,
           position: resolvedClusterPositions[projectPath] || { x: 0, y: 0 },
-          color: hashColor(projectPath),
+          color: hashColor(projectPath, theme),
         }))}
         zoom={zoom}
         panX={panX}
