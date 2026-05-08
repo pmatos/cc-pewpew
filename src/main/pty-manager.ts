@@ -71,6 +71,13 @@ function fireAgentExit(sessionId: string, entry: PtyEntry): void {
   if (!listener) return
 
   if (!entry.host) {
+    // Local: pty.onExit fires for any `tmux attach-session` client detach,
+    // not just for the agent exiting. A normal tmux detach (e.g. Ctrl-b d
+    // passing through xterm.js, or another `detach-client` from outside)
+    // would otherwise be misclassified as agent exit and the cleanup prompt
+    // would offer to delete a still-live worktree. Confirm the cc-pewpew
+    // tmux session is actually gone before firing the listener.
+    if (hasTmuxSession(sessionId)) return
     listener(sessionId)
     return
   }
