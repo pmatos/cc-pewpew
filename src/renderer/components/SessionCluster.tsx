@@ -117,7 +117,10 @@ export default function SessionCluster({
       >
         {projectName}
       </div>
-      <div className="cluster-cards">
+      <div
+        className="cluster-cards"
+        style={{ gridTemplateColumns: `repeat(${Math.min(sessions.length, 2)}, 240px)` }}
+      >
         {sessions.map((session) => (
           <SessionCard
             key={session.id}
