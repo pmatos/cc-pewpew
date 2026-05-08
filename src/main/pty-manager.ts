@@ -67,7 +67,32 @@ export function setOnAgentExit(listener: AgentExitListener | null): void {
 function fireAgentExit(sessionId: string, entry: PtyEntry): void {
   if (teardownStarted) return
   if (entry.intentionallyClosed) return
-  agentExitListener?.(sessionId)
+  const listener = agentExitListener
+  if (!listener) return
+
+  if (!entry.host) {
+    listener(sessionId)
+    return
+  }
+
+  // Remote: pty.onExit fires when the local `ssh -tt ... tmux attach-session`
+  // PTY drops. That can be an actual remote agent exit (tmux session ended),
+  // but it can also be a transport-level drop with the remote tmux still alive
+  // — network blip, ControlMaster teardown, peer SSH death. Probe the remote
+  // before treating this as an agent exit; only fire on a definitive 'absent'.
+  // 'unreachable' falls through silently — the existing reconnect machinery
+  // will reconcile the session's connectionState without our help, and we'd
+  // rather miss a codex-remote-/exit cleanup prompt than racefully delete a
+  // still-live remote worktree.
+  const remoteHost = entry.host
+  void (async () => {
+    try {
+      const probe = await probeRemoteTmuxSession(sessionId, remoteHost)
+      if (probe === 'absent') listener(sessionId)
+    } catch {
+      // Probe itself threw — treat as 'unreachable' and bail.
+    }
+  })()
 }
 
 function flushBuffers(): void {
@@ -480,6 +505,7 @@ export function reattachPty(sessionId: string): void {
 
   ptyProcess.onExit(() => {
     ptys.delete(sessionId)
+    fireAgentExit(sessionId, entry)
   })
 
   ptys.set(sessionId, entry)
@@ -525,6 +551,7 @@ export async function reattachRemotePty(sessionId: string, host: Host): Promise<
   ptyProcess.onExit(() => {
     ptys.delete(sessionId)
     releaseRemoteEntry(entry)
+    fireAgentExit(sessionId, entry)
   })
 
   ptys.set(sessionId, entry)
