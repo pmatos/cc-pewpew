@@ -46,10 +46,29 @@ interface PtyEntry {
   buffer: string
   host?: Host
   released?: boolean
+  // Set by detachPty/destroyPty/destroyRemotePty before they kill the pty,
+  // so the onExit handler can tell "user/cc-pewpew tore this down" apart from
+  // "the agent (claude/codex) exited on its own". Only the latter triggers
+  // the cleanup-prompt callback.
+  intentionallyClosed?: boolean
 }
 
 const ptys = new Map<string, PtyEntry>()
 let flushInterval: ReturnType<typeof setInterval> | null = null
+let teardownStarted = false
+
+type AgentExitListener = (sessionId: string) => void
+let agentExitListener: AgentExitListener | null = null
+
+export function setOnAgentExit(listener: AgentExitListener | null): void {
+  agentExitListener = listener
+}
+
+function fireAgentExit(sessionId: string, entry: PtyEntry): void {
+  if (teardownStarted) return
+  if (entry.intentionallyClosed) return
+  agentExitListener?.(sessionId)
+}
 
 function flushBuffers(): void {
   for (const [sessionId, entry] of ptys) {
@@ -74,6 +93,7 @@ export function initPtyManager(): void {
 }
 
 export function stopPtyManager(): void {
+  teardownStarted = true
   if (flushInterval) {
     clearInterval(flushInterval)
     flushInterval = null
@@ -133,6 +153,7 @@ export function createPty(sessionId: string, cwd: string, options?: SpawnOptions
 
   ptyProcess.onExit(() => {
     ptys.delete(sessionId)
+    fireAgentExit(sessionId, entry)
   })
 
   ptys.set(sessionId, entry)
@@ -195,6 +216,7 @@ export async function createRemotePty(
   ptyProcess.onExit(() => {
     ptys.delete(sessionId)
     releaseRemoteEntry(entry)
+    fireAgentExit(sessionId, entry)
   })
 
   ptys.set(sessionId, entry)
@@ -219,6 +241,7 @@ export function detachPty(sessionId: string): void {
   const entry = ptys.get(sessionId)
   if (!entry) return
 
+  entry.intentionallyClosed = true
   ptys.delete(sessionId)
   releaseRemoteEntry(entry)
 
@@ -235,6 +258,7 @@ export function destroyPty(sessionId: string): void {
   const tmuxSession = entry?.tmuxSession ?? `cc-pewpew-${sessionId}`
 
   if (entry) {
+    entry.intentionallyClosed = true
     ptys.delete(sessionId)
     releaseRemoteEntry(entry)
 
@@ -257,6 +281,13 @@ export function destroyPty(sessionId: string): void {
 export async function destroyRemotePty(sessionId: string, host: Host): Promise<void> {
   const entry = ptys.get(sessionId)
   const tmuxSession = entry?.tmuxSession ?? `cc-pewpew-${sessionId}`
+
+  // Mark before issuing the kill so the inevitable pty.onExit (triggered when
+  // the remote tmux dies and ssh attach drops) is recognised as our doing,
+  // not as the agent exiting on its own. Set even when the kill rejects: the
+  // remote side may already have exited, and we don't want a race here to
+  // re-fire promptCleanup.
+  if (entry) entry.intentionallyClosed = true
 
   const result = await execRemote(host, ['tmux', 'kill-session', '-t', tmuxSession], {
     timeoutMs: 5000,
