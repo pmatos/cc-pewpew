@@ -21,6 +21,7 @@
   --text-secondary: #9a9a9a;
   --text-on-accent: #111;
   --border: #2a2a4a;
+  --dot-grid: #2a2a4a;
   --accent-green: #4ade80;
   --accent-yellow: #facc15;
   --accent-red: #f87171;
@@ -51,38 +52,39 @@
 }
 
 :root[data-theme='light'] {
-  --bg-main: #f5f5fb;
-  --bg-sidebar: #ebebf2;
-  --bg-statusbar: #e0e0ea;
+  --bg-main: #eef0f5;
+  --bg-sidebar: #ffffff;
+  --bg-statusbar: #d8dde7;
   --bg-terminal: #ffffff;
   --bg-context-menu: #ffffff;
-  --text-primary: #1a1a2e;
-  --text-secondary: #5a5a72;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
   --text-on-accent: #ffffff;
-  --border: #cfcfdb;
-  --accent-green: #16a34a;
+  --border: #c8cfdc;
+  --dot-grid: #b6bfcf;
+  --accent-green: #15803d;
   --accent-yellow: #b45309;
   --accent-red: #dc2626;
-  --accent-blue: #2563eb;
+  --accent-blue: #1d4ed8;
   --accent-orange: #c2410c;
   --accent-error: #b91c1c;
 
-  --shadow-md: rgba(15, 23, 42, 0.12);
-  --shadow-lg: rgba(15, 23, 42, 0.18);
-  --shadow-sm: rgba(15, 23, 42, 0.08);
+  --shadow-md: rgba(15, 23, 42, 0.14);
+  --shadow-lg: rgba(15, 23, 42, 0.22);
+  --shadow-sm: rgba(15, 23, 42, 0.1);
   --modal-overlay-bg: rgba(15, 23, 42, 0.35);
   --terminal-overlay-bg: rgba(255, 255, 255, 0.82);
   --terminal-overlay-error-bg: rgba(254, 226, 226, 0.92);
   --terminal-overlay-warn-bg: rgba(254, 243, 199, 0.92);
   --connection-dot-border: rgba(255, 255, 255, 0.85);
 
-  --review-bg: #f0f0f7;
+  --review-bg: #eef0f5;
   --review-addition: rgba(22, 163, 74, 0.14);
   --review-deletion: rgba(220, 38, 38, 0.12);
   --review-addition-text: #166534;
   --review-deletion-text: #991b1b;
-  --review-hunk-header: #e0e0ea;
-  --review-approved: #16a34a;
+  --review-hunk-header: #dde2eb;
+  --review-approved: #15803d;
   --review-commented: #b45309;
   --review-rejected: #dc2626;
 }
@@ -328,6 +330,7 @@ body,
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
+  box-shadow: 0 1px 2px var(--shadow-sm);
   transition:
     border-color 0.3s ease,
     box-shadow 0.3s ease;
@@ -335,6 +338,7 @@ body,
 
 .session-card:hover {
   border-color: var(--accent-green);
+  box-shadow: 0 4px 12px var(--shadow-md);
 }
 
 .session-card.selected {
