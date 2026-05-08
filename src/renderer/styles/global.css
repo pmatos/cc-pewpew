@@ -319,7 +319,10 @@ body,
 }
 
 .cluster-cards {
-  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, 240px);
+  gap: 12px;
+  align-items: start;
 }
 
 .session-card {

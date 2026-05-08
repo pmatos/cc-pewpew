@@ -5,10 +5,6 @@ import { useProjectsStore } from '../stores/projects'
 import SessionCard from './SessionCard'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 
-const CARD_WIDTH = 240
-const CARD_GAP = 12
-const CLUSTER_COLS = 2
-
 interface Props {
   projectPath: string
   projectName: string
@@ -121,32 +117,16 @@ export default function SessionCluster({
       >
         {projectName}
       </div>
-      <div
-        className="cluster-cards"
-        style={{
-          width: Math.min(sessions.length, CLUSTER_COLS) * (CARD_WIDTH + CARD_GAP) - CARD_GAP,
-          height: Math.ceil(sessions.length / CLUSTER_COLS) * (230 + CARD_GAP) - CARD_GAP,
-        }}
-      >
-        {sessions.map((session, i) => {
-          const col = i % CLUSTER_COLS
-          const row = Math.floor(i / CLUSTER_COLS)
-          return (
-            <SessionCard
-              key={session.id}
-              session={session}
-              thumbnail={thumbnails[session.id]}
-              onOpenSession={onOpenSession}
-              onSelect={onSelect}
-              style={{
-                position: 'absolute',
-                left: col * (CARD_WIDTH + CARD_GAP),
-                top: row * (230 + CARD_GAP),
-                width: CARD_WIDTH,
-              }}
-            />
-          )
-        })}
+      <div className="cluster-cards">
+        {sessions.map((session) => (
+          <SessionCard
+            key={session.id}
+            session={session}
+            thumbnail={thumbnails[session.id]}
+            onOpenSession={onOpenSession}
+            onSelect={onSelect}
+          />
+        ))}
       </div>
 
       {headerMenu && (

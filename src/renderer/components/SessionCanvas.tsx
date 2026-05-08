@@ -354,7 +354,6 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
       const cy = e.clientY - rect.top
 
       const cap = computeMaxZoom(rect.width, rect.height)
-      let committedZoom = zoomRef.current
       setZoom((prevZoom) => {
         const zoomDelta = -e.deltaY * ZOOM_SENSITIVITY * prevZoom
         const newZoom = Math.max(MIN_ZOOM, Math.min(cap, prevZoom + zoomDelta))
@@ -363,7 +362,6 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
         setPanX(newPanX)
         setPanY(newPanY)
         persistCanvas(newZoom, newPanX, newPanY)
-        committedZoom = newZoom
         return newZoom
       })
 
@@ -385,10 +383,11 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
       }
 
       // Threshold: either dimension of the rendered card >= FILL_THRESHOLD of viewport.
-      const renderedW = CARD_WIDTH * committedZoom
-      const renderedH = CARD_HEIGHT * committedZoom
+      // Measure the actual rendered rect — card height varies with chip wrap.
+      const cardRect = cardEl.getBoundingClientRect()
       const filled =
-        renderedW >= rect.width * FILL_THRESHOLD || renderedH >= rect.height * FILL_THRESHOLD
+        cardRect.width >= rect.width * FILL_THRESHOLD ||
+        cardRect.height >= rect.height * FILL_THRESHOLD
       if (!filled) {
         thresholdCrossedAtRef.current = null
         return
@@ -407,7 +406,6 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
       if (!sessionId) return
       const sessionRec = sessions.find((s) => s.id === sessionId)
       if (!sessionRec) return
-      const cardRect = cardEl.getBoundingClientRect()
       zoomOpenFiredRef.current = true
       thresholdCrossedAtRef.current = null
       onZoomOpen?.({
