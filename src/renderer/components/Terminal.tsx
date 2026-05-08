@@ -151,6 +151,8 @@ export default function Terminal({ sessionId }: Props) {
         termRef.current = term
         fitRef.current = fitAddon
 
+        await syncTerminal(true)
+
         let sawLiveData = false
 
         dataCleanup = window.api.onPtyData((event) => {
@@ -160,7 +162,6 @@ export default function Terminal({ sessionId }: Props) {
           }
         })
 
-        await syncTerminal(true)
         await new Promise((r) => setTimeout(r, 120))
         if (aborted) return
 
