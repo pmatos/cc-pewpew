@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useCallback, useMemo, useEffectEvent, useReducer } from 'react'
 import { useReviewStore, getReviewProgress } from '../stores/review'
 import { useSessionsStore } from '../stores/sessions'
 import type { DiffMode, RejectMode } from '../../shared/types'
@@ -19,7 +19,30 @@ function nextAnnotationId(): string {
   return `ann-${++annotationIdCounter}-${Date.now()}`
 }
 
-export default function ReviewOverlay({ sessionId, onClose }: Props) {
+interface ReviewOverlayUiState {
+  focusedHunkKey: string | null
+  scrollToFile: string | undefined
+  feedbackState: { hunkKey: string; mode: 'comment' | 'reject' } | null
+  confirmAction: 'send' | 'copy' | null
+  diffMode: DiffMode
+  branches: string[]
+  selectedBranch: string
+  pendingModeSwitch: DiffMode | null
+  pendingBranch: string | null
+}
+
+function reviewOverlayUiReducer(
+  state: ReviewOverlayUiState,
+  update: Partial<ReviewOverlayUiState>
+): ReviewOverlayUiState {
+  return { ...state, ...update }
+}
+
+export default function ReviewOverlay(props: Props) {
+  return useReviewOverlayElement(props)
+}
+
+function useReviewOverlayElement({ sessionId, onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const reviewState = useReviewStore((s) => s.sessions[sessionId])
   const fetchDiff = useReviewStore((s) => s.fetchDiff)
@@ -29,19 +52,28 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
   const session = useSessionsStore((s) => s.sessions.find((s) => s.id === sessionId))
   const isRemote = session?.hostId != null
 
-  const [focusedHunkKey, setFocusedHunkKey] = useState<string | null>(null)
-  const [scrollToFile, setScrollToFile] = useState<string | undefined>(undefined)
-  const [feedbackState, setFeedbackState] = useState<{
-    hunkKey: string
-    mode: 'comment' | 'reject'
-  } | null>(null)
-  const [confirmAction, setConfirmAction] = useState<'send' | 'copy' | null>(null)
-
-  const [diffMode, setDiffMode] = useState<DiffMode>('uncommitted')
-  const [branches, setBranches] = useState<string[]>([])
-  const [selectedBranch, setSelectedBranch] = useState('main')
-  const [pendingModeSwitch, setPendingModeSwitch] = useState<DiffMode | null>(null)
-  const [pendingBranch, setPendingBranch] = useState<string | null>(null)
+  const [ui, setUi] = useReducer(reviewOverlayUiReducer, {
+    focusedHunkKey: null,
+    scrollToFile: undefined,
+    feedbackState: null,
+    confirmAction: null,
+    diffMode: 'uncommitted',
+    branches: [],
+    selectedBranch: 'main',
+    pendingModeSwitch: null,
+    pendingBranch: null,
+  })
+  const {
+    focusedHunkKey,
+    scrollToFile,
+    feedbackState,
+    confirmAction,
+    diffMode,
+    branches,
+    selectedBranch,
+    pendingModeSwitch,
+    pendingBranch,
+  } = ui
 
   useEffect(() => {
     containerRef.current?.focus()
@@ -53,13 +85,13 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
     window.api
       .getReviewBranches(sessionId)
       .then((r) => {
-        if (r.ok && r.branches) setBranches(r.branches)
+        if (r.ok && r.branches) setUi({ branches: r.branches })
       })
       .catch(() => {})
     window.api
       .getReviewDefaultBranch(sessionId)
       .then((r) => {
-        if (r.ok && r.branch) setSelectedBranch(r.branch)
+        if (r.ok && r.branch) setUi({ selectedBranch: r.branch })
       })
       .catch(() => {})
   }, [sessionId, fetchDiff, isRemote])
@@ -77,8 +109,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
   const switchMode = useCallback(
     (newMode: DiffMode, branch?: string) => {
       if (isRemote) return
-      setDiffMode(newMode)
-      setFocusedHunkKey(null)
+      setUi({ diffMode: newMode, focusedHunkKey: null })
       clearAnnotations(sessionId)
       fetchDiff(sessionId, newMode, newMode === 'branch' ? (branch ?? selectedBranch) : undefined)
     },
@@ -89,7 +120,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
     (newMode: DiffMode) => {
       if (newMode === diffMode) return
       if (hasAnnotations) {
-        setPendingModeSwitch(newMode)
+        setUi({ pendingModeSwitch: newMode })
       } else {
         switchMode(newMode)
       }
@@ -100,10 +131,9 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
   const handleBranchChange = useCallback(
     (branch: string) => {
       if (hasAnnotations) {
-        setPendingBranch(branch)
-        setPendingModeSwitch('branch')
+        setUi({ pendingBranch: branch, pendingModeSwitch: 'branch' })
       } else {
-        setSelectedBranch(branch)
+        setUi({ selectedBranch: branch })
         switchMode('branch', branch)
       }
     },
@@ -114,12 +144,14 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
     (direction: 1 | -1) => {
       if (allHunkKeys.length === 0) return
       if (!focusedHunkKey) {
-        setFocusedHunkKey(direction === 1 ? allHunkKeys[0] : allHunkKeys[allHunkKeys.length - 1])
+        setUi({
+          focusedHunkKey: direction === 1 ? allHunkKeys[0] : allHunkKeys[allHunkKeys.length - 1],
+        })
         return
       }
       const idx = allHunkKeys.indexOf(focusedHunkKey)
       const next = (idx + direction + allHunkKeys.length) % allHunkKeys.length
-      setFocusedHunkKey(allHunkKeys[next])
+      setUi({ focusedHunkKey: allHunkKeys[next] })
     },
     [allHunkKeys, focusedHunkKey]
   )
@@ -127,14 +159,14 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
   const handleHunkAction = useCallback(
     (filePath: string, hunkIndex: number, action: 'approve' | 'comment' | 'reject') => {
       const key = getHunkKey(filePath, hunkIndex)
-      setFocusedHunkKey(key)
+      setUi({ focusedHunkKey: key })
       if (action === 'approve') {
         addAnnotation(sessionId, key, {
           id: nextAnnotationId(),
           decision: 'approved',
         })
       } else {
-        setFeedbackState({ hunkKey: key, mode: action })
+        setUi({ feedbackState: { hunkKey: key, mode: action } })
       }
     },
     [sessionId, addAnnotation]
@@ -149,7 +181,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
         comment: comment || undefined,
         rejectMode,
       })
-      setFeedbackState(null)
+      setUi({ feedbackState: null })
       containerRef.current?.focus()
     },
     [sessionId, feedbackState, addAnnotation]
@@ -180,7 +212,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
   const handleSendOrCopy = useCallback(
     (action: 'send' | 'copy') => {
       if (unreviewedCount > 0) {
-        setConfirmAction(action)
+        setUi({ confirmAction: action })
       } else {
         executeAction(action)
       }
@@ -188,71 +220,66 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
     [unreviewedCount, executeAction]
   )
 
+  const handleReviewKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    // Scope shortcuts to this overlay instance (prevents cross-lane actions in swim lanes)
+    if (!containerRef.current?.contains(e.target as Node)) return
+
+    if (feedbackState) return
+    if (confirmAction) return
+    if (pendingModeSwitch) return
+
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
+      return
+    }
+
+    const noMod = !e.ctrlKey && !e.altKey && !e.metaKey
+    if (e.key === 'j' && noMod) {
+      e.preventDefault()
+      navigateHunk(1)
+      return
+    }
+    if (e.key === 'k' && noMod) {
+      e.preventDefault()
+      navigateHunk(-1)
+      return
+    }
+
+    if (focusedHunkKey && noMod) {
+      if (e.key === 'a') {
+        e.preventDefault()
+        addAnnotation(sessionId, focusedHunkKey, {
+          id: nextAnnotationId(),
+          decision: 'approved',
+        })
+        return
+      }
+      if (e.key === 'c') {
+        e.preventDefault()
+        setUi({ feedbackState: { hunkKey: focusedHunkKey, mode: 'comment' } })
+        return
+      }
+      if (e.key === 'r') {
+        e.preventDefault()
+        setUi({ feedbackState: { hunkKey: focusedHunkKey, mode: 'reject' } })
+        return
+      }
+    }
+  })
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Scope shortcuts to this overlay instance (prevents cross-lane actions in swim lanes)
-      if (!containerRef.current?.contains(e.target as Node)) return
-
-      if (feedbackState) return
-      if (confirmAction) return
-      if (pendingModeSwitch) return
-
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        onClose()
-        return
-      }
-
-      const noMod = !e.ctrlKey && !e.altKey && !e.metaKey
-      if (e.key === 'j' && noMod) {
-        e.preventDefault()
-        navigateHunk(1)
-        return
-      }
-      if (e.key === 'k' && noMod) {
-        e.preventDefault()
-        navigateHunk(-1)
-        return
-      }
-
-      if (focusedHunkKey && noMod) {
-        if (e.key === 'a') {
-          e.preventDefault()
-          addAnnotation(sessionId, focusedHunkKey, {
-            id: nextAnnotationId(),
-            decision: 'approved',
-          })
-          return
-        }
-        if (e.key === 'c') {
-          e.preventDefault()
-          setFeedbackState({ hunkKey: focusedHunkKey, mode: 'comment' })
-          return
-        }
-        if (e.key === 'r') {
-          e.preventDefault()
-          setFeedbackState({ hunkKey: focusedHunkKey, mode: 'reject' })
-          return
-        }
-      }
+      handleReviewKeyDown(e)
     }
     document.addEventListener('keydown', handler, true)
     return () => document.removeEventListener('keydown', handler, true)
-  }, [
-    onClose,
-    navigateHunk,
-    focusedHunkKey,
-    feedbackState,
-    confirmAction,
-    pendingModeSwitch,
-    sessionId,
-    addAnnotation,
-  ])
+  }, [])
 
   const handleFileClick = useCallback((filePath: string) => {
-    setScrollToFile(filePath)
-    setTimeout(() => setScrollToFile(undefined), 100)
+    setUi({ scrollToFile: filePath })
+    setTimeout(() => setUi({ scrollToFile: undefined }), 100)
   }, [])
 
   const loading = !reviewState || reviewState.loading
@@ -328,7 +355,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
                   mode={feedbackState.mode}
                   onSubmit={handleFeedbackSubmit}
                   onCancel={() => {
-                    setFeedbackState(null)
+                    setUi({ feedbackState: null })
                     containerRef.current?.focus()
                   }}
                 />
@@ -353,7 +380,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
                 <div className="rv-confirm-actions">
                   <button
                     className="rv-feedback-btn rv-feedback-btn--cancel"
-                    onClick={() => setConfirmAction(null)}
+                    onClick={() => setUi({ confirmAction: null })}
                   >
                     Cancel
                   </button>
@@ -361,7 +388,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
                     className="rv-feedback-btn rv-feedback-btn--submit"
                     onClick={() => {
                       executeAction(confirmAction)
-                      setConfirmAction(null)
+                      setUi({ confirmAction: null })
                     }}
                   >
                     Omit unreviewed
@@ -378,8 +405,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
                   <button
                     className="rv-feedback-btn rv-feedback-btn--cancel"
                     onClick={() => {
-                      setPendingModeSwitch(null)
-                      setPendingBranch(null)
+                      setUi({ pendingModeSwitch: null, pendingBranch: null })
                     }}
                   >
                     Cancel
@@ -387,10 +413,9 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
                   <button
                     className="rv-feedback-btn rv-feedback-btn--submit"
                     onClick={() => {
-                      if (pendingBranch) setSelectedBranch(pendingBranch)
+                      if (pendingBranch) setUi({ selectedBranch: pendingBranch })
                       switchMode(pendingModeSwitch, pendingBranch ?? undefined)
-                      setPendingModeSwitch(null)
-                      setPendingBranch(null)
+                      setUi({ pendingModeSwitch: null, pendingBranch: null })
                     }}
                   >
                     Switch mode

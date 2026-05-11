@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useReducer } from 'react'
 import { DiffFile } from '../../../shared/types'
 
 interface FileTreeProps {
@@ -116,11 +116,14 @@ function FileNode({
 
 export default function FileTree({ files, focusedFile, onFileClick }: FileTreeProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [narrow, setNarrow] = useState(false)
+  const [layout, setLayout] = useReducer(
+    (_state: { narrow: boolean }, width: number) => ({ narrow: width < 700 }),
+    { narrow: false }
+  )
 
   const handleResize = useCallback((entries: ResizeObserverEntry[]) => {
     for (const entry of entries) {
-      setNarrow(entry.contentRect.width < 700)
+      setLayout(entry.contentRect.width)
     }
   }, [])
 
@@ -137,7 +140,7 @@ export default function FileTree({ files, focusedFile, onFileClick }: FileTreePr
   const dirs = entries.filter((n) => !n.file)
   const topFiles = entries.filter((n) => n.file)
 
-  if (narrow) {
+  if (layout.narrow) {
     return (
       <div ref={containerRef} className="rv-file-tree">
         <select

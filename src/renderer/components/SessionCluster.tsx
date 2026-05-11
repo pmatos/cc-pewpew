@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useState } from 'react'
+import { useRef, useCallback, useEffect, useState, useEffectEvent } from 'react'
 import type { Session } from '../../shared/types'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
@@ -48,31 +48,33 @@ export default function SessionCluster({
     [position]
   )
 
+  const handleDocumentMove = useEffectEvent((e: MouseEvent) => {
+    if (!dragging.current) return
+    const dx = (e.clientX - dragStart.current.x) / zoom
+    const dy = (e.clientY - dragStart.current.y) / zoom
+    onDrag(projectPath, {
+      x: dragStart.current.posX + dx,
+      y: dragStart.current.posY + dy,
+    })
+  })
+
+  const handleDocumentUp = useEffectEvent(() => {
+    if (dragging.current) {
+      dragging.current = false
+      onDragEnd()
+    }
+  })
+
   useEffect(() => {
-    const handleMove = (e: MouseEvent) => {
-      if (!dragging.current) return
-      const dx = (e.clientX - dragStart.current.x) / zoom
-      const dy = (e.clientY - dragStart.current.y) / zoom
-      onDrag(projectPath, {
-        x: dragStart.current.posX + dx,
-        y: dragStart.current.posY + dy,
-      })
-    }
-
-    const handleUp = () => {
-      if (dragging.current) {
-        dragging.current = false
-        onDragEnd()
-      }
-    }
-
+    const handleMove = (e: MouseEvent) => handleDocumentMove(e)
+    const handleUp = () => handleDocumentUp()
     document.addEventListener('mousemove', handleMove)
     document.addEventListener('mouseup', handleUp)
     return () => {
       document.removeEventListener('mousemove', handleMove)
       document.removeEventListener('mouseup', handleUp)
     }
-  }, [projectPath, zoom, onDrag, onDragEnd])
+  }, [])
 
   const handleHeaderContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()

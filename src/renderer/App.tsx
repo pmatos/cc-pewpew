@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useEffectEvent, useReducer } from 'react'
 import ProjectTree from './components/ProjectTree'
 import SessionCanvas, { type ZoomOpenPayload } from './components/SessionCanvas'
 import DetailPane from './components/DetailPane'
@@ -13,6 +13,61 @@ import { useHostsStore } from './stores/hosts'
 import { useToastsStore } from './stores/toasts'
 import { useThemeStore } from './stores/theme'
 
+interface CreateProjectDialogProps {
+  onCreate: (name: string) => Promise<void>
+  onCancel: () => void
+}
+
+function CreateProjectDialog({ onCreate, onCancel }: CreateProjectDialogProps) {
+  const [projectName, setProjectName] = useState('')
+  const focusInput = useCallback((node: HTMLInputElement | null) => {
+    node?.focus()
+  }, [])
+
+  const submit = async () => {
+    const name = projectName.trim()
+    if (!name) return
+    await onCreate(name)
+  }
+
+  return (
+    <div className="create-dialog">
+      <input
+        ref={focusInput}
+        type="text"
+        className="create-input"
+        placeholder="Project name…"
+        value={projectName}
+        onChange={(e) => setProjectName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') void submit()
+          if (e.key === 'Escape') onCancel()
+        }}
+      />
+      <div className="create-actions">
+        <button className="create-btn" onClick={submit}>
+          Create
+        </button>
+        <button className="create-btn cancel" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+interface AppState {
+  showCreateDialog: boolean
+  sidebarWidth: number
+  activeSessionId: string | null
+  activeSessionName: string
+  morphPayload: ZoomOpenPayload | null
+}
+
+function appStateReducer(state: AppState, update: Partial<AppState>): AppState {
+  return { ...state, ...update }
+}
+
 export default function App() {
   const { scanProjects, filterReady, toggleFilterReady } = useProjectsStore()
   const openAddRemoteDialog = useProjectsStore((s) => s.openAddRemoteDialog)
@@ -21,17 +76,19 @@ export default function App() {
   const openHostsDialog = useHostsStore((s) => s.openDialog)
   const fetchHosts = useHostsStore((s) => s.fetchHosts)
 
-  const [showCreateDialog, setShowCreateDialog] = useState(false)
-  const [newProjectName, setNewProjectName] = useState('')
-  const [sidebarWidth, setSidebarWidth] = useState(250)
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
-  const [activeSessionName, setActiveSessionName] = useState('')
-  const [morphPayload, setMorphPayload] = useState<ZoomOpenPayload | null>(null)
-  const createProjectInputRef = useRef<HTMLInputElement>(null)
+  const [appState, setAppState] = useReducer(appStateReducer, {
+    showCreateDialog: false,
+    sidebarWidth: 250,
+    activeSessionId: null,
+    activeSessionName: '',
+    morphPayload: null,
+  })
+  const { showCreateDialog, sidebarWidth, activeSessionId, activeSessionName, morphPayload } =
+    appState
 
   const handleZoomOpen = useCallback((payload: ZoomOpenPayload) => {
     // Keep canvas rendered during the morph; mount DetailPane only on morph grown.
-    setMorphPayload(payload)
+    setAppState({ morphPayload: payload })
   }, [])
   const resizing = useRef(false)
   const resizeStart = useRef({ x: 0, width: 0 })
@@ -48,9 +105,9 @@ export default function App() {
     return initSessions()
   }, [initSessions])
 
-  useEffect(() => {
-    if (showCreateDialog) createProjectInputRef.current?.focus()
-  }, [showCreateDialog])
+  const openCreateProjectDialog = useCallback(() => {
+    setAppState({ showCreateDialog: true })
+  }, [])
 
   // Subscribe to open-detail IPC from tray/notifications
   useEffect(() => {
@@ -58,8 +115,10 @@ export default function App() {
       const sessions = useSessionsStore.getState().sessions
       const session = sessions.find((s) => s.id === sessionId)
       if (session) {
-        setActiveSessionId(sessionId)
-        setActiveSessionName(`${session.projectName}/${session.worktreeName}`)
+        setAppState({
+          activeSessionId: sessionId,
+          activeSessionName: `${session.projectName}/${session.worktreeName}`,
+        })
       }
     })
   }, [])
@@ -73,46 +132,47 @@ export default function App() {
 
   // Load sidebar width
   useEffect(() => {
-    window.api.getSidebarWidth().then((w) => setSidebarWidth(w))
+    window.api.getSidebarWidth().then((w) => setAppState({ sidebarWidth: w }))
   }, [])
+
+  const handleGlobalKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (e.ctrlKey && e.key === 'n') {
+      e.preventDefault()
+      openCreateProjectDialog()
+    } else if (e.ctrlKey && e.shiftKey && e.key === 'R') {
+      e.preventDefault()
+      scanProjects()
+    } else if (e.key === 'Escape') {
+      // Modals handle Escape themselves; don't run global shortcuts when
+      // one is open (avoids side-effect clearing of active session /
+      // selection when dismissing a modal via Escape).
+      if (useHostsStore.getState().dialogOpen) return
+      if (useProjectsStore.getState().addRemoteDialogOpen) return
+      if (morphPayload && !activeSessionId) {
+        // Cancel zoom-open mid-morph: abort the transition and stay on canvas.
+        setAppState({ morphPayload: null })
+      } else if (activeSessionId) {
+        setAppState({ activeSessionId: null })
+      } else if (useSessionsStore.getState().selectedIds.size > 0) {
+        useSessionsStore.getState().clearSelection()
+      } else {
+        setAppState({ showCreateDialog: false })
+      }
+    }
+  })
 
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === 'n') {
-        e.preventDefault()
-        setShowCreateDialog(true)
-      } else if (e.ctrlKey && e.shiftKey && e.key === 'R') {
-        e.preventDefault()
-        scanProjects()
-      } else if (e.key === 'Escape') {
-        // Modals handle Escape themselves; don't run global shortcuts when
-        // one is open (avoids side-effect clearing of active session /
-        // selection when dismissing a modal via Escape).
-        if (useHostsStore.getState().dialogOpen) return
-        if (useProjectsStore.getState().addRemoteDialogOpen) return
-        if (morphPayload && !activeSessionId) {
-          // Cancel zoom-open mid-morph: abort the transition and stay on canvas.
-          setMorphPayload(null)
-        } else if (activeSessionId) {
-          setActiveSessionId(null)
-        } else if (useSessionsStore.getState().selectedIds.size > 0) {
-          useSessionsStore.getState().clearSelection()
-        } else {
-          setShowCreateDialog(false)
-        }
-      }
+      handleGlobalKeyDown(e)
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [scanProjects, activeSessionId, morphPayload])
+  }, [])
 
-  const handleCreate = async () => {
-    const name = newProjectName.trim()
-    if (!name) return
+  const createProject = async (name: string) => {
     await window.api.createProject(name)
-    setNewProjectName('')
-    setShowCreateDialog(false)
+    setAppState({ showCreateDialog: false })
     scanProjects()
   }
 
@@ -130,7 +190,7 @@ export default function App() {
       if (!resizing.current) return
       const dx = e.clientX - resizeStart.current.x
       const newWidth = Math.max(150, Math.min(500, resizeStart.current.width + dx))
-      setSidebarWidth(newWidth)
+      setAppState({ sidebarWidth: newWidth })
     }
 
     const handleUp = () => {
@@ -173,41 +233,18 @@ export default function App() {
         <div className="sidebar-content">
           <ProjectTree
             onOpenSession={(id, name) => {
-              setActiveSessionId(id)
-              setActiveSessionName(name)
+              setAppState({ activeSessionId: id, activeSessionName: name })
             }}
           />
         </div>
         <div className="sidebar-footer">
           {showCreateDialog ? (
-            <div className="create-dialog">
-              <input
-                ref={createProjectInputRef}
-                type="text"
-                className="create-input"
-                placeholder="Project name…"
-                value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreate()
-                  if (e.key === 'Escape') setShowCreateDialog(false)
-                }}
-              />
-              <div className="create-actions">
-                <button className="create-btn" onClick={handleCreate}>
-                  Create
-                </button>
-                <button className="create-btn cancel" onClick={() => setShowCreateDialog(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
+            <CreateProjectDialog
+              onCreate={createProject}
+              onCancel={() => setAppState({ showCreateDialog: false })}
+            />
           ) : (
-            <button
-              className="new-project-btn"
-              onClick={() => setShowCreateDialog(true)}
-              title="Ctrl+N"
-            >
+            <button className="new-project-btn" onClick={openCreateProjectDialog} title="Ctrl+N">
               + New project
             </button>
           )}
@@ -240,13 +277,12 @@ export default function App() {
           <DetailPane
             sessionId={activeSessionId}
             sessionName={activeSessionName}
-            onClose={() => setActiveSessionId(null)}
+            onClose={() => setAppState({ activeSessionId: null })}
           />
         ) : (
           <SessionCanvas
             onOpenSession={(id, name) => {
-              setActiveSessionId(id)
-              setActiveSessionName(name)
+              setAppState({ activeSessionId: id, activeSessionName: name })
             }}
             onZoomOpen={handleZoomOpen}
             morphActive={morphPayload !== null}
@@ -263,10 +299,12 @@ export default function App() {
           onGrown={() => {
             // If the user already opened a different session during the morph
             // window (e.g. clicked another card), keep that selection.
-            setActiveSessionId((prev) => prev ?? morphPayload.sessionId)
-            setActiveSessionName((prev) => prev || morphPayload.sessionName)
+            setAppState({
+              activeSessionId: activeSessionId ?? morphPayload.sessionId,
+              activeSessionName: activeSessionName || morphPayload.sessionName,
+            })
           }}
-          onDone={() => setMorphPayload(null)}
+          onDone={() => setAppState({ morphPayload: null })}
         />
       )}
 

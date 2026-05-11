@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -24,7 +24,9 @@ export default function Terminal({ sessionId }: Props) {
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
 
-  useEffect(() => {
+  // Terminal setup mutates refs and xterm instances here; it does not cascade React state updates.
+  // react-doctor-disable-next-line
+  useLayoutEffect(() => {
     if (!containerRef.current) return
     const container = containerRef.current
 

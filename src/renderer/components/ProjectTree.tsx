@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useReducer, useRef } from 'react'
 import { useProjectsStore } from '../stores/projects'
 import { useSessionsStore } from '../stores/sessions'
 import { useHostsStore } from '../stores/hosts'
@@ -9,42 +9,90 @@ import { parsePrSpec } from '../utils/pr-spec-parser'
 interface MenuState {
   x: number
   y: number
-  projectPath: string
-  setupState: 'unsetup' | 'ready'
-  hostId: string | null
+  items: MenuItem[]
 }
 
 interface TreeProps {
   onOpenSession?: (id: string, name: string) => void
 }
 
-export default function ProjectTree({ onOpenSession }: TreeProps) {
+interface ProjectTreeUiState {
+  expanded: Set<string>
+  menu: MenuState | null
+  pendingSessionPath: string | null
+  pendingSessionHostId: string | null
+  sessionNameInput: string
+  defaultTool: AgentTool
+  pendingTool: AgentTool
+  creating: boolean
+  baseFromOrigin: boolean
+  createError: string | null
+  pendingPrPath: string | null
+  pendingPrHostId: string | null
+  pendingPrTool: AgentTool
+  prNumberInput: string
+  prError: string | null
+  toast: string | null
+}
+
+function projectTreeUiReducer(
+  state: ProjectTreeUiState,
+  update: Partial<ProjectTreeUiState>
+): ProjectTreeUiState {
+  return { ...state, ...update }
+}
+
+export default function ProjectTree(props: TreeProps) {
+  return useProjectTreeElement(props)
+}
+
+function useProjectTreeElement({ onOpenSession }: TreeProps) {
   const { projects, loading, scanProjects, filterReady } = useProjectsStore()
   const removeRemoteProject = useProjectsStore((s) => s.removeRemoteProject)
   const { sessions } = useSessionsStore()
   const hosts = useHostsStore((s) => s.hosts)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [menu, setMenu] = useState<MenuState | null>(null)
-  const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(null)
-  const [pendingSessionHostId, setPendingSessionHostId] = useState<string | null>(null)
-  const [sessionNameInput, setSessionNameInput] = useState('')
-  const [defaultTool, setDefaultTool] = useState<AgentTool>('claude')
-  const [pendingTool, setPendingTool] = useState<AgentTool>('claude')
-  const [creating, setCreating] = useState(false)
-  const [baseFromOrigin, setBaseFromOrigin] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
-  const [pendingPrPath, setPendingPrPath] = useState<string | null>(null)
-  const [pendingPrHostId, setPendingPrHostId] = useState<string | null>(null)
-  const [pendingPrTool, setPendingPrTool] = useState<AgentTool>('claude')
-  const [prNumberInput, setPrNumberInput] = useState('')
-  const [prError, setPrError] = useState<string | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
+  const [ui, setUi] = useReducer(projectTreeUiReducer, {
+    expanded: new Set<string>(),
+    menu: null,
+    pendingSessionPath: null,
+    pendingSessionHostId: null,
+    sessionNameInput: '',
+    defaultTool: 'claude',
+    pendingTool: 'claude',
+    creating: false,
+    baseFromOrigin: false,
+    createError: null,
+    pendingPrPath: null,
+    pendingPrHostId: null,
+    pendingPrTool: 'claude',
+    prNumberInput: '',
+    prError: null,
+    toast: null,
+  })
+  const {
+    expanded,
+    menu,
+    pendingSessionPath,
+    pendingSessionHostId,
+    sessionNameInput,
+    defaultTool,
+    pendingTool,
+    creating,
+    baseFromOrigin,
+    createError,
+    pendingPrPath,
+    pendingPrHostId,
+    pendingPrTool,
+    prNumberInput,
+    prError,
+    toast,
+  } = ui
   const sessionNameInputRef = useRef<HTMLInputElement>(null)
   const prNumberInputRef = useRef<HTMLInputElement>(null)
 
   const showToast = (msg: string) => {
-    setToast(msg)
-    setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 5000)
+    setUi({ toast: msg })
+    setTimeout(() => setUi({ toast: null }), 5000)
   }
 
   useEffect(() => {
@@ -55,7 +103,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     let cancelled = false
     window.api.getDefaultTool().then((tool) => {
       if (cancelled) return
-      setDefaultTool(tool)
+      setUi({ defaultTool: tool })
       // Don't touch pendingTool here — the New Session menu-item handler is
       // the only path that opens the dialog and it re-seeds pendingTool from
       // defaultTool at click time. Mutating pendingTool from this async
@@ -67,24 +115,14 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     }
   }, [])
 
-  useEffect(() => {
-    if (pendingSessionPath) sessionNameInputRef.current?.focus()
-  }, [pendingSessionPath])
-
-  useEffect(() => {
-    if (pendingPrPath) prNumberInputRef.current?.focus()
-  }, [pendingPrPath])
-
   const toggle = (path: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(path)) {
-        next.delete(path)
-      } else {
-        next.add(path)
-      }
-      return next
-    })
+    const next = new Set(expanded)
+    if (next.has(path)) {
+      next.delete(path)
+    } else {
+      next.add(path)
+    }
+    setUi({ expanded: next })
   }
 
   const handleContextMenu = (
@@ -94,21 +132,38 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     hostId: string | null
   ) => {
     e.preventDefault()
-    setMenu({ x: e.clientX, y: e.clientY, projectPath, setupState, hostId })
+    setUi({
+      menu: { x: e.clientX, y: e.clientY, items: getMenuItems(projectPath, setupState, hostId) },
+    })
   }
 
   const openNewSessionDialog = async (projectPath: string, hostId: string | null) => {
-    setCreateError(null)
-    setSessionNameInput('')
-    setPendingTool(defaultTool)
+    const update: Partial<ProjectTreeUiState> = {
+      createError: null,
+      sessionNameInput: '',
+      pendingTool: defaultTool,
+      pendingSessionPath: projectPath,
+      pendingSessionHostId: hostId,
+    }
     try {
       const worktreeBase = await window.api.getWorktreeBase()
-      setBaseFromOrigin(worktreeBase === 'origin-default')
+      update.baseFromOrigin = worktreeBase === 'origin-default'
     } catch {
-      setBaseFromOrigin(false)
+      update.baseFromOrigin = false
     }
-    setPendingSessionPath(projectPath)
-    setPendingSessionHostId(hostId)
+    setUi(update)
+    setTimeout(() => sessionNameInputRef.current?.focus(), 0)
+  }
+
+  const openPrSessionDialog = (projectPath: string, hostId: string | null) => {
+    setUi({
+      pendingPrPath: projectPath,
+      pendingPrHostId: hostId,
+      pendingPrTool: defaultTool,
+      prNumberInput: '',
+      prError: null,
+    })
+    setTimeout(() => prNumberInputRef.current?.focus(), 0)
   }
 
   const describeCreateError = (err: unknown): string => {
@@ -150,77 +205,75 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
 
   const handleOpenAllPrs = async (projectPath: string, hostId: string | null) => {
     if (creating) return
-    setCreating(true)
+    setUi({ creating: true })
     try {
       const result = await window.api.openSessionsForOpenPrs(projectPath, hostId)
       showToast(typeof result === 'string' ? result : formatOpenAllSummary(result, 'PR'))
     } catch (err) {
       showToast(`Failed to open PR sessions: ${String(err)}`)
     } finally {
-      setCreating(false)
+      setUi({ creating: false })
     }
   }
 
   const handleOpenAllIssues = async (projectPath: string, hostId: string | null) => {
     if (creating) return
-    setCreating(true)
+    setUi({ creating: true })
     try {
       const result = await window.api.openSessionsForOpenIssues(projectPath, hostId)
       showToast(typeof result === 'string' ? result : formatOpenAllSummary(result, 'issue'))
     } catch (err) {
       showToast(`Failed to open issue sessions: ${String(err)}`)
     } finally {
-      setCreating(false)
+      setUi({ creating: false })
     }
   }
 
-  const getMenuItems = (): MenuItem[] => {
-    if (!menu) return []
+  const getMenuItems = (
+    projectPath: string,
+    setupState: 'unsetup' | 'ready',
+    hostId: string | null
+  ): MenuItem[] => {
     const items: MenuItem[] = []
 
-    if (menu.hostId !== null) {
-      const hostId = menu.hostId
+    if (hostId !== null) {
       items.push({
         label: 'New session…',
         onClick: async () => {
-          await openNewSessionDialog(menu.projectPath, hostId)
+          await openNewSessionDialog(projectPath, hostId)
         },
       })
       items.push({
         label: 'New PR session…',
         onClick: () => {
-          setPendingPrPath(menu.projectPath)
-          setPendingPrHostId(hostId)
-          setPendingPrTool(defaultTool)
-          setPrNumberInput('')
-          setPrError(null)
+          openPrSessionDialog(projectPath, hostId)
         },
       })
       items.push({
         label: 'Open sessions for all open PRs',
         disabled: creating,
-        onClick: () => void handleOpenAllPrs(menu.projectPath, hostId),
+        onClick: () => void handleOpenAllPrs(projectPath, hostId),
       })
       items.push({
         label: 'Open sessions for all open issues',
         disabled: creating,
-        onClick: () => void handleOpenAllIssues(menu.projectPath, hostId),
+        onClick: () => void handleOpenAllIssues(projectPath, hostId),
       })
       items.push({ label: '', separator: true, onClick: () => {} })
       items.push({
         label: 'Remove remote project',
-        onClick: () => void removeRemoteProject(hostId, menu.projectPath),
+        onClick: () => void removeRemoteProject(hostId, projectPath),
       })
       items.push({ label: '', separator: true, onClick: () => {} })
       items.push({ label: 'Rescan', onClick: () => scanProjects() })
       return items
     }
 
-    if (menu.setupState === 'unsetup') {
+    if (setupState === 'unsetup') {
       items.push({
         label: 'Setup for cc-pewpew',
         onClick: async () => {
-          await window.api.setupProject(menu.projectPath)
+          await window.api.setupProject(projectPath)
           scanProjects()
         },
       })
@@ -228,31 +281,27 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
       items.push({
         label: 'New session…',
         onClick: async () => {
-          await openNewSessionDialog(menu.projectPath, null)
+          await openNewSessionDialog(projectPath, null)
         },
       })
       items.push({
         label: 'New PR session…',
         onClick: () => {
-          setPendingPrPath(menu.projectPath)
-          setPendingPrHostId(null)
-          setPendingPrTool(defaultTool)
-          setPrNumberInput('')
-          setPrError(null)
+          openPrSessionDialog(projectPath, null)
         },
       })
       items.push({
         label: 'Open sessions for all open PRs',
         disabled: creating,
-        onClick: () => void handleOpenAllPrs(menu.projectPath, null),
+        onClick: () => void handleOpenAllPrs(projectPath, null),
       })
       items.push({
         label: 'Open sessions for all open issues',
         disabled: creating,
-        onClick: () => void handleOpenAllIssues(menu.projectPath, null),
+        onClick: () => void handleOpenAllIssues(projectPath, null),
       })
 
-      const project = projects.find((p) => p.path === menu.projectPath)
+      const project = projects.find((p) => p.path === projectPath)
       const unmirroredCount =
         project?.worktrees.filter(
           (wt) => !wt.isMain && !sessions.some((s) => s.worktreePath === wt.path)
@@ -264,7 +313,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             : 'Mirror all worktrees',
         disabled: unmirroredCount === 0,
         onClick: async () => {
-          const { result, warning } = await window.api.mirrorAllWorktrees(menu.projectPath)
+          const { result, warning } = await window.api.mirrorAllWorktrees(projectPath)
           const { mirrored, failed } = result
           const parts: string[] = []
           if (mirrored.length > 0) parts.push(`Mirrored ${mirrored.length}`)
@@ -280,7 +329,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
       items.push({
         label: 'Re-setup for cc-pewpew',
         onClick: async () => {
-          await window.api.setupProject(menu.projectPath)
+          await window.api.setupProject(projectPath)
           scanProjects()
         },
       })
@@ -290,7 +339,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
 
     items.push({
       label: 'Open in file manager',
-      onClick: () => window.api.openInFileManager(menu.projectPath),
+      onClick: () => window.api.openInFileManager(projectPath),
     })
 
     items.push({
@@ -319,21 +368,18 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
 
   const handleCreateSession = async () => {
     if (!pendingSessionPath || creating) return
-    setCreating(true)
-    setCreateError(null)
+    setUi({ creating: true, createError: null })
     try {
       const name = sessionNameInput.trim() || undefined
       await window.api.createSession(pendingSessionPath, name, pendingSessionHostId, {
         tool: pendingTool,
         baseRef: baseFromOrigin ? 'origin-default' : 'local',
       })
-      setPendingSessionPath(null)
-      setPendingSessionHostId(null)
-      setSessionNameInput('')
+      setUi({ pendingSessionPath: null, pendingSessionHostId: null, sessionNameInput: '' })
     } catch (err) {
-      setCreateError(describeCreateError(err))
+      setUi({ createError: describeCreateError(err) })
     } finally {
-      setCreating(false)
+      setUi({ creating: false })
     }
   }
 
@@ -341,11 +387,10 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     if (!pendingPrPath || creating) return
     const parsed = parsePrSpec(prNumberInput)
     if ('error' in parsed) {
-      setPrError(parsed.error)
+      setUi({ prError: parsed.error })
       return
     }
-    setCreating(true)
-    setPrError(null)
+    setUi({ creating: true, prError: null })
     try {
       const result = await window.api.createPrSessions(
         pendingPrPath,
@@ -354,29 +399,25 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
         { tool: pendingPrTool }
       )
       if (typeof result === 'string') {
-        setPrError(result)
+        setUi({ prError: result })
         return
       }
       if (parsed.numbers.length === 1) {
         if (result.failed.length === 1) {
-          setPrError(result.failed[0].error)
+          setUi({ prError: result.failed[0].error })
           return
         }
         if (result.skipped.length === 1) {
-          setPrError(`PR #${result.skipped[0]} already has a session.`)
+          setUi({ prError: `PR #${result.skipped[0]} already has a session.` })
           return
         }
-        setPendingPrPath(null)
-        setPendingPrHostId(null)
-        setPrNumberInput('')
+        setUi({ pendingPrPath: null, pendingPrHostId: null, prNumberInput: '' })
         return
       }
       showToast(formatPrSpecSummary(result))
-      setPendingPrPath(null)
-      setPendingPrHostId(null)
-      setPrNumberInput('')
+      setUi({ pendingPrPath: null, pendingPrHostId: null, prNumberInput: '' })
     } finally {
-      setCreating(false)
+      setUi({ creating: false })
     }
   }
 
@@ -391,13 +432,11 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             className="create-input"
             placeholder="Leave empty for auto-name…"
             value={sessionNameInput}
-            onChange={(e) => setSessionNameInput(e.target.value)}
+            onChange={(e) => setUi({ sessionNameInput: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleCreateSession()
               if (e.key === 'Escape') {
-                setPendingSessionPath(null)
-                setPendingSessionHostId(null)
-                setCreateError(null)
+                setUi({ pendingSessionPath: null, pendingSessionHostId: null, createError: null })
               }
             }}
           />
@@ -409,7 +448,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
                 name="tool"
                 value="claude"
                 checked={pendingTool === 'claude'}
-                onChange={() => setPendingTool('claude')}
+                onChange={() => setUi({ pendingTool: 'claude' })}
               />
               Claude
             </label>
@@ -419,7 +458,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
                 name="tool"
                 value="codex"
                 checked={pendingTool === 'codex'}
-                onChange={() => setPendingTool('codex')}
+                onChange={() => setUi({ pendingTool: 'codex' })}
               />
               Codex
             </label>
@@ -429,8 +468,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
               type="checkbox"
               checked={baseFromOrigin}
               onChange={(e) => {
-                setBaseFromOrigin(e.target.checked)
-                setCreateError(null)
+                setUi({ baseFromOrigin: e.target.checked, createError: null })
               }}
             />
             <span>Branch from origin/&lt;default&gt;</span>
@@ -443,9 +481,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             <button
               className="create-btn cancel"
               onClick={() => {
-                setPendingSessionPath(null)
-                setPendingSessionHostId(null)
-                setCreateError(null)
+                setUi({ pendingSessionPath: null, pendingSessionHostId: null, createError: null })
               }}
             >
               Cancel
@@ -462,13 +498,11 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             className="create-input"
             placeholder="e.g. 42 or 1,2,22-28"
             value={prNumberInput}
-            onChange={(e) => setPrNumberInput(e.target.value)}
+            onChange={(e) => setUi({ prNumberInput: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleCreatePrSession()
               if (e.key === 'Escape') {
-                setPendingPrPath(null)
-                setPendingPrHostId(null)
-                setPrError(null)
+                setUi({ pendingPrPath: null, pendingPrHostId: null, prError: null })
               }
             }}
           />
@@ -480,7 +514,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
                 name="pr-tool"
                 value="claude"
                 checked={pendingPrTool === 'claude'}
-                onChange={() => setPendingPrTool('claude')}
+                onChange={() => setUi({ pendingPrTool: 'claude' })}
               />
               Claude
             </label>
@@ -490,7 +524,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
                 name="pr-tool"
                 value="codex"
                 checked={pendingPrTool === 'codex'}
-                onChange={() => setPendingPrTool('codex')}
+                onChange={() => setUi({ pendingPrTool: 'codex' })}
               />
               Codex
             </label>
@@ -503,9 +537,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
             <button
               className="create-btn cancel"
               onClick={() => {
-                setPendingPrPath(null)
-                setPendingPrHostId(null)
-                setPrError(null)
+                setUi({ pendingPrPath: null, pendingPrHostId: null, prError: null })
               }}
             >
               Cancel
@@ -616,7 +648,12 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
       })}
 
       {menu && (
-        <ContextMenu x={menu.x} y={menu.y} items={getMenuItems()} onClose={() => setMenu(null)} />
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menu.items}
+          onClose={() => setUi({ menu: null })}
+        />
       )}
 
       {toast && <div className="project-tree-toast">{toast}</div>}
