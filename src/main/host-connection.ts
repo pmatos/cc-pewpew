@@ -17,6 +17,7 @@ import { recordSshInvocation } from './ssh-log-buffer'
 import { emitToast } from './notifications'
 import { getHost } from './host-registry'
 import { CONFIG_DIR } from './config'
+import { sanitizeHostIdForPath } from './host-id'
 import type {
   Host,
   HostId,
@@ -162,14 +163,6 @@ function uidSegment(): string {
   } catch {
     return homedir().replace(/[^A-Za-z0-9_.-]/g, '_')
   }
-}
-
-// Strip any character that could let a hand-edited/corrupted hostId traverse
-// out of the intended directory when used in a filesystem path. UUIDs pass
-// through unchanged. Shared with hook-server.ts and any other module that
-// uses hostId as a path segment.
-export function sanitizeHostIdForPath(hostId: HostId): string {
-  return hostId.replace(/[^A-Za-z0-9_.-]/g, '_')
 }
 
 export function remoteSocketPathForHost(hostId: HostId): string {

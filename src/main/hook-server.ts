@@ -3,7 +3,7 @@ import { writeFileSync, unlinkSync, existsSync } from 'fs'
 import { join } from 'path'
 import { broadcastToAll } from './window-registry'
 import { CONFIG_DIR } from './config'
-import { sanitizeHostIdForPath } from './host-connection'
+import { sanitizeHostIdForPath } from './host-id'
 import { handleHookEvent } from './session-manager'
 
 const LOCAL_SOCKET_PATH = join(CONFIG_DIR, 'ipc.sock')
