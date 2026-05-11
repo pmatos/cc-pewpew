@@ -23,7 +23,7 @@ function showAndOpenSession(sessionId: string): void {
 
 export function createTray(): void {
   tray = new Tray(createTrayIcon())
-  tray.setToolTip('cc-pewpew — 0 sessions')
+  tray.setToolTip('pewpew — 0 sessions')
 
   tray.on('click', () => {
     const win = getMainWindow()
@@ -42,13 +42,13 @@ export function createTray(): void {
 export function updateTray(sessions: Session[]): void {
   if (!tray) return
 
-  tray.setToolTip(`cc-pewpew — ${sessions.length} session${sessions.length !== 1 ? 's' : ''}`)
+  tray.setToolTip(`pewpew — ${sessions.length} session${sessions.length !== 1 ? 's' : ''}`)
 
   const needsInput = sessions.filter((s) => s.status === 'needs_input')
 
   const menuItems: Electron.MenuItemConstructorOptions[] = [
     {
-      label: 'Show cc-pewpew',
+      label: 'Show pewpew',
       click: () => {
         const win = getMainWindow()
         if (win) {

@@ -56,7 +56,7 @@ vi.mock('./config', async () => {
     import('path'),
   ])
   return {
-    CONFIG_DIR: pathJoin(getTmpDir(), `cc-pewpew-host-connection-test-${process.pid}`),
+    CONFIG_DIR: pathJoin(getTmpDir(), `pewpew-host-connection-test-${process.pid}`),
   }
 })
 
@@ -270,7 +270,7 @@ describe('exec ring-buffer + toast wiring', () => {
       error: { name: 'Error', message: 'x', code: 1 } as unknown as NodeJS.ErrnoException,
       exitCode: 1,
     }
-    await exec(HOST, ['tmux', 'has-session', '-t', 'cc-pewpew-x'])
+    await exec(HOST, ['tmux', 'has-session', '-t', 'pewpew-x'])
     expect(emittedToasts).toHaveLength(0)
     // The ring buffer still records the exec, so diagnostics retain it.
     expect(recordedEntries).toHaveLength(1)
@@ -293,7 +293,7 @@ describe('ensureHostConnection / startRuntime', () => {
   it('reaches live state when the parent ssh exits 0 after daemonization', async () => {
     // controlCheck always succeeds — the daemon is serving the socket.
     nextResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
-    const promise = ensureHostConnection(HOST, '/tmp/cc-pewpew-test-local.sock')
+    const promise = ensureHostConnection(HOST, '/tmp/pewpew-test-local.sock')
     expect(pendingSpawn).not.toBeNull()
     // Simulate the foreground parent forking to the background and exiting 0.
     pendingSpawn!.child.exitCode = 0
@@ -327,7 +327,7 @@ describe('ensureHostConnection / startRuntime', () => {
       return { stdout: '', stderr: '', error: null, exitCode: 0 }
     }
 
-    const promise = ensureHostConnection(HOST, '/tmp/cc-pewpew-test-local.sock')
+    const promise = ensureHostConnection(HOST, '/tmp/pewpew-test-local.sock')
     expect(pendingSpawn).not.toBeNull()
     // Wait for the first failed controlCheck to resolve, then simulate the
     // parent ssh forking to background and exiting cleanly. The next poll
@@ -344,7 +344,7 @@ describe('ensureHostConnection / startRuntime', () => {
 
   it('returns immediately on subsequent calls once the runtime is live', async () => {
     nextResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
-    const first = ensureHostConnection(HOST, '/tmp/cc-pewpew-test-local.sock')
+    const first = ensureHostConnection(HOST, '/tmp/pewpew-test-local.sock')
     pendingSpawn!.child.exitCode = 0
     pendingSpawn!.child.emit('exit', 0)
     await first
@@ -354,7 +354,7 @@ describe('ensureHostConnection / startRuntime', () => {
     // handle has already exited, so the live fast-path cannot rely on a
     // running parent process to detect liveness.
     pendingSpawn = null
-    const second = await ensureHostConnection(HOST, '/tmp/cc-pewpew-test-local.sock')
+    const second = await ensureHostConnection(HOST, '/tmp/pewpew-test-local.sock')
     expect(pendingSpawn).toBeNull()
     expect(second.controlPath).toContain(HOST.hostId)
     await stopHostConnection(HOST.hostId)
@@ -364,7 +364,7 @@ describe('ensureHostConnection / startRuntime', () => {
     // controlCheck would succeed — but the parent exits with auth failure
     // before the live socket gets used. exitPromise must win the race.
     nextResult = { stdout: '', stderr: '', error: null, exitCode: 0 }
-    const promise = ensureHostConnection(HOST, '/tmp/cc-pewpew-test-local.sock')
+    const promise = ensureHostConnection(HOST, '/tmp/pewpew-test-local.sock')
     expect(pendingSpawn).not.toBeNull()
     pendingSpawn!.child.stderr.emit('data', Buffer.from('Permission denied (publickey).\n'))
     pendingSpawn!.child.exitCode = 255

@@ -153,7 +153,7 @@ function hasSessionsBoundTo(hostId: HostId): boolean {
 // Local-only forget. Cascading teardown (PTY detach, SSH connection close, IPC
 // socket unlink, remote-project removal) is orchestrated by the `hosts:delete`
 // IPC handler in index.ts, which calls this last. Remote tmux/worktrees and
-// the host's ~/.config/cc-pewpew/ tree are intentionally not touched — that is
+// the host's ~/.config/pewpew/ tree are intentionally not touched — that is
 // the v1 contract per issue #14. The retarget guards in updateHost above stay
 // in place; alias-retargeting still requires no bindings.
 export function deleteHost(hostId: HostId): void {

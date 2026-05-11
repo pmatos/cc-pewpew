@@ -1,5 +1,5 @@
 {
-  "name": "cc-pewpew",
+  "name": "pewpew",
   "version": "0.1.1-pre.0",
   "description": "Desktop GUI for launching and monitoring Claude Code sessions with embedded terminals",
   "author": {
@@ -24,8 +24,8 @@
     "dist:linux": "electron-vite build && electron-builder --linux --publish never"
   },
   "build": {
-    "appId": "com.cc-pewpew.app",
-    "productName": "cc-pewpew",
+    "appId": "com.pewpew.app",
+    "productName": "pewpew",
     "directories": {
       "output": "release"
     },

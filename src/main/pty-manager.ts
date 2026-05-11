@@ -88,12 +88,12 @@ export function createPty(sessionId: string, cwd: string, options?: SpawnOptions
   if (!isTmuxAvailable()) {
     dialog.showErrorBox(
       'tmux not found',
-      'tmux is required for embedded terminals.\nPlease install tmux and restart cc-pewpew.'
+      'tmux is required for embedded terminals.\nPlease install tmux and restart pewpew.'
     )
     throw new Error('tmux not found')
   }
 
-  const tmuxSession = `cc-pewpew-${sessionId}`
+  const tmuxSession = `pewpew-${sessionId}`
   const agentArgs = buildAgentArgs(options)
 
   // Create a detached tmux session that directly runs the agent CLI.
@@ -150,7 +150,7 @@ export async function createRemotePty(
   host: Host,
   options?: SpawnOptions
 ): Promise<void> {
-  const tmuxSession = `cc-pewpew-${sessionId}`
+  const tmuxSession = `pewpew-${sessionId}`
   const agentArgs = buildAgentArgs(options)
 
   const create = await execRemote(host, [
@@ -232,7 +232,7 @@ export function detachPty(sessionId: string): void {
 /** Kill both node-pty and the tmux session (full teardown). */
 export function destroyPty(sessionId: string): void {
   const entry = ptys.get(sessionId)
-  const tmuxSession = entry?.tmuxSession ?? `cc-pewpew-${sessionId}`
+  const tmuxSession = entry?.tmuxSession ?? `pewpew-${sessionId}`
 
   if (entry) {
     ptys.delete(sessionId)
@@ -256,7 +256,7 @@ export function destroyPty(sessionId: string): void {
 
 export async function destroyRemotePty(sessionId: string, host: Host): Promise<void> {
   const entry = ptys.get(sessionId)
-  const tmuxSession = entry?.tmuxSession ?? `cc-pewpew-${sessionId}`
+  const tmuxSession = entry?.tmuxSession ?? `pewpew-${sessionId}`
 
   const result = await execRemote(host, ['tmux', 'kill-session', '-t', tmuxSession], {
     timeoutMs: 5000,
@@ -303,7 +303,7 @@ export function hasPty(sessionId: string): boolean {
 
 export function hasTmuxSession(sessionId: string): boolean {
   try {
-    execFileSync('tmux', ['has-session', '-t', `cc-pewpew-${sessionId}`], { timeout: 3000 })
+    execFileSync('tmux', ['has-session', '-t', `pewpew-${sessionId}`], { timeout: 3000 })
     return true
   } catch {
     return false
@@ -353,7 +353,7 @@ export async function captureThumbnails(opts?: {
 }
 
 export async function hasRemoteTmuxSession(sessionId: string, host: Host): Promise<boolean> {
-  const result = await execRemote(host, ['tmux', 'has-session', '-t', `cc-pewpew-${sessionId}`], {
+  const result = await execRemote(host, ['tmux', 'has-session', '-t', `pewpew-${sessionId}`], {
     timeoutMs: 3000,
   })
   return result.code === 0 && !result.timedOut
@@ -370,7 +370,7 @@ export async function probeRemoteTmuxSession(
   sessionId: string,
   host: Host
 ): Promise<RemoteTmuxProbeResult> {
-  const result = await execRemote(host, ['tmux', 'has-session', '-t', `cc-pewpew-${sessionId}`], {
+  const result = await execRemote(host, ['tmux', 'has-session', '-t', `pewpew-${sessionId}`], {
     timeoutMs: 3000,
   })
   if (result.timedOut) return 'unreachable'
@@ -400,7 +400,7 @@ export async function getScrollback(sessionId: string): Promise<string> {
     return result.code === 0 && !result.timedOut ? result.stdout : ''
   }
 
-  const tmuxSession = `cc-pewpew-${sessionId}`
+  const tmuxSession = `pewpew-${sessionId}`
   try {
     return execFileSync('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-e', '-S', '-5000'], {
       encoding: 'utf-8',
@@ -419,8 +419,8 @@ export function discoverTmuxSessions(): string[] {
     })
     const sessions: string[] = []
     for (const name of output.split('\n')) {
-      if (name.startsWith('cc-pewpew-')) {
-        sessions.push(name.replace('cc-pewpew-', ''))
+      if (name.startsWith('pewpew-')) {
+        sessions.push(name.replace('pewpew-', ''))
       }
     }
     return sessions
@@ -430,7 +430,7 @@ export function discoverTmuxSessions(): string[] {
 }
 
 export function reattachPty(sessionId: string): void {
-  const tmuxSession = `cc-pewpew-${sessionId}`
+  const tmuxSession = `pewpew-${sessionId}`
 
   // Attach to existing tmux session via node-pty
   const ptyProcess = pty.spawn('tmux', ['attach-session', '-t', tmuxSession], {
@@ -472,7 +472,7 @@ export function reattachPty(sessionId: string): void {
 }
 
 export async function reattachRemotePty(sessionId: string, host: Host): Promise<void> {
-  const tmuxSession = `cc-pewpew-${sessionId}`
+  const tmuxSession = `pewpew-${sessionId}`
 
   const ptyProcess = spawnAttach(host, ['tmux', 'attach-session', '-t', tmuxSession], {
     name: 'xterm-256color',

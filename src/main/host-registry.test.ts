@@ -5,7 +5,7 @@ let fakeHosts: Host[] = []
 const saveConfigSpy = vi.fn()
 
 vi.mock('./config', () => ({
-  CONFIG_DIR: '/tmp/cc-pewpew-test',
+  CONFIG_DIR: '/tmp/pewpew-test',
   getConfig: () => ({
     scanDirs: [],
     pinnedPaths: [],

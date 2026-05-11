@@ -17,7 +17,7 @@ describe('parseWorktreeList', () => {
       '',
       'worktree /home/user/repo/.claude/worktrees/feat-a',
       'HEAD def456',
-      'branch refs/heads/cc-pewpew/feat-a',
+      'branch refs/heads/pewpew/feat-a',
       '',
       'worktree /tmp/external-wt',
       'HEAD 789abc',
@@ -37,7 +37,7 @@ describe('parseWorktreeList', () => {
     expect(result[1]).toEqual({
       name: 'feat-a',
       path: '/home/user/repo/.claude/worktrees/feat-a',
-      branch: 'cc-pewpew/feat-a',
+      branch: 'pewpew/feat-a',
       isMain: false,
     })
     expect(result[2]).toEqual({

@@ -8,13 +8,13 @@ const STRICT_DEPS = ['tmux', 'git', 'jq', 'socat'] as const
 const AGENT_TOOLS: readonly AgentTool[] = ['claude', 'codex'] as const
 
 const notifyScript = `#!/usr/bin/env bash
-# cc-pewpew notify script v${NOTIFY_SCRIPT_VERSION}
-CC_PEWPEW_NOTIFY_VERSION=${NOTIFY_SCRIPT_VERSION}
+# pewpew notify script v${NOTIFY_SCRIPT_VERSION}
+PEWPEW_NOTIFY_VERSION=${NOTIFY_SCRIPT_VERSION}
 set -euo pipefail
 
 INPUT=$(cat)
-CC_PEWPEW_DIR="\${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew"
-SOCKET=$(cat "$CC_PEWPEW_DIR/hooks/socket-path" 2>/dev/null || echo "")
+PEWPEW_DIR="\${XDG_CONFIG_HOME:-$HOME/.config}/pewpew"
+SOCKET=$(cat "$PEWPEW_DIR/hooks/socket-path" 2>/dev/null || echo "")
 if [ -z "$SOCKET" ] || [ ! -S "$SOCKET" ]; then
   exit 0
 fi
@@ -219,13 +219,13 @@ export async function bootstrapHost(
     throw new HostBootstrapError('install-failed', 'Remote config root is not an absolute path')
   }
 
-  const hooksDir = posix.join(configRoot, 'cc-pewpew', 'hooks')
+  const hooksDir = posix.join(configRoot, 'pewpew', 'hooks')
   const notifyScriptPath = posix.join(hooksDir, `notify-v${NOTIFY_SCRIPT_VERSION}.sh`)
   const breadcrumbPath = posix.join(hooksDir, 'socket-path')
   const installScript =
     'set -e\n' +
     'mkdir -p "$1"\n' +
-    'if [ ! -f "$2" ] || ! grep -q "CC_PEWPEW_NOTIFY_VERSION=$5" "$2"; then\n' +
+    'if [ ! -f "$2" ] || ! grep -q "PEWPEW_NOTIFY_VERSION=$5" "$2"; then\n' +
     '  printf "%s" "$4" > "$2"\n' +
     '  chmod 700 "$2"\n' +
     'fi\n' +

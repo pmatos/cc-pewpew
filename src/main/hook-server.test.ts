@@ -66,7 +66,7 @@ function send(socketPath: string, payload: unknown): Promise<unknown> {
 
 describe('hook-server', () => {
   beforeEach(() => {
-    state.configDir = mkdtempSync(join(tmpdir(), 'cc-pewpew-hook-'))
+    state.configDir = mkdtempSync(join(tmpdir(), 'pewpew-hook-'))
     state.hookResult = true
     state.hookCalls = []
     state.broadcasts = []

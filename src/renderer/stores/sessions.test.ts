@@ -13,7 +13,7 @@ function makeSession(id: string): Session {
     worktreePath: '/p/w',
     branch: 'main',
     pid: 0,
-    tmuxSession: `cc-pewpew-${id}`,
+    tmuxSession: `pewpew-${id}`,
     status: 'idle',
     lastActivity: 0,
     hookEvents: [],

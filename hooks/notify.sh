@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Called by Claude Code hooks — reads event JSON from stdin,
-# forwards to cc-pewpew orchestrator via Unix socket.
+# forwards to pewpew orchestrator via Unix socket.
 
 set -euo pipefail
 
 INPUT=$(cat)
-CC_PEWPEW_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/cc-pewpew"
-SOCKET=$(cat "$CC_PEWPEW_DIR/socket-path" 2>/dev/null || echo "")
+PEWPEW_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/pewpew"
+SOCKET=$(cat "$PEWPEW_DIR/socket-path" 2>/dev/null || echo "")
 if [ -z "$SOCKET" ] || [ ! -S "$SOCKET" ]; then
-  exit 0  # cc-pewpew not running, silently ignore
+  exit 0  # pewpew not running, silently ignore
 fi
 
 EVENT_NAME=$(echo "$INPUT" | jq -r '.hook_event_name // empty')

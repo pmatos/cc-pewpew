@@ -82,7 +82,7 @@ function parseAsObject(raw: string): Record<string, unknown> {
 }
 
 function isExternalHook(entry: unknown): boolean {
-  return !/cc-pewpew/.test(JSON.stringify(entry))
+  return !/pewpew/.test(JSON.stringify(entry))
 }
 
 export async function installHooks(
@@ -129,7 +129,7 @@ export async function installRemoteHooks(
     'jq --argjson newHooks "$2" \'\n' +
     '  .hooks = (.hooks // {}) |\n' +
     '  reduce ($newHooks | keys[]) as $k (.;\n' +
-    '    .hooks[$k] = (((.hooks[$k] // []) | map(select(((. | tostring) | contains("cc-pewpew")) | not))) + $newHooks[$k])\n' +
+    '    .hooks[$k] = (((.hooks[$k] // []) | map(select(((. | tostring) | contains("pewpew")) | not))) + $newHooks[$k])\n' +
     '  )\n' +
     '\' > "$settings.tmp"\n' +
     'mv "$settings.tmp" "$settings"\n'
@@ -213,7 +213,7 @@ export async function installCodexHooks(
 export interface RemoteCodexHooksSnapshot {
   worktreePath: string
   // True when a prior `.codex/hooks.json` existed and was backed up to
-  // `.codex/hooks.json.cc-pewpew.bak` before merge. Rollback restores from
+  // `.codex/hooks.json.pewpew.bak` before merge. Rollback restores from
   // that backup. False means there was no prior file; rollback unlinks.
   hadPrior: boolean
 }
@@ -238,7 +238,7 @@ export async function installRemoteCodexHooks(
     'set -e\n' +
     'codex_dir="$1/.codex"\n' +
     'hooks="$codex_dir/hooks.json"\n' +
-    'backup="$codex_dir/hooks.json.cc-pewpew.bak"\n' +
+    'backup="$codex_dir/hooks.json.pewpew.bak"\n' +
     'mkdir -p "$codex_dir"\n' +
     'if [ -f "$hooks" ]; then cp "$hooks" "$backup"; printf "1"; else printf "0"; fi\n' +
     'if [ -s "$hooks" ] && jq -e \'type == "object"\' "$hooks" >/dev/null 2>&1; then\n' +
@@ -249,7 +249,7 @@ export async function installRemoteCodexHooks(
     'jq --argjson newHooks "$2" \'\n' +
     '  .hooks = (.hooks // {}) |\n' +
     '  reduce ($newHooks | keys[]) as $k (.;\n' +
-    '    .hooks[$k] = (((.hooks[$k] // []) | map(select(((. | tostring) | contains("cc-pewpew")) | not))) + $newHooks[$k])\n' +
+    '    .hooks[$k] = (((.hooks[$k] // []) | map(select(((. | tostring) | contains("pewpew")) | not))) + $newHooks[$k])\n' +
     '  )\n' +
     '\' > "$hooks.tmp"\n' +
     'mv "$hooks.tmp" "$hooks"\n'
@@ -274,7 +274,7 @@ export async function rollbackRemoteCodexHooks(
       // rather than deleting it (less destructive).
       'set -e\n' +
       'hooks="$1/.codex/hooks.json"\n' +
-      'backup="$1/.codex/hooks.json.cc-pewpew.bak"\n' +
+      'backup="$1/.codex/hooks.json.pewpew.bak"\n' +
       'if [ -f "$backup" ]; then mv "$backup" "$hooks"; fi\n'
     : 'set -e\n' + 'rm -f "$1/.codex/hooks.json"\n'
   await execRemote(['sh', '-c', script, '_', snapshot.worktreePath], {
@@ -289,7 +289,7 @@ export async function commitRemoteCodexHooks(
 ): Promise<void> {
   if (!snapshot.hadPrior) return
   await execRemote(
-    ['sh', '-c', 'rm -f "$1/.codex/hooks.json.cc-pewpew.bak"', '_', snapshot.worktreePath],
+    ['sh', '-c', 'rm -f "$1/.codex/hooks.json.pewpew.bak"', '_', snapshot.worktreePath],
     { timeoutMs: 5000 }
   ).catch(() => undefined)
 }

@@ -14,7 +14,7 @@ const CDP_PORT = 9333
 const BOOT_TIMEOUT_MS = 30_000
 const POLL_INTERVAL_MS = 500
 
-const xdgConfigHome = mkdtempSync(join(tmpdir(), 'cc-pewpew-smoke-'))
+const xdgConfigHome = mkdtempSync(join(tmpdir(), 'pewpew-smoke-'))
 
 const electronArgs = [
   '.',

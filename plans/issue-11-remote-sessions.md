@@ -1,8 +1,8 @@
 # Plan: Remote Sessions End-to-End
 
-> Source issue: [pmatos/cc-pewpew#11](https://github.com/pmatos/cc-pewpew/issues/11)  
-> Parent PRD: [pmatos/cc-pewpew#8](https://github.com/pmatos/cc-pewpew/issues/8)  
-> Prerequisite: [pmatos/cc-pewpew#10](https://github.com/pmatos/cc-pewpew/issues/10) is closed and its remote-project registry/UI work is present on `origin/main`.
+> Source issue: [pmatos/pewpew#11](https://github.com/pmatos/pewpew/issues/11)  
+> Parent PRD: [pmatos/pewpew#8](https://github.com/pmatos/pewpew/issues/8)  
+> Prerequisite: [pmatos/pewpew#10](https://github.com/pmatos/pewpew/issues/10) is closed and its remote-project registry/UI work is present on `origin/main`.
 
 ## Current Baseline
 
@@ -47,7 +47,7 @@ Turn `HostConnection` from standalone functions into a process-owning manager wh
 
 ### Acceptance criteria
 
-- [ ] `HostConnection.ensureLive(host)` starts `ssh -N` with `ControlMaster=yes`, `ControlPersist=10m`, `ExitOnForwardFailure=yes`, keepalives, and `-R /tmp/cc-pewpew-{uid}.sock:<local ipc-host socket>`.
+- [ ] `HostConnection.ensureLive(host)` starts `ssh -N` with `ControlMaster=yes`, `ControlPersist=10m`, `ExitOnForwardFailure=yes`, keepalives, and `-R /tmp/pewpew-{uid}.sock:<local ipc-host socket>`.
 - [ ] Repeated `ensureLive()` calls for the same host reuse the in-flight/live connection.
 - [ ] `exec(host, argv)` multiplexes through the host's ControlPath and preserves argv quoting.
 - [ ] `spawnAttach(host, argv)` returns a child suitable for `node-pty` bridging via local `ssh ... tmux attach-session ...`.
@@ -81,8 +81,8 @@ Add `src/main/host-bootstrap.ts` as a deterministic orchestration module around 
 
 - [ ] Probes `tmux`, `git`, `jq`, `socat`, and `claude` on the remote PATH.
 - [ ] Checks whether sshd supports the required StreamLocalBindUnlink behavior for the reverse Unix socket.
-- [ ] Installs `~/.config/cc-pewpew/hooks/notify-v1.sh` if absent or wrong version.
-- [ ] Writes a remote breadcrumb pointing at `/tmp/cc-pewpew-{uid}.sock`.
+- [ ] Installs `~/.config/pewpew/hooks/notify-v1.sh` if absent or wrong version.
+- [ ] Writes a remote breadcrumb pointing at `/tmp/pewpew-{uid}.sock`.
 - [ ] Returns typed, actionable errors for missing deps and StreamLocalBindUnlink failure.
 - [ ] Caches successful bootstrap per host per app session.
 - [ ] Unit tests cover all-deps-present, selective missing dependency, and already-installed script cases with fake exec responses.
@@ -96,10 +96,10 @@ Branch session creation on `hostId`. For remote projects, create the worktree an
 ### Acceptance criteria
 
 - [ ] Remote `git worktree add` runs on the remote host under `{projectPath}/.claude/worktrees/{worktreeName}`.
-- [ ] Remote branch fallback mirrors local behavior: try `-b cc-pewpew/{worktreeName}`, then retry without `-b`.
+- [ ] Remote branch fallback mirrors local behavior: try `-b pewpew/{worktreeName}`, then retry without `-b`.
 - [ ] Remote hook config is installed into `{worktreePath}/.claude/settings.local.json`.
 - [ ] The hook command uses the absolute remote `notify-v1.sh` path.
-- [ ] Remote tmux creation runs `tmux new-session -d -s cc-pewpew-{id} -c {worktreePath} claude --dangerously-skip-permissions`.
+- [ ] Remote tmux creation runs `tmux new-session -d -s pewpew-{id} -c {worktreePath} claude --dangerously-skip-permissions`.
 - [ ] Remote attach streams into the existing renderer terminal data path.
 - [ ] Missing dependency/bootstrap errors block creation and surface a specific message.
 - [ ] Concurrent sessions on the same remote project get independent worktree hook files.

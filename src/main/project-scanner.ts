@@ -70,7 +70,7 @@ function detectSetupState(repoPath: string): 'ready' | 'unsetup' {
   try {
     const raw = readFileSync(settingsPath, 'utf-8')
     const content = JSON.stringify(JSON.parse(raw))
-    return content.includes('cc-pewpew') ? 'ready' : 'unsetup'
+    return content.includes('pewpew') ? 'ready' : 'unsetup'
   } catch {
     return 'unsetup'
   }

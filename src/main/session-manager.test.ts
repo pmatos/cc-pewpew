@@ -100,7 +100,7 @@ vi.mock('./remote-project-registry', () => ({
 }))
 
 vi.mock('./hook-server', () => ({
-  listenHookServerForHost: (hostId: string) => `/tmp/cc-pewpew-ipc-${hostId}.sock`,
+  listenHookServerForHost: (hostId: string) => `/tmp/pewpew-ipc-${hostId}.sock`,
 }))
 
 vi.mock('./host-bootstrap', () => ({
@@ -223,9 +223,9 @@ function baseRemoteSession(overrides: Partial<Session>): Session {
     projectName: 'proj',
     worktreeName: 'feat',
     worktreePath: '/remote/proj/.claude/worktrees/feat',
-    branch: 'cc-pewpew/feat',
+    branch: 'pewpew/feat',
     pid: 0,
-    tmuxSession: 'cc-pewpew-r1',
+    tmuxSession: 'pewpew-r1',
     status: 'idle',
     lastActivity: 1000,
     hookEvents: [],
@@ -242,9 +242,9 @@ function baseLocalSession(overrides: Partial<Session>): Session {
     projectName: 'proj',
     worktreeName: 'local-feat',
     worktreePath: join(state.configDir, 'local-wt'),
-    branch: 'cc-pewpew/local-feat',
+    branch: 'pewpew/local-feat',
     pid: 0,
-    tmuxSession: 'cc-pewpew-l1',
+    tmuxSession: 'pewpew-l1',
     status: 'idle',
     lastActivity: 1000,
     hookEvents: [],
@@ -1203,7 +1203,7 @@ describe('codex agent integration', () => {
           worktreePath: '/p/w',
           branch: 'main',
           pid: 0,
-          tmuxSession: 'cc-pewpew-legacy1',
+          tmuxSession: 'pewpew-legacy1',
           status: 'idle',
           lastActivity: 0,
           hookEvents: [],
@@ -1263,7 +1263,7 @@ describe('codex agent integration', () => {
 describe('sanitizeBranchPrefix', () => {
   it('preserves valid ref-component characters', async () => {
     const sm = await loadSessionManager()
-    expect(sm.sanitizeBranchPrefix('cc-pewpew')).toBe('cc-pewpew')
+    expect(sm.sanitizeBranchPrefix('pewpew')).toBe('pewpew')
     expect(sm.sanitizeBranchPrefix('my_repo.v2')).toBe('my_repo.v2')
   })
 
@@ -1292,11 +1292,11 @@ describe('sanitizeBranchPrefix', () => {
     expect(sm.sanitizeBranchPrefix('proj-.lock')).toBe('proj')
   })
 
-  it('falls back to `cc-pewpew` when nothing valid remains', async () => {
+  it('falls back to `pewpew` when nothing valid remains', async () => {
     const sm = await loadSessionManager()
-    expect(sm.sanitizeBranchPrefix('   ')).toBe('cc-pewpew')
-    expect(sm.sanitizeBranchPrefix(':::')).toBe('cc-pewpew')
-    expect(sm.sanitizeBranchPrefix('')).toBe('cc-pewpew')
+    expect(sm.sanitizeBranchPrefix('   ')).toBe('pewpew')
+    expect(sm.sanitizeBranchPrefix(':::')).toBe('pewpew')
+    expect(sm.sanitizeBranchPrefix('')).toBe('pewpew')
   })
 })
 

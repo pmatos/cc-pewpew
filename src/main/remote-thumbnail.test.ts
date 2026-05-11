@@ -42,8 +42,8 @@ describe('captureRemotePaneTexts', () => {
 
     const result = await captureRemotePaneTexts(
       [
-        { sessionId: 's1', host, tmuxSession: 'cc-pewpew-s1' },
-        { sessionId: 's2', host, tmuxSession: 'cc-pewpew-s2' },
+        { sessionId: 's1', host, tmuxSession: 'pewpew-s1' },
+        { sessionId: 's2', host, tmuxSession: 'pewpew-s2' },
       ],
       { exec }
     )
@@ -52,9 +52,9 @@ describe('captureRemotePaneTexts', () => {
     expect(calls).toHaveLength(2)
     expect(calls[0]).toEqual({
       host,
-      argv: ['tmux', 'capture-pane', '-t', 'cc-pewpew-s1', '-p'],
+      argv: ['tmux', 'capture-pane', '-t', 'pewpew-s1', '-p'],
     })
-    expect(calls[1].argv).toEqual(['tmux', 'capture-pane', '-t', 'cc-pewpew-s2', '-p'])
+    expect(calls[1].argv).toEqual(['tmux', 'capture-pane', '-t', 'pewpew-s2', '-p'])
   })
 
   it('caps captured output to the configured row limit', async () => {
@@ -62,7 +62,7 @@ describe('captureRemotePaneTexts', () => {
     const exec = async () => ok(big)
 
     const result = await captureRemotePaneTexts(
-      [{ sessionId: 's1', host, tmuxSession: 'cc-pewpew-s1' }],
+      [{ sessionId: 's1', host, tmuxSession: 'pewpew-s1' }],
       { exec, maxRows: 24 }
     )
 
@@ -73,14 +73,14 @@ describe('captureRemotePaneTexts', () => {
 
   it('skips a session whose exec rejects but still returns the others', async () => {
     const exec = async (_h: Host, argv: string[]) => {
-      if (argv.includes('cc-pewpew-broken')) throw new Error('boom')
+      if (argv.includes('pewpew-broken')) throw new Error('boom')
       return ok('ok-out\n')
     }
 
     const result = await captureRemotePaneTexts(
       [
-        { sessionId: 'broken', host, tmuxSession: 'cc-pewpew-broken' },
-        { sessionId: 'good', host, tmuxSession: 'cc-pewpew-good' },
+        { sessionId: 'broken', host, tmuxSession: 'pewpew-broken' },
+        { sessionId: 'good', host, tmuxSession: 'pewpew-good' },
       ],
       { exec }
     )
@@ -90,10 +90,10 @@ describe('captureRemotePaneTexts', () => {
 
   it('skips a session whose capture times out or fails non-zero', async () => {
     const exec = async (_h: Host, argv: string[]): Promise<ExecResult> => {
-      if (argv.includes('cc-pewpew-timeout')) {
+      if (argv.includes('pewpew-timeout')) {
         return { stdout: '', stderr: 'timed out', code: 1, timedOut: true }
       }
-      if (argv.includes('cc-pewpew-noexit')) {
+      if (argv.includes('pewpew-noexit')) {
         return { stdout: '', stderr: "can't find session", code: 1, timedOut: false }
       }
       return ok('alive\n')
@@ -101,9 +101,9 @@ describe('captureRemotePaneTexts', () => {
 
     const result = await captureRemotePaneTexts(
       [
-        { sessionId: 'timeout', host, tmuxSession: 'cc-pewpew-timeout' },
-        { sessionId: 'noexit', host, tmuxSession: 'cc-pewpew-noexit' },
-        { sessionId: 'alive', host, tmuxSession: 'cc-pewpew-alive' },
+        { sessionId: 'timeout', host, tmuxSession: 'pewpew-timeout' },
+        { sessionId: 'noexit', host, tmuxSession: 'pewpew-noexit' },
+        { sessionId: 'alive', host, tmuxSession: 'pewpew-alive' },
       ],
       { exec }
     )
@@ -122,7 +122,7 @@ describe('captureRemotePaneTexts', () => {
       return ok('hi\n')
     }
 
-    await captureRemotePaneTexts([{ sessionId: 's1', host, tmuxSession: 'cc-pewpew-s1' }], { exec })
+    await captureRemotePaneTexts([{ sessionId: 's1', host, tmuxSession: 'pewpew-s1' }], { exec })
 
     expect(seenTimeouts).toHaveLength(1)
     expect(seenTimeouts[0]).toBeDefined()
@@ -137,7 +137,7 @@ describe('captureRemotePaneTexts', () => {
     const fastEmitsObservedSlowState: boolean[] = []
 
     const exec = async (_h: Host, argv: string[]): Promise<ExecResult> => {
-      if (argv.includes('cc-pewpew-slow')) {
+      if (argv.includes('pewpew-slow')) {
         await new Promise((r) => setTimeout(r, 60))
         slowSettled = true
         return ok('slow\n')
@@ -147,8 +147,8 @@ describe('captureRemotePaneTexts', () => {
 
     await captureRemotePaneTexts(
       [
-        { sessionId: 'fast', host, tmuxSession: 'cc-pewpew-fast' },
-        { sessionId: 'slow', host, tmuxSession: 'cc-pewpew-slow' },
+        { sessionId: 'fast', host, tmuxSession: 'pewpew-fast' },
+        { sessionId: 'slow', host, tmuxSession: 'pewpew-slow' },
       ],
       {
         exec,
@@ -164,12 +164,12 @@ describe('captureRemotePaneTexts', () => {
   it('passes the capped per-session text to onCapture and the aggregate return', async () => {
     const calls: { sid: string; text: string }[] = []
     const exec = async (_h: Host, argv: string[]) =>
-      ok(argv.includes('cc-pewpew-s1') ? 's1-text\n' : 's2-text\n')
+      ok(argv.includes('pewpew-s1') ? 's1-text\n' : 's2-text\n')
 
     const result = await captureRemotePaneTexts(
       [
-        { sessionId: 's1', host, tmuxSession: 'cc-pewpew-s1' },
-        { sessionId: 's2', host, tmuxSession: 'cc-pewpew-s2' },
+        { sessionId: 's1', host, tmuxSession: 'pewpew-s1' },
+        { sessionId: 's2', host, tmuxSession: 'pewpew-s2' },
       ],
       { exec, onCapture: (sid, text) => calls.push({ sid, text }) }
     )
