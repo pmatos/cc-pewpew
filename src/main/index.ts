@@ -78,6 +78,26 @@ import type {
 } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
+const UNTRACKED_FILE_READ_CONCURRENCY = 16
+
+async function mapWithConcurrency<T, Result>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<Result>
+): Promise<Result[]> {
+  const results = new Array<Result>(items.length)
+  let nextIndex = 0
+  const runNext = async (): Promise<void> => {
+    const index = nextIndex
+    nextIndex += 1
+    if (index >= items.length) return
+    results[index] = await mapper(items[index], index)
+    return runNext()
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => runNext()))
+  return results
+}
 
 async function readTextFileUnderLimit(path: string, maxBytes: number): Promise<string | null> {
   const file = await openFile(path, 'r')
@@ -532,13 +552,15 @@ app.whenReady().then(async () => {
         )
         const untrackedPaths = untrackedRaw.split('\n').filter(Boolean)
         const MAX_FILE_SIZE = 1_000_000 // 1MB
-        const untrackedFiles = await Promise.all(
-          untrackedPaths.map(async (filePath) => {
+        const untrackedFiles = await mapWithConcurrency(
+          untrackedPaths,
+          UNTRACKED_FILE_READ_CONCURRENCY,
+          async (filePath) => {
             const fullPath = join(cwd, filePath)
             const content = await readTextFileUnderLimit(fullPath, MAX_FILE_SIZE).catch(() => null)
             if (content === null) return null
             return synthesizeUntrackedFile(filePath, content)
-          })
+          }
         )
         for (const file of untrackedFiles) {
           if (file) files.push(file)
