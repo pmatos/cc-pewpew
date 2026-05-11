@@ -1622,4 +1622,37 @@ describe('createPrSessions', () => {
     await sm.createPrSessions('/proj', [11], null, { tool: 'codex' }, { createPrSession })
     expect(createPrSession).toHaveBeenCalledWith('/proj', 11, null, { tool: 'codex' })
   })
+
+  it('serializes remote Codex session creation on the same host', async () => {
+    const sm = await loadSessionManager()
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const started: number[] = []
+    const createPrSession = vi.fn(
+      async (_projectPath: string, prNumber: number, _hostId: string | null) => {
+        started.push(prNumber)
+        if (prNumber === 8) await firstGate
+        return baseLocalSession({ id: `s-${prNumber}`, prNumber }) as Session
+      }
+    )
+
+    const resultPromise = sm.createPrSessions(
+      '/proj',
+      [8, 9],
+      'h1',
+      { tool: 'codex' },
+      { createPrSession }
+    )
+    await Promise.resolve()
+    expect(started).toEqual([8])
+
+    releaseFirst()
+    const result = await resultPromise
+    if (typeof result === 'string') throw new Error(result)
+    expect(started).toEqual([8, 9])
+    expect(result.created.map((s) => s.prNumber)).toEqual([8, 9])
+    expect(result.failed).toEqual([])
+  })
 })

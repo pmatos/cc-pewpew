@@ -30,7 +30,7 @@ export default function BroadcastBar({ sessionIds }: Props) {
       <input
         ref={inputRef}
         type="text"
-        placeholder="Broadcast command to all lanes..."
+        placeholder="Broadcast command to all lanes…"
         value={command}
         onChange={(e) => setCommand(e.target.value)}
         onKeyDown={handleKeyDown}

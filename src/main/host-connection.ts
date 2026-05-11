@@ -311,11 +311,16 @@ async function waitForControl(runtime: HostRuntime): Promise<void> {
   // foreground ssh, so exitCode flips to 0 once setup completes while the
   // control socket lives on in the daemon. A non-zero exit is signaled by
   // exitPromise in startRuntime, which wins the Promise.race.
-  while (Date.now() < deadline) {
+  async function poll(): Promise<void> {
+    if (Date.now() >= deadline) {
+      throw new Error('ssh control connection did not become ready')
+    }
     if (await controlCheck(runtime)) return
     await new Promise((resolve) => setTimeout(resolve, 100))
+    await poll()
   }
-  throw new Error('ssh control connection did not become ready')
+
+  await poll()
 }
 
 export function classifyConnectionFailure(

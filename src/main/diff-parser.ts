@@ -60,7 +60,7 @@ export function parseDiff(raw: string): DiffFile[] {
       const oldCount = hunkMatch[2] !== undefined ? parseInt(hunkMatch[2], 10) : 1
       const newStart = parseInt(hunkMatch[3], 10)
       const newCount = hunkMatch[4] !== undefined ? parseInt(hunkMatch[4], 10) : 1
-      const header = lines[i].substring(0, lines[i].indexOf(' @@', 2) + 3)
+      const header = `@@ -${hunkMatch[1]}${hunkMatch[2] ? `,${hunkMatch[2]}` : ''} +${hunkMatch[3]}${hunkMatch[4] ? `,${hunkMatch[4]}` : ''} @@`
       i++
 
       const hunkLines: DiffLine[] = []

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useEffectEvent } from 'react'
 import type { Session } from '../shared/types'
 import BroadcastBar from './components/BroadcastBar'
 import LaneHeader from './components/LaneHeader'
@@ -54,19 +54,23 @@ export default function SwimLanesApp() {
     })
   }, [])
 
+  const handleReviewShortcut = useEffectEvent((e: KeyboardEvent) => {
+    if (e.ctrlKey && e.key === 'r') {
+      e.preventDefault()
+      e.stopPropagation()
+      if (focusedLane) {
+        toggleReview(focusedLane)
+      }
+    }
+  })
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === 'r') {
-        e.preventDefault()
-        e.stopPropagation()
-        if (focusedLane) {
-          toggleReview(focusedLane)
-        }
-      }
+      handleReviewShortcut(e)
     }
     document.addEventListener('keydown', handler, true)
     return () => document.removeEventListener('keydown', handler, true)
-  }, [focusedLane, toggleReview])
+  }, [])
 
   const handleRevive = async (id: string) => {
     try {
@@ -88,7 +92,21 @@ export default function SwimLanesApp() {
           const isReviewOpen = flipCount % 2 === 1
 
           return (
-            <div key={id} className="lane" data-lane-id={id} onClick={() => setFocusedLane(id)}>
+            <div
+              key={id}
+              className="lane"
+              data-lane-id={id}
+              role="group"
+              tabIndex={0}
+              onClick={() => setFocusedLane(id)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setFocusedLane(id)
+                }
+              }}
+            >
               <LaneHeader session={session} focused={focusedLane === id} />
               <div className="lane-terminal">
                 {isDead ? (

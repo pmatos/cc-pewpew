@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useReducer } from 'react'
 import { DiffFile } from '../../../shared/types'
 
 interface FileTreeProps {
@@ -53,14 +53,15 @@ function DirectoryNode({
 
   return (
     <div className="rv-file-tree-dir">
-      <div
+      <button
+        type="button"
         className="rv-file-tree-dir-label"
         style={{ paddingLeft: depth * 16 + 8 }}
         onClick={() => setExpanded(!expanded)}
       >
         <span className="rv-file-tree-arrow">{expanded ? '\u25BC' : '\u25B6'}</span>
         <span className="rv-file-tree-dir-name">{node.name}/</span>
-      </div>
+      </button>
       {expanded && (
         <div>
           {dirs.map((dir) => (
@@ -102,23 +103,27 @@ function FileNode({
   const isFocused = focusedFile === file.path
 
   return (
-    <div
+    <button
+      type="button"
       className={`rv-file-tree-file${isFocused ? ' rv-file-tree-file--focused' : ''}`}
       style={{ paddingLeft: depth * 16 + 26 }}
       onClick={() => onFileClick(file.path)}
     >
       <span className="rv-file-tree-file-name">{node.name}</span>
-    </div>
+    </button>
   )
 }
 
 export default function FileTree({ files, focusedFile, onFileClick }: FileTreeProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [narrow, setNarrow] = useState(false)
+  const [layout, setLayout] = useReducer(
+    (_state: { narrow: boolean }, width: number) => ({ narrow: width < 700 }),
+    { narrow: false }
+  )
 
   const handleResize = useCallback((entries: ResizeObserverEntry[]) => {
     for (const entry of entries) {
-      setNarrow(entry.contentRect.width < 700)
+      setLayout(entry.contentRect.width)
     }
   }, [])
 
@@ -135,7 +140,7 @@ export default function FileTree({ files, focusedFile, onFileClick }: FileTreePr
   const dirs = entries.filter((n) => !n.file)
   const topFiles = entries.filter((n) => n.file)
 
-  if (narrow) {
+  if (layout.narrow) {
     return (
       <div ref={containerRef} className="rv-file-tree">
         <select

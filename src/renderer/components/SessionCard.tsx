@@ -43,7 +43,7 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
 
   const sessionName = `${session.projectName}/${session.worktreeName}`
 
-  const handleClick = (e: React.MouseEvent) => {
+  const openOrSelectSession = (e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey || e.shiftKey) {
       onSelect?.(session.id, e)
       return
@@ -168,10 +168,11 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
     .join(' ')
 
   return (
-    <div
+    <button
+      type="button"
       className={classes}
       data-session-id={session.id}
-      onClick={handleClick}
+      onClick={openOrSelectSession}
       onContextMenu={handleContextMenu}
       style={style}
     >
@@ -224,6 +225,6 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={buildMenuItems()} onClose={() => setMenu(null)} />
       )}
-    </div>
+    </button>
   )
 }

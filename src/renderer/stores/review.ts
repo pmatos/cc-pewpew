@@ -72,6 +72,28 @@ function getSession(
   return state[sessionId] ?? emptySession()
 }
 
+function diffFilesEqual(left: DiffFile[], right: DiffFile[]): boolean {
+  if (left.length !== right.length) return false
+  for (let fileIndex = 0; fileIndex < left.length; fileIndex++) {
+    const leftFile = left[fileIndex]
+    const rightFile = right[fileIndex]
+    if (leftFile.path !== rightFile.path) return false
+    if (leftFile.hunks.length !== rightFile.hunks.length) return false
+    for (let hunkIndex = 0; hunkIndex < leftFile.hunks.length; hunkIndex++) {
+      const leftHunk = leftFile.hunks[hunkIndex]
+      const rightHunk = rightFile.hunks[hunkIndex]
+      if (leftHunk.header !== rightHunk.header) return false
+      if (leftHunk.lines.length !== rightHunk.lines.length) return false
+      for (let lineIndex = 0; lineIndex < leftHunk.lines.length; lineIndex++) {
+        if (leftHunk.lines[lineIndex].content !== rightHunk.lines[lineIndex].content) {
+          return false
+        }
+      }
+    }
+  }
+  return true
+}
+
 export const useReviewStore = create<ReviewStore>((set, get) => ({
   sessions: {},
   fetchDiff: async (sessionId, mode, baseBranch) => {
@@ -118,20 +140,7 @@ export const useReviewStore = create<ReviewStore>((set, get) => ({
       }
 
       if (hasCachedData) {
-        const oldFiles = existing.files
-        const unchanged =
-          oldFiles.length === files.length &&
-          oldFiles.every(
-            (f, i) =>
-              f.path === files[i].path &&
-              f.hunks.length === files[i].hunks.length &&
-              f.hunks.every(
-                (h, j) =>
-                  h.lines.length === files[i].hunks[j].lines.length &&
-                  h.header === files[i].hunks[j].header &&
-                  h.lines.every((l, k) => l.content === files[i].hunks[j].lines[k].content)
-              )
-          )
+        const unchanged = diffFilesEqual(existing.files, files)
         if (unchanged) {
           // Clear any stale error even when diff hasn't changed
           set((state) => {

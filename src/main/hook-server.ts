@@ -98,11 +98,11 @@ function handleConnection(socket: Socket, originHostId: string | null): void {
   socket.on('data', (data) => {
     buffer += data.toString()
 
-    let newlineIdx: number
-    while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, newlineIdx).trim()
-      buffer = buffer.slice(newlineIdx + 1)
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
 
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
       if (!line) continue
 
       const response = handleRequest(line, originHostId)

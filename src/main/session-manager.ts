@@ -23,7 +23,6 @@ import {
   reattachPty,
   reattachRemotePty,
   createRemotePty,
-  setOnAgentExit,
 } from './pty-manager'
 import { getRepoFingerprint, gitWorktrees } from './project-scanner'
 import {
@@ -139,36 +138,43 @@ export async function resolveOriginDefaultBase(run: GitRunner): Promise<string> 
   }
 
   const candidates: string[] = []
+  const seen = new Set<string>()
+  const addCandidate = (ref: string | undefined): void => {
+    if (!ref || seen.has(ref)) return
+    seen.add(ref)
+    candidates.push(ref)
+  }
+
   try {
     const { stdout } = await run(['ls-remote', '--symref', 'origin', 'HEAD'])
-    const ref = parseOriginHeadSymref(stdout)
-    if (ref) candidates.push(ref)
+    addCandidate(parseOriginHeadSymref(stdout))
   } catch {
     // fall through to local origin/HEAD
   }
 
   try {
     const { stdout } = await run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
-    const ref = remoteTrackingRef(stdout)
-    if (ref && !candidates.includes(ref)) candidates.push(ref)
+    addCandidate(remoteTrackingRef(stdout))
   } catch {
     // fall through to conventional branch names
   }
 
   for (const ref of ['refs/remotes/origin/main', 'refs/remotes/origin/master']) {
-    if (!candidates.includes(ref)) candidates.push(ref)
+    addCandidate(ref)
   }
 
-  for (const ref of candidates) {
+  async function firstExistingCandidate(index: number): Promise<string> {
+    const ref = candidates[index]
+    if (!ref) throw new Error('no-origin-default-branch')
     try {
       await run(['rev-parse', '--verify', ref])
       return ref
     } catch {
-      // try next candidate
+      return firstExistingCandidate(index + 1)
     }
   }
 
-  throw new Error('no-origin-default-branch')
+  return firstExistingCandidate(0)
 }
 
 // Extract the owner segment from a GitHub `origin` remote URL. Used to
@@ -398,18 +404,6 @@ export function initSessionManager(): void {
       if (entry.session.prNumber === undefined) resolvePrNumberAsync(entry.session.id)
     }
   }, PR_REFRESH_INTERVAL_MS).unref()
-
-  // When a session's agent (claude/codex) exits on its own — by /exit, crash,
-  // or any path that wasn't cc-pewpew tearing the pty down ourselves —
-  // open the cleanup prompt. Claude's SessionEnd hook already does this via
-  // the session.end RPC; this fallback covers Codex (which has no SessionEnd
-  // hook) and any abnormal exit on either tool. promptCleanup's
-  // cleanupInProgress lock dedupes the two paths if they both fire.
-  setOnAgentExit((sessionId) => {
-    promptCleanup(sessionId).catch((err) => {
-      console.error(`promptCleanup(${sessionId}) failed via agent-exit:`, err)
-    })
-  })
 }
 
 async function deriveLabel(worktreePath: string): Promise<string> {
@@ -1157,6 +1151,7 @@ async function doProbePendingSessionsOnHost(
 ): Promise<void> {
   const host = getHost(hostId)
   if (!host) return
+  const reconnectHost = host
 
   const pending: Session[] = []
   for (const entry of sessions.values()) {
@@ -1178,18 +1173,21 @@ async function doProbePendingSessionsOnHost(
     return
   }
 
-  let bailed = false
-  for (const s of pending) {
-    if (bailed) break
+  async function reconnectNext(index: number): Promise<void> {
+    const s = pending[index]
+    if (!s) return
     // The snapshot was taken once at batch entry; by the time we get here
     // another concurrent reconnect (e.g. user clicking a sibling card) may
     // have already advanced this session out of `pending`. Skip — otherwise
     // we'd duplicate the remote reattach and leak the earlier runtime retain.
-    if (s.connectionState !== 'pending') continue
+    if (s.connectionState !== 'pending') {
+      await reconnectNext(index + 1)
+      return
+    }
     try {
-      const probe = await probeRemoteTmuxSession(s.id, host)
+      const probe = await probeRemoteTmuxSession(s.id, reconnectHost)
       if (probe === 'present') {
-        await reattachRemotePty(s.id, host)
+        await reattachRemotePty(s.id, reconnectHost)
         s.connectionState = 'live'
         if (s.status === 'running') s.status = 'idle'
         s.lastActivity = Date.now()
@@ -1202,7 +1200,7 @@ async function doProbePendingSessionsOnHost(
         // running. Mark unreachable and bail so we don't mis-classify the rest
         // of the batch as dead on a transient failure.
         s.connectionState = 'unreachable'
-        bailed = true
+        return
       }
     } catch (err) {
       // A mid-batch SSH failure means the host dropped. Mark this sibling
@@ -1210,9 +1208,12 @@ async function doProbePendingSessionsOnHost(
       // later manual reconnect, avoiding a flood of follow-up SSH attempts.
       console.error(`probePendingSessionsOnHost(${hostId}) aborted on ${s.id}:`, err)
       s.connectionState = 'unreachable'
-      bailed = true
+      return
     }
+    await reconnectNext(index + 1)
   }
+
+  await reconnectNext(0)
   onSessionsChanged()
 }
 
@@ -1303,10 +1304,7 @@ export async function removeWorktree(id: string): Promise<void> {
   }
 }
 
-export async function removeSession(
-  id: string,
-  options: { keepWorktree?: boolean } = {}
-): Promise<void> {
+export async function removeSession(id: string): Promise<void> {
   const entry = sessions.get(id)
   if (entry?.session.hostId) {
     const host = getRequiredHost(entry.session.hostId)
@@ -1314,7 +1312,7 @@ export async function removeSession(
   } else {
     destroyPty(id)
   }
-  if (!options.keepWorktree) await removeWorktree(id)
+  await removeWorktree(id)
   sessions.delete(id)
   onSessionsChanged()
 }
@@ -1340,23 +1338,18 @@ const cleanupInProgress = new Set<string>()
 
 async function promptCleanup(id: string): Promise<void> {
   if (cleanupInProgress.has(id)) return
-  // Bail before grabbing the lock if the session is already gone — e.g. a
-  // previous prompt-cleanup answered "Delete" and removeSession() ran. Without
-  // this check, a late pty-onExit triggered by the same agent shutdown would
-  // re-open the dialog with no session to clean up.
-  const entry = sessions.get(id)
-  if (!entry) return
-
   cleanupInProgress.add(id)
   try {
+    const entry = sessions.get(id)
+    if (!entry) return
+
     const session = entry.session
     const parentWindow = getMainWindow()
 
     const options = {
       type: 'question' as const,
       title: 'Session ended',
-      message: `Session "${session.projectName}/${session.worktreeName}" ended.\nDelete the worktree?`,
-      detail: 'The session will be removed from the canvas either way.',
+      message: `Session "${session.projectName}/${session.worktreeName}" ended.\nClean up worktree?`,
       buttons: ['Delete worktree', 'Keep worktree', 'Keep and open in file manager'],
       defaultId: 1,
       cancelId: 1,
@@ -1366,19 +1359,13 @@ async function promptCleanup(id: string): Promise<void> {
       ? await dialog.showMessageBox(parentWindow, options)
       : await dialog.showMessageBox(options)
 
-    // All three responses end with the session removed. The dialog only
-    // controls whether the worktree directory is deleted.
     if (response === 0) {
       await removeSession(id)
+    } else if (response === 1) {
+      updateSession(id, 'completed')
     } else if (response === 2) {
-      // Capture the path before removeSession drops the entry. keepWorktree
-      // means the directory itself survives — we just need its path to hand
-      // to the file manager.
-      const path = session.worktreePath
-      await removeSession(id, { keepWorktree: true })
-      shell.openPath(path)
-    } else {
-      await removeSession(id, { keepWorktree: true })
+      updateSession(id, 'completed')
+      shell.openPath(session.worktreePath)
     }
   } finally {
     cleanupInProgress.delete(id)
@@ -1564,17 +1551,40 @@ async function createSessionsForNumbers(
   )
   const created: Session[] = []
   const failed: { number: number; error: string }[] = []
-
-  for (const item of toCreate) {
+  type CreateSessionResult = { session: Session } | { number: number; error: string }
+  const createOne = async (item: { number: number }): Promise<CreateSessionResult> => {
     try {
       const result = await createSession(projectPath, item.number, hostId, options)
       if (typeof result === 'string') {
-        failed.push({ number: item.number, error: result })
-      } else {
-        created.push(result)
+        return { number: item.number, error: result }
       }
+      return { session: result }
     } catch (err) {
-      failed.push({ number: item.number, error: describeGhError(err) })
+      return { number: item.number, error: describeGhError(err) }
+    }
+  }
+
+  const effectiveTool = options.tool ?? getConfig().defaultTool
+  const createSerially = async (
+    index: number,
+    results: CreateSessionResult[]
+  ): Promise<CreateSessionResult[]> => {
+    const item = toCreate[index]
+    if (!item) return results
+    results.push(await createOne(item))
+    return createSerially(index + 1, results)
+  }
+
+  const results: CreateSessionResult[] =
+    hostId !== null && effectiveTool === 'codex'
+      ? await createSerially(0, [])
+      : await Promise.all(toCreate.map((item) => createOne(item)))
+
+  for (const result of results) {
+    if ('session' in result) {
+      created.push(result.session)
+    } else {
+      failed.push(result)
     }
   }
 

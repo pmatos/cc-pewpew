@@ -46,13 +46,16 @@ export const useThemeStore = create<ThemeStore>((set, get) => ({
     // the same await.
     const initialMutation = get().mutationCount
     set({ loaded: true })
-    const persisted = await window.api.getTheme()
+    const loadedTheme = await window.api.getTheme().then((theme) => ({
+      theme,
+      mutationCount: get().mutationCount,
+    }))
     // If setTheme or a broadcast ran during the await, the latest theme
     // is already applied; do not clobber it with the value we fetched.
-    if (get().mutationCount !== initialMutation) return
-    if (persisted === get().theme) return
-    applyTheme(persisted)
-    set({ theme: persisted })
+    if (loadedTheme.mutationCount !== initialMutation) return
+    if (loadedTheme.theme === get().theme) return
+    applyTheme(loadedTheme.theme)
+    set({ theme: loadedTheme.theme })
   },
   setTheme: (theme) => {
     if (get().theme === theme) return

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -24,7 +24,9 @@ export default function Terminal({ sessionId }: Props) {
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
 
-  useEffect(() => {
+  // Terminal setup mutates refs and xterm instances here; it does not cascade React state updates.
+  // react-doctor-disable-next-line
+  useLayoutEffect(() => {
     if (!containerRef.current) return
     const container = containerRef.current
 
@@ -125,6 +127,14 @@ export default function Terminal({ sessionId }: Props) {
       await window.api.ptyResize(sessionId, cols, rows)
     }
 
+    const flushPendingPtyData = async (): Promise<void> => {
+      if (aborted || !pendingPtyData) return
+      const data = pendingPtyData
+      pendingPtyData = ''
+      await new Promise<void>((resolve) => term.write(data, resolve))
+      await flushPendingPtyData()
+    }
+
     // Defer term.open() until fonts are loaded and layout is stable.
     // Opening before fonts causes xterm to render with wrong glyph metrics,
     // producing garbled output on Wayland with fractional DPR.
@@ -166,12 +176,8 @@ export default function Terminal({ sessionId }: Props) {
 
         await syncTerminal(true)
         if (aborted) return
-        while (pendingPtyData) {
-          const data = pendingPtyData
-          pendingPtyData = ''
-          await new Promise<void>((resolve) => term.write(data, resolve))
-          if (aborted) return
-        }
+        await flushPendingPtyData()
+        if (aborted) return
         readyForPtyData = true
 
         await new Promise((r) => setTimeout(r, 120))

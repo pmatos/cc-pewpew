@@ -27,7 +27,7 @@ const FeedbackInput: React.FC<FeedbackInputProps> = ({ mode, onSubmit, onCancel 
   }
 
   return (
-    <div className="rv-feedback-input" onKeyDown={handleKeyDown}>
+    <div className="rv-feedback-input" role="group" onKeyDown={handleKeyDown}>
       {mode === 'reject' && (
         <div className="rv-feedback-radio-group">
           <label>
@@ -57,7 +57,7 @@ const FeedbackInput: React.FC<FeedbackInputProps> = ({ mode, onSubmit, onCancel 
         className="rv-feedback-textarea"
         value={comment}
         onChange={(e) => setComment(e.target.value)}
-        placeholder={mode === 'reject' ? 'Describe your feedback...' : 'Add a comment...'}
+        placeholder={mode === 'reject' ? 'Describe your feedback…' : 'Add a comment…'}
       />
       <div className="rv-feedback-actions">
         <button className="rv-feedback-btn rv-feedback-btn--cancel" onClick={onCancel}>
@@ -67,7 +67,7 @@ const FeedbackInput: React.FC<FeedbackInputProps> = ({ mode, onSubmit, onCancel 
           className="rv-feedback-btn rv-feedback-btn--submit"
           onClick={() => onSubmit(comment, mode === 'reject' ? rejectMode : undefined)}
         >
-          Submit
+          {mode === 'reject' ? 'Add rejection' : 'Add comment'}
         </button>
       </div>
     </div>

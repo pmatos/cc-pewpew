@@ -302,11 +302,17 @@ body,
 }
 
 .cluster-header {
+  width: 100%;
+  border: 0;
+  background: transparent;
   padding: 8px 4px;
+  color: inherit;
+  font: inherit;
   font-size: 14px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  text-align: left;
   cursor: grab;
   user-select: none;
 }
@@ -328,9 +334,15 @@ body,
 }
 
 .session-card {
+  display: block;
+  width: 100%;
   background: var(--bg-sidebar);
   border: 1px solid var(--border);
   border-radius: 8px;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   overflow: hidden;
   cursor: pointer;
   box-shadow: 0 1px 2px var(--shadow-sm);
@@ -600,9 +612,15 @@ body,
 }
 
 .project-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
   display: flex;
   align-items: center;
   padding: 4px 8px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   border-radius: 4px;
   gap: 4px;
@@ -667,9 +685,14 @@ body,
 }
 
 .worktree-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
   padding: 2px 8px;
   font-size: 14px;
   color: var(--text-secondary);
+  font-family: inherit;
+  text-align: left;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1240,9 +1263,13 @@ body,
 }
 
 .hosts-error {
+  border: 0;
+  background: transparent;
   color: var(--accent-error);
   font-size: 12px;
+  font-family: inherit;
   padding: 4px 8px;
+  text-align: left;
 }
 
 .hosts-empty {
@@ -1695,6 +1722,9 @@ body,
 }
 
 .rv-file-tree-dir-label {
+  width: 100%;
+  border: 0;
+  background: transparent;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1702,6 +1732,8 @@ body,
   cursor: pointer;
   border-radius: 3px;
   color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
 }
 
 .rv-file-tree-dir-label:hover {
@@ -1719,12 +1751,17 @@ body,
 }
 
 .rv-file-tree-file {
+  width: 100%;
+  border: 0;
+  background: transparent;
   display: flex;
   align-items: center;
   padding: 3px 8px;
   cursor: pointer;
   border-radius: 3px;
   color: var(--text-primary);
+  font: inherit;
+  text-align: left;
 }
 
 .rv-file-tree-file:hover {

@@ -8,10 +8,11 @@ export function parsePrSpec(input: string): PrSpecResult {
   const trimmed = input.trim()
   if (trimmed.length === 0) return { error: 'Enter at least one PR number.' }
 
-  const tokens = trimmed
-    .split(',')
-    .map((t) => t.trim())
-    .filter((t) => t.length > 0)
+  const tokens: string[] = []
+  for (const part of trimmed.split(',')) {
+    const token = part.trim()
+    if (token.length > 0) tokens.push(token)
+  }
   if (tokens.length === 0) return { error: 'Enter at least one PR number.' }
 
   const result = new Set<number>()
