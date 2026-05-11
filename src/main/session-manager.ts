@@ -73,7 +73,7 @@ function parseIssueNumber(...sources: (string | undefined)[]): number | undefine
 // remote-project label), so they can contain characters that are illegal in a
 // git ref component (space, `:`, `~`, `^`, `?`, `*`, `[`, `\`, control chars,
 // `..`, leading `-`/`.`, etc.). Coerce to a safe slug; fall back to
-// `cc-pewpew` when nothing valid remains.
+// `pewpew` when nothing valid remains.
 export function sanitizeBranchPrefix(name: string): string {
   const slug = name
     .replace(/[^A-Za-z0-9._-]+/g, '-')
@@ -82,7 +82,7 @@ export function sanitizeBranchPrefix(name: string): string {
     .replace(/^[-._]+|[-._]+$/g, '')
     .replace(/(?:\.lock)+$/i, '')
     .replace(/^[-._]+|[-._]+$/g, '')
-  return slug || 'cc-pewpew'
+  return slug || 'pewpew'
 }
 
 // Read the actual branch checked out in a worktree. Falls back to the
@@ -523,7 +523,7 @@ async function adoptWorktree(
   const id = randomUUID().slice(0, 8)
   const projectName = basename(projectPath)
   const worktreeName = label || (await deriveLabel(worktreePath))
-  const tmuxSession = `cc-pewpew-${id}`
+  const tmuxSession = `pewpew-${id}`
   const branch = resolveBranchFromWorktree(worktreePath, worktreeName, projectName)
 
   await installAgentHooks(tool, worktreePath)
@@ -634,7 +634,7 @@ async function createRemoteSession(
   }
 
   const id = randomUUID().slice(0, 8)
-  const tmuxSession = `cc-pewpew-${id}`
+  const tmuxSession = `pewpew-${id}`
   const branchName = `${sanitizeBranchPrefix(remoteProject.name)}/${worktreeName}`
   const baseRef = effectiveWorktreeBase(options)
 
@@ -797,7 +797,7 @@ async function createRemotePrSession(
 
     const branch = prInfo.headRefName
     const id = randomUUID().slice(0, 8)
-    const tmuxSession = `cc-pewpew-${id}`
+    const tmuxSession = `pewpew-${id}`
 
     await execRemote(host, ['git', '-C', projectPath, 'fetch', 'origin', branch]).catch(
       () => undefined
@@ -1321,7 +1321,7 @@ export async function removeSession(id: string): Promise<void> {
 // host (releases the host-connection refcount via releaseRemoteEntry without
 // talking to the remote tmux), then drop the entries so they vanish from
 // sessions.json on the next persist. Worktrees, remote tmux sessions, and the
-// remote ~/.config/cc-pewpew/ tree are intentionally left alone — that is the
+// remote ~/.config/pewpew/ tree are intentionally left alone — that is the
 // v1 host-delete contract (issue #14).
 export function removeSessionsForHost(hostId: string): void {
   let removed = false
@@ -1818,7 +1818,7 @@ async function createRemoteIssueSession(
     }
 
     const id = randomUUID().slice(0, 8)
-    const tmuxSession = `cc-pewpew-${id}`
+    const tmuxSession = `pewpew-${id}`
     let originRef: string
     try {
       originRef = await resolveOriginDefaultBase((argv) =>

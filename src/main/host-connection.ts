@@ -169,7 +169,7 @@ export function remoteSocketPathForHost(hostId: HostId): string {
   // Include hostId so two configured hosts that resolve to the same remote
   // account don't collide on the reverse-forwarded socket (StreamLocalBindUnlink
   // would otherwise let the later connection steal the earlier one's socket).
-  return `/tmp/cc-pewpew-${uidSegment()}-${sanitizeHostIdForPath(hostId)}.sock`
+  return `/tmp/pewpew-${uidSegment()}-${sanitizeHostIdForPath(hostId)}.sock`
 }
 
 function controlPathForHost(hostId: HostId): string {

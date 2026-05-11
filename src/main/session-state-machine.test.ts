@@ -12,7 +12,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     worktreePath: '/p/w',
     branch: 'main',
     pid: 0,
-    tmuxSession: 'cc-pewpew-s1',
+    tmuxSession: 'pewpew-s1',
     status: 'idle',
     lastActivity: 0,
     hookEvents: [],

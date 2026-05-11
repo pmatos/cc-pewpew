@@ -14,7 +14,7 @@ vi.mock('os', async () => {
 })
 
 vi.mock('./config', () => ({
-  CONFIG_DIR: '/tmp/cc-pewpew-test-config',
+  CONFIG_DIR: '/tmp/pewpew-test-config',
 }))
 
 beforeEach(() => {
@@ -45,10 +45,10 @@ describe('installCodexHooks', () => {
     expect(json.hooks.Stop).toHaveLength(1)
     expect(json.hooks.PostToolUse).toHaveLength(1)
     expect(json.hooks.PostToolUse[0].matcher).toBe('.*')
-    expect(json.hooks.SessionStart[0].hooks[0].command).toContain('cc-pewpew')
+    expect(json.hooks.SessionStart[0].hooks[0].command).toContain('pewpew')
   })
 
-  it('preserves existing non-cc-pewpew entries when merging', async () => {
+  it('preserves existing non-pewpew entries when merging', async () => {
     const codexDir = join(state.tmpProject, '.codex')
     mkdirSync(codexDir, { recursive: true })
     writeFileSync(
@@ -70,10 +70,10 @@ describe('installCodexHooks', () => {
     expect(json.hooks.SessionStart).toHaveLength(2)
     const commands = json.hooks.SessionStart.map((g) => g.hooks[0].command)
     expect(commands).toContain('/usr/local/bin/other-hook.sh')
-    expect(commands.some((c: string) => c.includes('cc-pewpew'))).toBe(true)
+    expect(commands.some((c: string) => c.includes('pewpew'))).toBe(true)
   })
 
-  it('replaces stale cc-pewpew entries on re-install', async () => {
+  it('replaces stale pewpew entries on re-install', async () => {
     const { installCodexHooks } = await loadInstaller()
     await installCodexHooks(state.tmpProject, { skipGitignore: true })
     await installCodexHooks(state.tmpProject, { skipGitignore: true })

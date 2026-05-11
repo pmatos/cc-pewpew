@@ -1,8 +1,8 @@
-# cc-pewpew
+# pewpew
 
-[![CI](https://github.com/pmatos/cc-pewpew/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pmatos/cc-pewpew/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/pmatos/cc-pewpew/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/pmatos/cc-pewpew/actions/workflows/codeql.yml)
-[![codecov](https://codecov.io/gh/pmatos/cc-pewpew/branch/main/graph/badge.svg)](https://codecov.io/gh/pmatos/cc-pewpew)
+[![CI](https://github.com/pmatos/pewpew/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pmatos/pewpew/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/pmatos/pewpew/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/pmatos/pewpew/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/pmatos/pewpew/branch/main/graph/badge.svg)](https://codecov.io/gh/pmatos/pewpew)
 
 A desktop GUI for launching, monitoring, and visualizing Claude Code sessions with embedded terminals across your git projects.
 
@@ -27,8 +27,8 @@ A desktop GUI for launching, monitoring, and visualizing Claude Code sessions wi
 ## Getting started
 
 ```bash
-git clone https://github.com/pmatos/cc-pewpew.git
-cd cc-pewpew
+git clone https://github.com/pmatos/pewpew.git
+cd pewpew
 npm install
 npm run rebuild-pty   # rebuild node-pty for Electron
 npm run dev           # start in development mode
@@ -37,7 +37,7 @@ npm run dev           # start in development mode
 ## Usage
 
 1. Projects from `~/dev` appear in the sidebar
-2. Right-click a project → **Setup for cc-pewpew** (installs Claude Code hooks)
+2. Right-click a project → **Setup for pewpew** (installs Claude Code hooks)
 3. Right-click again → **New session...** (optionally name it)
 4. A session card appears on the canvas with a live terminal preview
 5. Click the card to open the full interactive terminal
@@ -46,7 +46,7 @@ npm run dev           # start in development mode
 
 ## Configuration
 
-Edit `~/.config/cc-pewpew/config.json`:
+Edit `~/.config/pewpew/config.json`:
 
 ```json
 {

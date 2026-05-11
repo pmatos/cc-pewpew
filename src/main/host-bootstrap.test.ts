@@ -57,15 +57,15 @@ describe('bootstrapHost', () => {
     )
 
     expect(result).toEqual({
-      notifyScriptPath: '/home/dev/.config/cc-pewpew/hooks/notify-v1.sh',
+      notifyScriptPath: '/home/dev/.config/pewpew/hooks/notify-v1.sh',
       remoteSocketPath: '/tmp/ipc',
       agentPaths: { claude: '/usr/bin/claude', codex: '/usr/bin/codex' },
     })
     expect(calls.some((argv) => argv.some((a) => a.includes('resolve_one claude')))).toBe(true)
     expect(calls.some((argv) => argv.includes('/tmp/ipc'))).toBe(true)
-    expect(
-      calls.some((argv) => argv.includes('/home/dev/.config/cc-pewpew/hooks/notify-v1.sh'))
-    ).toBe(true)
+    expect(calls.some((argv) => argv.includes('/home/dev/.config/pewpew/hooks/notify-v1.sh'))).toBe(
+      true
+    )
   })
 
   it('hard-fails on missing strict deps but tolerates missing agent CLIs', async () => {
@@ -114,7 +114,7 @@ describe('bootstrapHost', () => {
       argv.some((part) => part.includes(`notify-v${NOTIFY_SCRIPT_VERSION}.sh`))
     )
     expect(installCall).toBeDefined()
-    expect(installCall?.[2]).toContain('grep -q "CC_PEWPEW_NOTIFY_VERSION=$5"')
+    expect(installCall?.[2]).toContain('grep -q "PEWPEW_NOTIFY_VERSION=$5"')
     expect(installCall).toContain(String(NOTIFY_SCRIPT_VERSION))
   })
 

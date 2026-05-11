@@ -63,14 +63,14 @@ export async function gitWorktrees(repoPath: string): Promise<Worktree[]> {
   }
 }
 
-function detectSetupState(repoPath: string): 'ready' | 'unsetup' {
+export function detectSetupState(repoPath: string): 'ready' | 'unsetup' {
   const settingsPath = join(repoPath, '.claude', 'settings.local.json')
   if (!existsSync(settingsPath)) return 'unsetup'
 
   try {
     const raw = readFileSync(settingsPath, 'utf-8')
     const content = JSON.stringify(JSON.parse(raw))
-    return content.includes('cc-pewpew') ? 'ready' : 'unsetup'
+    return content.includes('/pewpew/hooks/') ? 'ready' : 'unsetup'
   } catch {
     return 'unsetup'
   }

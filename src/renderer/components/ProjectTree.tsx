@@ -271,7 +271,7 @@ function useProjectTreeElement({ onOpenSession }: TreeProps) {
 
     if (setupState === 'unsetup') {
       items.push({
-        label: 'Setup for cc-pewpew',
+        label: 'Setup for pewpew',
         onClick: async () => {
           await window.api.setupProject(projectPath)
           scanProjects()
@@ -327,7 +327,7 @@ function useProjectTreeElement({ onOpenSession }: TreeProps) {
         },
       })
       items.push({
-        label: 'Re-setup for cc-pewpew',
+        label: 'Re-setup for pewpew',
         onClick: async () => {
           await window.api.setupProject(projectPath)
           scanProjects()
@@ -571,7 +571,7 @@ function useProjectTreeElement({ onOpenSession }: TreeProps) {
               )}
               {project.hostId === null &&
                 (project.setupState === 'ready' ? (
-                  <span className="badge-ready" title="cc-pewpew hooks installed">
+                  <span className="badge-ready" title="pewpew hooks installed">
                     ●
                   </span>
                 ) : (
@@ -595,7 +595,7 @@ function useProjectTreeElement({ onOpenSession }: TreeProps) {
                       {canMirror && (
                         <button
                           className="worktree-mirror-btn"
-                          title="Mirror this worktree as a cc-pewpew session"
+                          title="Mirror this worktree as a pewpew session"
                           onClick={async (e) => {
                             e.stopPropagation()
                             try {

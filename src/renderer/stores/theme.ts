@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { Theme } from '../../shared/types'
 
-const THEME_CHANGED_EVENT = 'cc-pewpew:theme-changed'
+const THEME_CHANGED_EVENT = 'pewpew:theme-changed'
 
 function applyTheme(theme: Theme): void {
   document.documentElement.dataset.theme = theme

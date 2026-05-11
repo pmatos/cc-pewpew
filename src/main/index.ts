@@ -157,7 +157,7 @@ if (process.platform === 'linux') {
     }
   }
 
-  // cc-pewpew never plays video, but Chromium still tries to bring up VA-API
+  // pewpew never plays video, but Chromium still tries to bring up VA-API
   // at startup. Inside AppImages the bundled libva can't load the host's
   // matching driver, producing a noisy `vaInitialize failed: unknown libva
   // error`. The feature-flag disable alone doesn't gate the probe in
@@ -194,7 +194,7 @@ function createWindow(): BrowserWindow {
     height: ws?.height ?? 800,
     x: ws?.x,
     y: ws?.y,
-    title: 'cc-pewpew',
+    title: 'pewpew',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -679,7 +679,7 @@ app.whenReady().then(async () => {
     const swimWindow = new BrowserWindow({
       width: 1200,
       height: 800,
-      title: `cc-pewpew — Swimming Lanes (${sessionIds.length})`,
+      title: `pewpew — Swimming Lanes (${sessionIds.length})`,
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         contextIsolation: true,
@@ -721,7 +721,7 @@ app.whenReady().then(async () => {
   //   3. stopHookServerForHost — explicit belt-and-braces for the offline
   //      path (no runtime → no callback fires); idempotent otherwise.
   //   4. Drop bootstrap cache, remote projects, and finally the host itself.
-  // Remote tmux/worktrees and the remote ~/.config/cc-pewpew/ are untouched.
+  // Remote tmux/worktrees and the remote ~/.config/pewpew/ are untouched.
   ipcMain.handle('hosts:delete', async (_event, hostId: string) => {
     removeSessionsForHost(hostId)
     await stopHostConnection(hostId).catch(() => undefined)

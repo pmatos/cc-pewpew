@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-cc-pewpew is a desktop GUI (Electron + TypeScript + React) for launching, monitoring, and visualizing Claude Code sessions with embedded terminals across git projects. See @PLAN.md for full architecture and implementation phases.
+pewpew is a desktop GUI (Electron + TypeScript + React) for launching, monitoring, and visualizing Claude Code sessions with embedded terminals across git projects. See @PLAN.md for full architecture and implementation phases.
 
 ## Stack
 
@@ -40,15 +40,15 @@ const fs = require('fs');
 const pageId = JSON.parse(require('child_process').execSync('curl -s http://127.0.0.1:9229/json/list'))[0].id;
 const socket = new ws('ws://127.0.0.1:9229/devtools/page/' + pageId);
 socket.on('open', () => socket.send(JSON.stringify({id:1, method:'Page.captureScreenshot', params:{format:'png'}})));
-socket.on('message', (d) => { const m = JSON.parse(d.toString()); if(m.result?.data) { fs.writeFileSync('/tmp/cc-pewpew-screenshot.png', Buffer.from(m.result.data,'base64')); socket.close(); }});
+socket.on('message', (d) => { const m = JSON.parse(d.toString()); if(m.result?.data) { fs.writeFileSync('/tmp/pewpew-screenshot.png', Buffer.from(m.result.data,'base64')); socket.close(); }});
 "
 ```
 
-Then `Read /tmp/cc-pewpew-screenshot.png` to view the UI visually.
+Then `Read /tmp/pewpew-screenshot.png` to view the UI visually.
 
 ### Automated UI debugging workflow
 
-Port 9229 may conflict with cc-pewpew's own tmux server. If so, use a different port:
+Port 9229 may conflict with pewpew's own tmux server. If so, use a different port:
 
 ```bash
 npx electron-vite build && npx electron --remote-debugging-port=9333 .
@@ -96,9 +96,9 @@ When debugging visual issues, **always use this approach first** rather than ask
 ## Supported agents
 
 - **Claude Code** (`claude`) — default. Uses `--continue` to resume. Hooks installed at `<worktree>/.claude/settings.local.json`.
-- **OpenAI Codex** (`codex`) — opt-in per session. Resume uses `codex resume <session_id>` (the `agentSessionId` is captured from the `SessionStart` hook payload). Hooks installed at `<worktree>/.codex/hooks.json` and gated behind `[features].codex_hooks = true` in `~/.codex/config.toml`, which cc-pewpew enables idempotently on first codex session install.
+- **OpenAI Codex** (`codex`) — opt-in per session. Resume uses `codex resume <session_id>` (the `agentSessionId` is captured from the `SessionStart` hook payload). Hooks installed at `<worktree>/.codex/hooks.json` and gated behind `[features].codex_hooks = true` in `~/.codex/config.toml`, which pewpew enables idempotently on first codex session install.
 
-The default tool is configurable via `defaultTool` in `~/.config/cc-pewpew/config.json`. Per-session selection is exposed in the "New session" dialog. Both `claude` and `codex` must be in `PATH` (locally and on every remote host where the corresponding tool is selected).
+The default tool is configurable via `defaultTool` in `~/.config/pewpew/config.json`. Per-session selection is exposed in the "New session" dialog. Both `claude` and `codex` must be in `PATH` (locally and on every remote host where the corresponding tool is selected).
 
 ## Implementation
 
@@ -115,4 +115,4 @@ Three-process Electron structure:
 
 Terminal stack: xterm.js (renderer) + node-pty (main) + tmux (persistence).
 
-User data stored in `~/.config/cc-pewpew/` (config, sessions, IPC socket, hooks).
+User data stored in `~/.config/pewpew/` (config, sessions, IPC socket, hooks).

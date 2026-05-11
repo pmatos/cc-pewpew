@@ -155,10 +155,10 @@ function HostDeleteConfirm({ host, onConfirm, onCancel }: HostDeleteConfirmProps
       }}
     >
       <div className="hosts-delete-confirm-body">
-        Forget <strong>{host.label}</strong> ({host.alias})? cc-pewpew will mark its sessions dead,
+        Forget <strong>{host.label}</strong> ({host.alias})? pewpew will mark its sessions dead,
         close its SSH connection, and remove it from your registry.{' '}
         <strong>
-          Remote tmux sessions, worktrees, and ~/.config/cc-pewpew/ on the host are not touched.
+          Remote tmux sessions, worktrees, and ~/.config/pewpew/ on the host are not touched.
         </strong>
       </div>
       <div className="create-actions">
