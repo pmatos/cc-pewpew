@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, symlinkSync, rmSync, chmodSync } from 'fs'
+import { mkdtempSync, mkdirSync, symlinkSync, rmSync, chmodSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { discoverRepos, parseWorktreeList } from './project-scanner'
+import { detectSetupState, discoverRepos, parseWorktreeList } from './project-scanner'
 
 describe('parseWorktreeList', () => {
   it('returns empty array for empty input', () => {
@@ -233,5 +233,51 @@ describe('discoverRepos', () => {
 
     // Depth 6 means the walk visits depth 1..6; 'repo' at level 7 is out of reach.
     expect(result).toEqual([])
+  })
+})
+
+describe('detectSetupState', () => {
+  let repo: string
+
+  function writeSettings(command: string): void {
+    mkdirSync(join(repo, '.claude'), { recursive: true })
+    writeFileSync(
+      join(repo, '.claude', 'settings.local.json'),
+      JSON.stringify({
+        hooks: { SessionStart: [{ hooks: [{ type: 'command', command }] }] },
+      })
+    )
+  }
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'detectSetupState-'))
+  })
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('returns unsetup when settings file is missing', () => {
+    expect(detectSetupState(repo)).toBe('unsetup')
+  })
+
+  it('returns ready for a current-path hook command', () => {
+    writeSettings('/home/user/.config/pewpew/hooks/notify.sh')
+    expect(detectSetupState(repo)).toBe('ready')
+  })
+
+  it('returns ready for a tilde-expanded hook command', () => {
+    writeSettings('~/.config/pewpew/hooks/notify.sh')
+    expect(detectSetupState(repo)).toBe('ready')
+  })
+
+  it('returns unsetup for legacy cc-pewpew XDG path', () => {
+    writeSettings('/home/user/.config/cc-pewpew/hooks/notify.sh')
+    expect(detectSetupState(repo)).toBe('unsetup')
+  })
+
+  it('returns unsetup for legacy ~/.cc-pewpew/ path', () => {
+    writeSettings('~/.cc-pewpew/hooks/notify.sh')
+    expect(detectSetupState(repo)).toBe('unsetup')
   })
 })
