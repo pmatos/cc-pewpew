@@ -96,7 +96,10 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   },
   selectAll: (projectPath) => {
     const { sessions } = get()
-    const ids = sessions.filter((s) => s.projectPath === projectPath).map((s) => s.id)
+    const ids: string[] = []
+    for (const session of sessions) {
+      if (session.projectPath === projectPath) ids.push(session.id)
+    }
     set({ selectedIds: new Set(ids), lastSelectedId: ids[ids.length - 1] ?? null })
   },
   clearSelection: () => {

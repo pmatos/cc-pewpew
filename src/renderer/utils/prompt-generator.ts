@@ -69,19 +69,21 @@ export function generatePrompt(
       }
 
       for (const ann of lineApprovals) {
+        const selectedLines = ann.selectedLines!
         const linePart =
-          ann.selectedLines!.start === ann.selectedLines!.end
-            ? ` on line ${ann.selectedLines!.start}`
-            : ` on lines ${ann.selectedLines!.start}-${ann.selectedLines!.end}`
+          selectedLines.start === selectedLines.end
+            ? ` on line ${selectedLines.start}`
+            : ` on lines ${selectedLines.start}-${selectedLines.end}`
         const textPart = ann.selectedText ? ` (\`${ann.selectedText}\`)` : ''
         items.push(`**Approved**${linePart}${textPart}`)
       }
 
       for (const ann of anns.filter((a) => a.decision === 'commented')) {
-        const linePart = ann.selectedLines
-          ? ann.selectedLines.start === ann.selectedLines.end
-            ? ` on line ${ann.selectedLines.start}`
-            : ` on lines ${ann.selectedLines.start}-${ann.selectedLines.end}`
+        const selectedLines = ann.selectedLines
+        const linePart = selectedLines
+          ? selectedLines.start === selectedLines.end
+            ? ` on line ${selectedLines.start}`
+            : ` on lines ${selectedLines.start}-${selectedLines.end}`
           : ''
         const textPart = ann.selectedText ? ` (\`${ann.selectedText}\`)` : ''
         items.push(`**Comment**${linePart}${textPart}:\n${ann.comment ?? ''}`)

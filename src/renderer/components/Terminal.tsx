@@ -125,6 +125,14 @@ export default function Terminal({ sessionId }: Props) {
       await window.api.ptyResize(sessionId, cols, rows)
     }
 
+    const flushPendingPtyData = async (): Promise<void> => {
+      if (aborted || !pendingPtyData) return
+      const data = pendingPtyData
+      pendingPtyData = ''
+      await new Promise<void>((resolve) => term.write(data, resolve))
+      await flushPendingPtyData()
+    }
+
     // Defer term.open() until fonts are loaded and layout is stable.
     // Opening before fonts causes xterm to render with wrong glyph metrics,
     // producing garbled output on Wayland with fractional DPR.
@@ -166,12 +174,8 @@ export default function Terminal({ sessionId }: Props) {
 
         await syncTerminal(true)
         if (aborted) return
-        while (pendingPtyData) {
-          const data = pendingPtyData
-          pendingPtyData = ''
-          await new Promise<void>((resolve) => term.write(data, resolve))
-          if (aborted) return
-        }
+        await flushPendingPtyData()
+        if (aborted) return
         readyForPtyData = true
 
         await new Promise((r) => setTimeout(r, 120))

@@ -480,10 +480,13 @@ export function discoverTmuxSessions(): string[] {
       encoding: 'utf-8',
       timeout: 5000,
     })
-    return output
-      .split('\n')
-      .filter((name) => name.startsWith('cc-pewpew-'))
-      .map((name) => name.replace('cc-pewpew-', ''))
+    const sessions: string[] = []
+    for (const name of output.split('\n')) {
+      if (name.startsWith('cc-pewpew-')) {
+        sessions.push(name.replace('cc-pewpew-', ''))
+      }
+    }
+    return sessions
   } catch {
     return []
   }

@@ -11,10 +11,10 @@ async function gitBranches(repoPath: string): Promise<string[]> {
     const { stdout } = await execFileAsync('git', ['-C', repoPath, 'branch', '--list'], {
       timeout: 5000,
     })
-    return stdout
-      .split('\n')
-      .map((line) => line.replace(/^\*?\s+/, '').trim())
-      .filter(Boolean)
+    return stdout.split('\n').flatMap((line) => {
+      const branch = line.replace(/^\*?\s+/, '').trim()
+      return branch ? [branch] : []
+    })
   } catch {
     return []
   }
@@ -191,12 +191,16 @@ export async function scanProjects(
   const repos = discoverRepos(scanDirs, pinnedPaths || [], followSymlinks ?? true, scanDepth ?? 3)
   const projects: Project[] = []
 
-  // Process in batches to avoid spawning hundreds of git processes
-  for (let i = 0; i < repos.length; i += CONCURRENCY) {
-    const batch = repos.slice(i, i + CONCURRENCY)
+  async function enrichBatch(start: number): Promise<void> {
+    if (start >= repos.length) return
+    const batch = repos.slice(start, start + CONCURRENCY)
     const results = await Promise.all(batch.map(enrichRepo))
     projects.push(...results)
+    await enrichBatch(start + CONCURRENCY)
   }
+
+  // Process in batches to avoid spawning hundreds of git processes.
+  await enrichBatch(0)
 
   return projects.sort((a, b) => a.name.localeCompare(b.name))
 }
