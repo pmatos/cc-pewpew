@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { join, resolve } from 'path'
 import { copyFileSync, mkdirSync, chmodSync } from 'fs'
+import { readFile, stat } from 'fs/promises'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import {
   getConfig,
   saveConfig,
@@ -73,6 +76,8 @@ import type {
   ReviewDiffResult,
   ValidateRemoteRepoReason,
 } from '../shared/types'
+
+const execFileAsync = promisify(execFile)
 
 // Use native Wayland rendering when available (avoids Xwayland scaling artifacts)
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
@@ -262,9 +267,6 @@ app.whenReady().then(async () => {
   ipcMain.handle('projects:create', async (_event, name: string) => {
     const config = getConfig()
     const dir = resolvePath(config.scanDirs[0] || '~/dev')
-    const { execFile } = await import('child_process')
-    const { promisify } = await import('util')
-    const execFileAsync = promisify(execFile)
     const repoPath = join(dir, name)
     mkdirSync(repoPath, { recursive: true })
     await execFileAsync('git', ['init', repoPath])
@@ -332,11 +334,10 @@ app.whenReady().then(async () => {
     checkPaths: string[]
   ): Promise<'gitignore' | undefined> {
     if (!shouldWarnGitignore(projectPath) || checkPaths.length === 0) return undefined
-    for (const p of checkPaths) {
-      if (!(await isSettingsGitignored(p))) {
-        markGitignoreWarned(projectPath)
-        return 'gitignore'
-      }
+    const ignored = await Promise.all(checkPaths.map(isSettingsGitignored))
+    if (ignored.some((isIgnored) => !isIgnored)) {
+      markGitignoreWarned(projectPath)
+      return 'gitignore'
     }
     // All checked worktrees ignore the file. Leave the project un-warned so a
     // later mirror of a branch that doesn't ignore it can still surface the
@@ -408,33 +409,39 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('sessions:kill-batch', async (_event, ids: string[]) => {
-    for (const id of ids) {
-      try {
-        await killSession(id)
-      } catch (err) {
-        console.error(`Failed to kill session ${id}:`, err)
-      }
-    }
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          await killSession(id)
+        } catch (err) {
+          console.error(`Failed to kill session ${id}:`, err)
+        }
+      })
+    )
   })
 
   ipcMain.handle('sessions:revive-batch', async (_event, ids: string[]) => {
-    for (const id of ids) {
-      try {
-        await reviveSession(id)
-      } catch (err) {
-        console.error(`Failed to revive session ${id}:`, err)
-      }
-    }
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          await reviveSession(id)
+        } catch (err) {
+          console.error(`Failed to revive session ${id}:`, err)
+        }
+      })
+    )
   })
 
   ipcMain.handle('sessions:remove-batch', async (_event, ids: string[]) => {
-    for (const id of ids) {
-      try {
-        await removeSession(id)
-      } catch (err) {
-        console.error(`Failed to remove session ${id}:`, err)
-      }
-    }
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          await removeSession(id)
+        } catch (err) {
+          console.error(`Failed to remove session ${id}:`, err)
+        }
+      })
+    )
   })
 
   ipcMain.handle('pty:write', (_event, sessionId: string, data: string) => {
@@ -471,21 +478,17 @@ app.whenReady().then(async () => {
         return { ok: false, reason: 'remote-unsupported' }
       }
       const cwd = session.worktreePath || session.projectPath
-      const { execFile: execFileCb } = await import('child_process')
-      const { promisify: pfy } = await import('util')
-      const { readFile } = await import('fs/promises')
-      const execAsync = pfy(execFileCb)
 
       let diffArgs: string[]
       switch (mode) {
         case 'uncommitted': {
           // Check if HEAD exists — new repos with no commits have no HEAD
           try {
-            await execAsync('git', ['rev-parse', 'HEAD'], { cwd })
+            await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd })
             diffArgs = ['diff', 'HEAD']
           } catch {
             // No HEAD: diff staged+unstaged against the empty tree
-            const { stdout: emptyTree } = await execAsync(
+            const { stdout: emptyTree } = await execFileAsync(
               'git',
               ['hash-object', '-t', 'tree', '/dev/null'],
               { cwd }
@@ -502,24 +505,31 @@ app.whenReady().then(async () => {
           break
       }
 
-      const { stdout: rawDiff } = await execAsync('git', diffArgs, { cwd, maxBuffer: 10_000_000 })
+      const { stdout: rawDiff } = await execFileAsync('git', diffArgs, {
+        cwd,
+        maxBuffer: 10_000_000,
+      })
       const files = parseDiff(rawDiff)
 
       if (mode === 'uncommitted') {
-        const { stdout: untrackedRaw } = await execAsync(
+        const { stdout: untrackedRaw } = await execFileAsync(
           'git',
           ['ls-files', '--others', '--exclude-standard'],
           { cwd }
         )
-        const { stat } = await import('fs/promises')
         const untrackedPaths = untrackedRaw.split('\n').filter(Boolean)
         const MAX_FILE_SIZE = 1_000_000 // 1MB
-        for (const filePath of untrackedPaths) {
-          const fullPath = join(cwd, filePath)
-          const fileStat = await stat(fullPath).catch(() => null)
-          if (!fileStat || fileStat.size > MAX_FILE_SIZE) continue
-          const content = await readFile(fullPath, 'utf-8').catch(() => '')
-          files.push(synthesizeUntrackedFile(filePath, content))
+        const untrackedFiles = await Promise.all(
+          untrackedPaths.map(async (filePath) => {
+            const fullPath = join(cwd, filePath)
+            const fileStat = await stat(fullPath).catch(() => null)
+            if (!fileStat || fileStat.size > MAX_FILE_SIZE) return null
+            const content = await readFile(fullPath, 'utf-8').catch(() => '')
+            return synthesizeUntrackedFile(filePath, content)
+          })
+        )
+        for (const file of untrackedFiles) {
+          if (file) files.push(file)
         }
       }
 
@@ -536,10 +546,7 @@ app.whenReady().then(async () => {
         return { ok: false, reason: 'remote-unsupported' }
       }
       const cwd = session.worktreePath || session.projectPath
-      const { execFile: execFileCb } = await import('child_process')
-      const { promisify: pfy } = await import('util')
-      const execAsync = pfy(execFileCb)
-      const { stdout } = await execAsync('git', ['branch', '-a', '--format=%(refname:short)'], {
+      const { stdout } = await execFileAsync('git', ['branch', '-a', '--format=%(refname:short)'], {
         cwd,
       })
       return { ok: true, branches: stdout.split('\n').filter(Boolean) }
@@ -555,13 +562,14 @@ app.whenReady().then(async () => {
         return { ok: false, reason: 'remote-unsupported' }
       }
       const cwd = session.worktreePath || session.projectPath
-      const { execFile: execFileCb } = await import('child_process')
-      const { promisify: pfy } = await import('util')
-      const execAsync = pfy(execFileCb)
       try {
-        const { stdout } = await execAsync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
-          cwd,
-        })
+        const { stdout } = await execFileAsync(
+          'git',
+          ['symbolic-ref', 'refs/remotes/origin/HEAD'],
+          {
+            cwd,
+          }
+        )
         const ref = stdout.trim()
         return { ok: true, branch: ref.replace('refs/remotes/origin/', '') }
       } catch {

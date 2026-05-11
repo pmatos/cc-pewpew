@@ -192,11 +192,12 @@ export async function bootstrapHost(
     )
   }
 
-  const agentPaths = await resolveRemoteAgents(connection, cachedAgentPaths)
-
-  const socketProbe = await connection.exec(['sh', '-c', 'test -S "$1"', '_', remoteSocketPath], {
-    timeoutMs: 5000,
-  })
+  const [agentPaths, socketProbe] = await Promise.all([
+    resolveRemoteAgents(connection, cachedAgentPaths),
+    connection.exec(['sh', '-c', 'test -S "$1"', '_', remoteSocketPath], {
+      timeoutMs: 5000,
+    }),
+  ])
   if (socketProbe.code !== 0 || socketProbe.timedOut) {
     throw new HostBootstrapError(
       'stream-local-bind',

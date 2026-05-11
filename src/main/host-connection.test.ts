@@ -51,8 +51,10 @@ vi.mock('child_process', () => ({
 }))
 
 vi.mock('./config', async () => {
-  const { tmpdir: getTmpDir } = await import('os')
-  const { join: pathJoin } = await import('path')
+  const [{ tmpdir: getTmpDir }, { join: pathJoin }] = await Promise.all([
+    import('os'),
+    import('path'),
+  ])
   return {
     CONFIG_DIR: pathJoin(getTmpDir(), `cc-pewpew-host-connection-test-${process.pid}`),
   }

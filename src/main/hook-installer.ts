@@ -81,6 +81,10 @@ function parseAsObject(raw: string): Record<string, unknown> {
   return {}
 }
 
+function isExternalHook(entry: unknown): boolean {
+  return !/cc-pewpew/.test(JSON.stringify(entry))
+}
+
 export async function installHooks(
   projectPath: string,
   { skipGitignore = false }: { skipGitignore?: boolean } = {}
@@ -98,10 +102,7 @@ export async function installHooks(
   const merged: Record<string, unknown[]> = { ...existingHooks }
 
   for (const [event, entries] of Object.entries(newHooks)) {
-    const kept = (existingHooks[event] || []).filter((entry) => {
-      const json = JSON.stringify(entry)
-      return !json.includes('cc-pewpew')
-    })
+    const kept = (existingHooks[event] || []).filter(isExternalHook)
     merged[event] = [...kept, ...entries]
   }
 
@@ -195,10 +196,7 @@ export async function installCodexHooks(
   const merged: Record<string, unknown[]> = { ...existingHooks }
 
   for (const [event, entries] of Object.entries(newHooks)) {
-    const kept = (existingHooks[event] || []).filter((entry) => {
-      const json = JSON.stringify(entry)
-      return !json.includes('cc-pewpew')
-    })
+    const kept = (existingHooks[event] || []).filter(isExternalHook)
     merged[event] = [...kept, ...entries]
   }
 
