@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { join, resolve } from 'path'
 import { copyFileSync, mkdirSync, chmodSync } from 'fs'
-import { readFile, stat } from 'fs/promises'
+import { open as openFile } from 'fs/promises'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import {
@@ -78,6 +78,19 @@ import type {
 } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
+
+async function readTextFileUnderLimit(path: string, maxBytes: number): Promise<string | null> {
+  const file = await openFile(path, 'r')
+  try {
+    const fileStat = await file.stat()
+    if (!fileStat.isFile() || fileStat.size > maxBytes) return null
+
+    const content = await file.readFile('utf-8')
+    return Buffer.byteLength(content, 'utf-8') > maxBytes ? null : content
+  } finally {
+    await file.close()
+  }
+}
 
 // Use native Wayland rendering when available (avoids Xwayland scaling artifacts)
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
@@ -522,9 +535,8 @@ app.whenReady().then(async () => {
         const untrackedFiles = await Promise.all(
           untrackedPaths.map(async (filePath) => {
             const fullPath = join(cwd, filePath)
-            const fileStat = await stat(fullPath).catch(() => null)
-            if (!fileStat || fileStat.size > MAX_FILE_SIZE) return null
-            const content = await readFile(fullPath, 'utf-8').catch(() => '')
+            const content = await readTextFileUnderLimit(fullPath, MAX_FILE_SIZE).catch(() => null)
+            if (content === null) return null
             return synthesizeUntrackedFile(filePath, content)
           })
         )
