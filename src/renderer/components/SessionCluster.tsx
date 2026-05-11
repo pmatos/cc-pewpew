@@ -94,7 +94,7 @@ export default function SessionCluster({
     ...(isOrphaned
       ? [
           { separator: true } as MenuItem,
-          { label: 'Locate moved project...', onClick: handleLocateProject } as MenuItem,
+          { label: 'Locate moved project…', onClick: handleLocateProject } as MenuItem,
         ]
       : []),
   ]
@@ -109,14 +109,15 @@ export default function SessionCluster({
         borderColor: accentColor,
       }}
     >
-      <div
+      <button
+        type="button"
         className={`cluster-header${isOrphaned ? ' cluster-header--orphaned' : ''}`}
         style={isOrphaned ? undefined : { color: accentColor }}
         onMouseDown={handleMouseDown}
         onContextMenu={handleHeaderContextMenu}
       >
         {projectName}
-      </div>
+      </button>
       <div
         className="cluster-cards"
         style={{ gridTemplateColumns: `repeat(${Math.min(sessions.length, 2)}, 240px)` }}

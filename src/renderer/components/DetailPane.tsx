@@ -138,7 +138,7 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
                 terminal in the same worktree.
               </p>
               <button className="dead-session-restart" onClick={handleRevive} disabled={reviving}>
-                {reviving ? 'Restarting...' : 'Restart terminal'}
+                {reviving ? 'Restarting…' : 'Restart terminal'}
               </button>
             </div>
           </div>
@@ -185,7 +185,7 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
                 onClick={handleReconnect}
                 disabled={reconnecting || isConnecting}
               >
-                {reconnecting || isConnecting ? 'Connecting...' : isPending ? 'Connect' : 'Retry'}
+                {reconnecting || isConnecting ? 'Connecting…' : isPending ? 'Connect' : 'Retry'}
               </button>
             </div>
           </div>

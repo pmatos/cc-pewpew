@@ -47,16 +47,17 @@ function BroadcastDialogContent() {
   return (
     <div
       className="broadcast-dialog-overlay"
+      role="presentation"
       onClick={closeBroadcastDialog}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="broadcast-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="broadcast-dialog" role="presentation" onClick={(e) => e.stopPropagation()}>
         <div className="session-name-label">Send command to {selectedIds.size} sessions</div>
         <input
           ref={inputRef}
           type="text"
           className="create-input"
-          placeholder="Type a command..."
+          placeholder="Type a command…"
           value={command}
           onChange={(e) => setCommand(e.target.value)}
           onKeyDown={handleKeyDown}

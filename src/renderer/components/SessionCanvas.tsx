@@ -511,6 +511,8 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
     <div
       className="canvas-viewport"
       ref={viewportRef}
+      role="application"
+      tabIndex={0}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}

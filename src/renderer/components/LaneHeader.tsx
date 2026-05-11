@@ -10,7 +10,7 @@ export default function LaneHeader({ session, focused }: Props) {
   if (!session) {
     return (
       <div className="lane-header">
-        <span className="lane-header-name">Loading...</span>
+        <span className="lane-header-name">Loading…</span>
       </div>
     )
   }
