@@ -80,6 +80,15 @@ vi.mock('./notifications', () => ({
   emitToast: vi.fn(),
 }))
 
+vi.mock('electron', () => ({
+  dialog: {
+    showMessageBox: async () => ({ response: 1 }),
+  },
+  shell: {
+    openPath: async () => '',
+  },
+}))
+
 vi.mock('./project-scanner', () => ({
   getRepoFingerprint: vi.fn(async () => state.repoFingerprint),
   gitWorktrees: vi.fn(async () => []),
