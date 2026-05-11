@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import { useHostsStore } from '../stores/hosts'
 import type { Host, HostId, TestConnectionResult } from '../../shared/types'
 
@@ -23,6 +23,28 @@ interface HostFormProps {
   onCancel: () => void
 }
 
+interface HostFormState {
+  alias: string
+  label: string
+  submitting: boolean
+}
+
+type HostFormAction =
+  | { type: 'alias'; value: string }
+  | { type: 'label'; value: string }
+  | { type: 'submitting'; value: boolean }
+
+function hostFormReducer(state: HostFormState, action: HostFormAction): HostFormState {
+  switch (action.type) {
+    case 'alias':
+      return { ...state, alias: action.value }
+    case 'label':
+      return { ...state, label: action.value }
+    case 'submitting':
+      return { ...state, submitting: action.value }
+  }
+}
+
 function HostForm({
   initialAlias = '',
   initialLabel = '',
@@ -30,26 +52,28 @@ function HostForm({
   onSubmit,
   onCancel,
 }: HostFormProps) {
-  const [alias, setAlias] = useState(initialAlias)
-  const [label, setLabel] = useState(initialLabel)
-  const [submitting, setSubmitting] = useState(false)
+  const [form, dispatch] = useReducer(hostFormReducer, {
+    alias: initialAlias,
+    label: initialLabel,
+    submitting: false,
+  })
   const aliasInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     aliasInputRef.current?.focus()
   }, [])
 
-  const canSubmit = alias.trim().length > 0 && label.trim().length > 0 && !submitting
+  const canSubmit = form.alias.trim().length > 0 && form.label.trim().length > 0 && !form.submitting
 
   const handleSubmit = async () => {
     if (!canSubmit) return
-    setSubmitting(true)
+    dispatch({ type: 'submitting', value: true })
     try {
-      await onSubmit(alias.trim(), label.trim())
+      await onSubmit(form.alias.trim(), form.label.trim())
     } catch {
       // Error shown via store.error; keep the form open so the user can retry.
     } finally {
-      setSubmitting(false)
+      dispatch({ type: 'submitting', value: false })
     }
   }
 
@@ -69,23 +93,23 @@ function HostForm({
         type="text"
         className="create-input"
         placeholder="Host from ~/.ssh/config (e.g. devbox)"
-        value={alias}
-        onChange={(e) => setAlias(e.target.value)}
+        value={form.alias}
+        onChange={(e) => dispatch({ type: 'alias', value: e.target.value })}
         onKeyDown={handleKey}
       />
       <input
         type="text"
         className="create-input"
         placeholder="Short label (e.g. Dev box)"
-        value={label}
-        onChange={(e) => setLabel(e.target.value)}
+        value={form.label}
+        onChange={(e) => dispatch({ type: 'label', value: e.target.value })}
         onKeyDown={handleKey}
       />
       <div className="create-actions">
         <button className="create-btn" disabled={!canSubmit} onClick={handleSubmit}>
           {submitLabel}
         </button>
-        <button className="create-btn cancel" onClick={onCancel} disabled={submitting}>
+        <button className="create-btn cancel" onClick={onCancel} disabled={form.submitting}>
           Cancel
         </button>
       </div>

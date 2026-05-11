@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo, useLayoutEffect } from 'react'
+import { useEffect, useRef, useCallback, useMemo, useLayoutEffect, useReducer } from 'react'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
 import { useCanvasStore } from '../stores/canvas'
@@ -79,7 +79,28 @@ interface CanvasProps {
   morphActive?: boolean
 }
 
-export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }: CanvasProps) {
+interface CanvasViewState {
+  zoom: number
+  panX: number
+  panY: number
+  loaded: boolean
+  dragging: boolean
+  clusterPositions: Record<string, { x: number; y: number }>
+  viewportSize: { width: number; height: number }
+}
+
+function canvasViewReducer(
+  state: CanvasViewState,
+  update: Partial<CanvasViewState>
+): CanvasViewState {
+  return { ...state, ...update }
+}
+
+export default function SessionCanvas(props: CanvasProps) {
+  return useSessionCanvasElement(props)
+}
+
+function useSessionCanvasElement({ onOpenSession, onZoomOpen, morphActive }: CanvasProps) {
   const { sessions, thumbnails, toggleSelect, rangeSelect, clearSelection } = useSessionsStore()
   const broadcastDialogOpen = useSessionsStore((s) => s.broadcastDialogOpen)
   const theme = useThemeStore((s) => s.theme)
@@ -88,19 +109,18 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
   const viewportRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLCanvasElement>(null)
 
-  const [zoom, setZoom] = useState(0.7)
-  const [panX, setPanX] = useState(0)
-  const [panY, setPanY] = useState(0)
-  const [loaded, setLoaded] = useState(false)
-
-  const [dragging, setDragging] = useState(false)
+  const [view, updateView] = useReducer(canvasViewReducer, {
+    zoom: 0.7,
+    panX: 0,
+    panY: 0,
+    loaded: false,
+    dragging: false,
+    clusterPositions: {},
+    viewportSize: { width: 0, height: 0 },
+  })
+  const { zoom, panX, panY, loaded, dragging, clusterPositions, viewportSize } = view
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-
-  const [clusterPositions, setClusterPositions] = useState<
-    Record<string, { x: number; y: number }>
-  >({})
-  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
 
   const setPanToCluster = useCanvasStore((s) => s.setPanToCluster)
   const panXRef = useRef(panX)
@@ -170,15 +190,16 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
   useEffect(() => {
     Promise.all([window.api.getCanvasState(), window.api.getClusterPositions()]).then(
       ([canvasState, positions]) => {
+        const update: Partial<CanvasViewState> = { loaded: true }
         if (canvasState) {
-          setZoom(canvasState.zoom)
-          setPanX(canvasState.panX)
-          setPanY(canvasState.panY)
+          update.zoom = canvasState.zoom
+          update.panX = canvasState.panX
+          update.panY = canvasState.panY
         }
         if (positions) {
-          setClusterPositions(positions)
+          update.clusterPositions = positions
         }
-        setLoaded(true)
+        updateView(update)
       }
     )
   }, [])
@@ -212,8 +233,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
         const ease = 1 - Math.pow(1 - t, 3)
         const newPanX = startPanX + (targetPanX - startPanX) * ease
         const newPanY = startPanY + (targetPanY - startPanY) * ease
-        setPanX(newPanX)
-        setPanY(newPanY)
+        updateView({ panX: newPanX, panY: newPanY })
         if (t < 1) {
           requestAnimationFrame(animate)
         } else {
@@ -246,7 +266,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
     if (!viewport) return
     const updateSize = () => {
       const rect = viewport.getBoundingClientRect()
-      setViewportSize({ width: rect.width, height: rect.height })
+      updateView({ viewportSize: { width: rect.width, height: rect.height } })
     }
     updateSize()
     const observer = new ResizeObserver(updateSize)
@@ -333,25 +353,19 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
 
       if (e.key === '0') {
         e.preventDefault()
-        setZoom(0.7)
-        setPanX(0)
-        setPanY(0)
+        updateView({ zoom: 0.7, panX: 0, panY: 0 })
         persistCanvas(0.7, 0, 0)
       } else if (e.key === '=' || e.key === '+') {
         e.preventDefault()
         const cap = computeMaxZoom(viewportSize.width, viewportSize.height)
-        setZoom((prev) => {
-          const next = Math.min(cap, prev + KEYBOARD_ZOOM_STEP)
-          persistCanvas(next, panX, panY)
-          return next
-        })
+        const next = Math.min(cap, zoomRef.current + KEYBOARD_ZOOM_STEP)
+        updateView({ zoom: next })
+        persistCanvas(next, panXRef.current, panYRef.current)
       } else if (e.key === '-') {
         e.preventDefault()
-        setZoom((prev) => {
-          const next = Math.max(MIN_ZOOM, prev - KEYBOARD_ZOOM_STEP)
-          persistCanvas(next, panX, panY)
-          return next
-        })
+        const next = Math.max(MIN_ZOOM, zoomRef.current - KEYBOARD_ZOOM_STEP)
+        updateView({ zoom: next })
+        persistCanvas(next, panXRef.current, panYRef.current)
       }
     }
     document.addEventListener('keydown', handler)
@@ -368,16 +382,15 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
       const cy = e.clientY - rect.top
 
       const cap = computeMaxZoom(rect.width, rect.height)
-      setZoom((prevZoom) => {
-        const zoomDelta = -e.deltaY * ZOOM_SENSITIVITY * prevZoom
-        const newZoom = Math.max(MIN_ZOOM, Math.min(cap, prevZoom + zoomDelta))
-        const newPanX = cx - (cx - panX) * (newZoom / prevZoom)
-        const newPanY = cy - (cy - panY) * (newZoom / prevZoom)
-        setPanX(newPanX)
-        setPanY(newPanY)
-        persistCanvas(newZoom, newPanX, newPanY)
-        return newZoom
-      })
+      const prevZoom = zoomRef.current
+      const prevPanX = panXRef.current
+      const prevPanY = panYRef.current
+      const zoomDelta = -e.deltaY * ZOOM_SENSITIVITY * prevZoom
+      const newZoom = Math.max(MIN_ZOOM, Math.min(cap, prevZoom + zoomDelta))
+      const newPanX = cx - (cx - prevPanX) * (newZoom / prevZoom)
+      const newPanY = cy - (cy - prevPanY) * (newZoom / prevZoom)
+      updateView({ zoom: newZoom, panX: newPanX, panY: newPanY })
+      persistCanvas(newZoom, newPanX, newPanY)
 
       // Zoom-to-open detection (wheel-only path).
       // Guards: no modal, not mid-drag, no automated pan, not already fired.
@@ -434,7 +447,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
         thumbnail: thumbnails[sessionId],
       })
     },
-    [panX, panY, persistCanvas, broadcastDialogOpen, dragging, sessions, thumbnails, onZoomOpen]
+    [persistCanvas, broadcastDialogOpen, dragging, sessions, thumbnails, onZoomOpen]
   )
 
   const handleSelect = useCallback(
@@ -461,7 +474,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
       if (target.closest('.session-cluster')) return
 
       clearSelection()
-      setDragging(true)
+      updateView({ dragging: true })
       dragStart.current = { x: e.clientX, y: e.clientY, panX, panY }
     },
     [panX, panY, clearSelection]
@@ -472,15 +485,14 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
       if (!dragging) return
       const dx = e.clientX - dragStart.current.x
       const dy = e.clientY - dragStart.current.y
-      setPanX(dragStart.current.panX + dx)
-      setPanY(dragStart.current.panY + dy)
+      updateView({ panX: dragStart.current.panX + dx, panY: dragStart.current.panY + dy })
     },
     [dragging]
   )
 
   const handleMouseUp = useCallback(() => {
     if (dragging) {
-      setDragging(false)
+      updateView({ dragging: false })
       persistCanvas(zoom, panX, panY)
     }
   }, [dragging, zoom, panX, panY, persistCanvas])
@@ -488,7 +500,7 @@ export default function SessionCanvas({ onOpenSession, onZoomOpen, morphActive }
   const handleClusterDrag = useCallback((projectPath: string, pos: { x: number; y: number }) => {
     const next = { ...clusterPositionsRef.current, [projectPath]: pos }
     clusterPositionsRef.current = next
-    setClusterPositions(next)
+    updateView({ clusterPositions: next })
   }, [])
 
   const handleClusterDragEnd = useCallback(() => {

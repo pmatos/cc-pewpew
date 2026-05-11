@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useEffectEvent } from 'react'
 import Terminal from './Terminal'
 import ReviewOverlay from './ReviewOverlay'
 import { useSessionsStore } from '../stores/sessions'
@@ -53,40 +53,44 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
   // keeps codex sessions out of the flip path entirely.
   const reviewEnabled = !session || session.tool === 'claude'
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === 'r' && reviewEnabled) {
+  const handleDocumentKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (e.ctrlKey && e.key === 'r' && reviewEnabled) {
+      e.preventDefault()
+      e.stopPropagation()
+      setFlipCount((c) => {
+        const next = c + 1
+        if (next % 2 === 0) {
+          // Flipping back to terminal — refocus after animation
+          refocusTerminal()
+        }
+        return next
+      })
+      return
+    }
+
+    if (e.key === 'Escape') {
+      if (reviewOpen) {
         e.preventDefault()
         e.stopPropagation()
-        setFlipCount((c) => {
-          const next = c + 1
-          if (next % 2 === 0) {
-            // Flipping back to terminal — refocus after animation
-            refocusTerminal()
-          }
-          return next
-        })
+        closeReview()
         return
       }
-
-      if (e.key === 'Escape') {
-        if (reviewOpen) {
-          e.preventDefault()
-          e.stopPropagation()
-          closeReview()
-          return
-        }
-        const target = e.target as HTMLElement
-        const isTerminalFocused = target.closest('.terminal-container')
-        if (!isTerminalFocused) {
-          e.stopPropagation()
-          onClose()
-        }
+      const target = e.target as HTMLElement
+      const isTerminalFocused = target.closest('.terminal-container')
+      if (!isTerminalFocused) {
+        e.stopPropagation()
+        onClose()
       }
+    }
+  })
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      handleDocumentKeyDown(e)
     }
     document.addEventListener('keydown', handler, true)
     return () => document.removeEventListener('keydown', handler, true)
-  }, [onClose, reviewOpen, closeReview, refocusTerminal, reviewEnabled])
+  }, [])
 
   const handleRevive = async () => {
     setReviving(true)
