@@ -1579,20 +1579,33 @@ async function createSessionsForNumbers(
   const created: Session[] = []
   const failed: { number: number; error: string }[] = []
   type CreateSessionResult = { session: Session } | { number: number; error: string }
-
-  const results: CreateSessionResult[] = await Promise.all(
-    toCreate.map(async (item) => {
-      try {
-        const result = await createSession(projectPath, item.number, hostId, options)
-        if (typeof result === 'string') {
-          return { number: item.number, error: result }
-        }
-        return { session: result }
-      } catch (err) {
-        return { number: item.number, error: describeGhError(err) }
+  const createOne = async (item: { number: number }): Promise<CreateSessionResult> => {
+    try {
+      const result = await createSession(projectPath, item.number, hostId, options)
+      if (typeof result === 'string') {
+        return { number: item.number, error: result }
       }
-    })
-  )
+      return { session: result }
+    } catch (err) {
+      return { number: item.number, error: describeGhError(err) }
+    }
+  }
+
+  const effectiveTool = options.tool ?? getConfig().defaultTool
+  const createSerially = async (
+    index: number,
+    results: CreateSessionResult[]
+  ): Promise<CreateSessionResult[]> => {
+    const item = toCreate[index]
+    if (!item) return results
+    results.push(await createOne(item))
+    return createSerially(index + 1, results)
+  }
+
+  const results: CreateSessionResult[] =
+    hostId !== null && effectiveTool === 'codex'
+      ? await createSerially(0, [])
+      : await Promise.all(toCreate.map((item) => createOne(item)))
 
   for (const result of results) {
     if ('session' in result) {
