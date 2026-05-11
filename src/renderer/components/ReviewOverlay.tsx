@@ -364,7 +364,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
                       setConfirmAction(null)
                     }}
                   >
-                    Continue
+                    Omit unreviewed
                   </button>
                 </div>
               </div>
@@ -393,7 +393,7 @@ export default function ReviewOverlay({ sessionId, onClose }: Props) {
                       setPendingBranch(null)
                     }}
                   >
-                    Continue
+                    Switch mode
                   </button>
                 </div>
               </div>

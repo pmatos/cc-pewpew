@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 
 export interface MenuItem {
   label: string
+  id?: string
   disabled?: boolean
   separator?: boolean
   onClick: () => void
@@ -60,6 +61,8 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
     }
   }, [onClose])
 
+  let separatorCount = 0
+
   return createPortal(
     <div
       className="context-menu"
@@ -68,12 +71,16 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
       style={{ left: x, top: y }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {items.map((item, i) =>
+      {items.map((item) =>
         item.separator ? (
-          <div key={i} className="context-menu-separator" role="separator" />
+          <div
+            key={item.id ?? `separator-${separatorCount++}`}
+            className="context-menu-separator"
+            role="separator"
+          />
         ) : (
           <button
-            key={i}
+            key={item.id ?? item.label}
             role="menuitem"
             className={`context-menu-item${item.disabled ? ' disabled' : ''}`}
             disabled={item.disabled}

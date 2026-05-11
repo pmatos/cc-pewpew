@@ -27,6 +27,7 @@ export default function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [activeSessionName, setActiveSessionName] = useState('')
   const [morphPayload, setMorphPayload] = useState<ZoomOpenPayload | null>(null)
+  const createProjectInputRef = useRef<HTMLInputElement>(null)
 
   const handleZoomOpen = useCallback((payload: ZoomOpenPayload) => {
     // Keep canvas rendered during the morph; mount DetailPane only on morph grown.
@@ -46,6 +47,10 @@ export default function App() {
   useEffect(() => {
     return initSessions()
   }, [initSessions])
+
+  useEffect(() => {
+    if (showCreateDialog) createProjectInputRef.current?.focus()
+  }, [showCreateDialog])
 
   // Subscribe to open-detail IPC from tray/notifications
   useEffect(() => {
@@ -177,16 +182,16 @@ export default function App() {
           {showCreateDialog ? (
             <div className="create-dialog">
               <input
+                ref={createProjectInputRef}
                 type="text"
                 className="create-input"
-                placeholder="Project name..."
+                placeholder="Project name…"
                 value={newProjectName}
                 onChange={(e) => setNewProjectName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleCreate()
                   if (e.key === 'Escape') setShowCreateDialog(false)
                 }}
-                autoFocus
               />
               <div className="create-actions">
                 <button className="create-btn" onClick={handleCreate}>
@@ -223,7 +228,12 @@ export default function App() {
         </div>
       </aside>
 
-      <div className="sidebar-resizer" onMouseDown={handleResizeStart} />
+      <div
+        className="sidebar-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        onMouseDown={handleResizeStart}
+      />
 
       <main className="canvas">
         {activeSessionId ? (

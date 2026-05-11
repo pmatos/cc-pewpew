@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useProjectsStore } from '../stores/projects'
 import { useSessionsStore } from '../stores/sessions'
 import { useHostsStore } from '../stores/hosts'
@@ -39,6 +39,8 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   const [prNumberInput, setPrNumberInput] = useState('')
   const [prError, setPrError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const sessionNameInputRef = useRef<HTMLInputElement>(null)
+  const prNumberInputRef = useRef<HTMLInputElement>(null)
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -64,6 +66,14 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (pendingSessionPath) sessionNameInputRef.current?.focus()
+  }, [pendingSessionPath])
+
+  useEffect(() => {
+    if (pendingPrPath) prNumberInputRef.current?.focus()
+  }, [pendingPrPath])
 
   const toggle = (path: string) => {
     setExpanded((prev) => {
@@ -171,13 +181,13 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
     if (menu.hostId !== null) {
       const hostId = menu.hostId
       items.push({
-        label: 'New session...',
+        label: 'New session…',
         onClick: async () => {
           await openNewSessionDialog(menu.projectPath, hostId)
         },
       })
       items.push({
-        label: 'New PR session...',
+        label: 'New PR session…',
         onClick: () => {
           setPendingPrPath(menu.projectPath)
           setPendingPrHostId(hostId)
@@ -216,13 +226,13 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
       })
     } else {
       items.push({
-        label: 'New session...',
+        label: 'New session…',
         onClick: async () => {
           await openNewSessionDialog(menu.projectPath, null)
         },
       })
       items.push({
-        label: 'New PR session...',
+        label: 'New PR session…',
         onClick: () => {
           setPendingPrPath(menu.projectPath)
           setPendingPrHostId(null)
@@ -292,7 +302,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
   }
 
   if (loading) {
-    return <div className="project-loading">Scanning...</div>
+    return <div className="project-loading">Scanning…</div>
   }
 
   const displayProjects = filterReady ? projects.filter((p) => p.setupState === 'ready') : projects
@@ -376,9 +386,10 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
         <div className="session-name-dialog">
           <div className="session-name-label">Session name (optional):</div>
           <input
+            ref={sessionNameInputRef}
             type="text"
             className="create-input"
-            placeholder="Leave empty for auto-name..."
+            placeholder="Leave empty for auto-name…"
             value={sessionNameInput}
             onChange={(e) => setSessionNameInput(e.target.value)}
             onKeyDown={(e) => {
@@ -389,7 +400,6 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
                 setCreateError(null)
               }
             }}
-            autoFocus
           />
           <div className="session-name-label">Tool:</div>
           <div className="tool-picker">
@@ -428,7 +438,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           {createError && <div className="pr-error">{createError}</div>}
           <div className="create-actions">
             <button className="create-btn" onClick={handleCreateSession} disabled={creating}>
-              {creating ? 'Creating...' : 'Create'}
+              {creating ? 'Creating…' : 'Create'}
             </button>
             <button
               className="create-btn cancel"
@@ -447,6 +457,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
         <div className="session-name-dialog">
           <div className="session-name-label">PR number(s):</div>
           <input
+            ref={prNumberInputRef}
             type="text"
             className="create-input"
             placeholder="e.g. 42 or 1,2,22-28"
@@ -460,7 +471,6 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
                 setPrError(null)
               }
             }}
-            autoFocus
           />
           <div className="session-name-label">Tool:</div>
           <div className="tool-picker">
@@ -488,7 +498,7 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
           {prError && <div className="pr-error">{prError}</div>}
           <div className="create-actions">
             <button className="create-btn" onClick={handleCreatePrSession} disabled={creating}>
-              {creating ? 'Creating...' : 'Create'}
+              {creating ? 'Creating…' : 'Create'}
             </button>
             <button
               className="create-btn cancel"
@@ -510,7 +520,8 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
 
         return (
           <div key={`${project.hostId ?? 'local'}:${project.path}`} className="project-node">
-            <div
+            <button
+              type="button"
               className="project-row"
               onClick={() => hasWorktrees && toggle(project.path)}
               onContextMenu={(e) =>
@@ -536,26 +547,15 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
                     [Setup]
                   </span>
                 ))}
-            </div>
+            </button>
 
             {isExpanded && (
               <div className="worktree-list">
                 {project.worktrees.map((wt) => {
                   const matchingSession = sessions.find((s) => s.worktreePath === wt.path)
                   const canMirror = !matchingSession && !wt.isMain
-                  return (
-                    <div
-                      key={wt.path}
-                      className={`worktree-item${matchingSession ? ' clickable' : ''}`}
-                      onClick={() => {
-                        if (matchingSession && onOpenSession) {
-                          onOpenSession(
-                            matchingSession.id,
-                            `${matchingSession.projectName}/${matchingSession.worktreeName}`
-                          )
-                        }
-                      }}
-                    >
+                  const worktreeContent = (
+                    <>
                       <span className="worktree-label">
                         {wt.name}
                         {wt.branch && <span className="worktree-branch"> ({wt.branch})</span>}
@@ -584,6 +584,28 @@ export default function ProjectTree({ onOpenSession }: TreeProps) {
                           + Mirror
                         </button>
                       )}
+                    </>
+                  )
+                  if (matchingSession && onOpenSession) {
+                    return (
+                      <button
+                        key={wt.path}
+                        type="button"
+                        className="worktree-item clickable"
+                        onClick={() => {
+                          onOpenSession(
+                            matchingSession.id,
+                            `${matchingSession.projectName}/${matchingSession.worktreeName}`
+                          )
+                        }}
+                      >
+                        {worktreeContent}
+                      </button>
+                    )
+                  }
+                  return (
+                    <div key={wt.path} className="worktree-item">
+                      {worktreeContent}
                     </div>
                   )
                 })}

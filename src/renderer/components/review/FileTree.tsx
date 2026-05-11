@@ -53,14 +53,15 @@ function DirectoryNode({
 
   return (
     <div className="rv-file-tree-dir">
-      <div
+      <button
+        type="button"
         className="rv-file-tree-dir-label"
         style={{ paddingLeft: depth * 16 + 8 }}
         onClick={() => setExpanded(!expanded)}
       >
         <span className="rv-file-tree-arrow">{expanded ? '\u25BC' : '\u25B6'}</span>
         <span className="rv-file-tree-dir-name">{node.name}/</span>
-      </div>
+      </button>
       {expanded && (
         <div>
           {dirs.map((dir) => (
@@ -102,13 +103,14 @@ function FileNode({
   const isFocused = focusedFile === file.path
 
   return (
-    <div
+    <button
+      type="button"
       className={`rv-file-tree-file${isFocused ? ' rv-file-tree-file--focused' : ''}`}
       style={{ paddingLeft: depth * 16 + 26 }}
       onClick={() => onFileClick(file.path)}
     >
       <span className="rv-file-tree-file-name">{node.name}</span>
-    </div>
+    </button>
   )
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useHostsStore } from '../stores/hosts'
 import type { Host, HostId, TestConnectionResult } from '../../shared/types'
 
@@ -33,6 +33,11 @@ function HostForm({
   const [alias, setAlias] = useState(initialAlias)
   const [label, setLabel] = useState(initialLabel)
   const [submitting, setSubmitting] = useState(false)
+  const aliasInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    aliasInputRef.current?.focus()
+  }, [])
 
   const canSubmit = alias.trim().length > 0 && label.trim().length > 0 && !submitting
 
@@ -60,7 +65,7 @@ function HostForm({
   return (
     <div className="hosts-form">
       <input
-        autoFocus
+        ref={aliasInputRef}
         type="text"
         className="create-input"
         placeholder="Host from ~/.ssh/config (e.g. devbox)"
@@ -96,6 +101,11 @@ interface HostDeleteConfirmProps {
 
 function HostDeleteConfirm({ host, onConfirm, onCancel }: HostDeleteConfirmProps) {
   const [submitting, setSubmitting] = useState(false)
+  const confirmButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    confirmButtonRef.current?.focus()
+  }, [])
 
   // `submitting` only meaningfully blocks a re-click while we await the async
   // delete; without `await onConfirm()` the lock would clear synchronously,
@@ -114,6 +124,7 @@ function HostDeleteConfirm({ host, onConfirm, onCancel }: HostDeleteConfirmProps
   return (
     <div
       className="hosts-form hosts-delete-confirm"
+      role="group"
       tabIndex={-1}
       onKeyDown={(e) => {
         if (e.key === 'Escape') onCancel()
@@ -128,7 +139,7 @@ function HostDeleteConfirm({ host, onConfirm, onCancel }: HostDeleteConfirmProps
       </div>
       <div className="create-actions">
         <button
-          autoFocus
+          ref={confirmButtonRef}
           className="create-btn cancel"
           disabled={submitting}
           onClick={handleConfirm}
@@ -233,10 +244,11 @@ export default function ManageHostsDialog() {
   return (
     <div
       className="hosts-dialog-overlay"
+      role="presentation"
       onClick={closeDialog}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="hosts-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="hosts-dialog" role="presentation" onClick={(e) => e.stopPropagation()}>
         <div className="hosts-dialog-header">
           <div className="session-name-label">Manage hosts</div>
           <button className="create-btn cancel" onClick={closeDialog}>

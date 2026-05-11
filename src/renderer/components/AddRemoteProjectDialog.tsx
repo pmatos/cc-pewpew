@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Host } from '../../shared/types'
 import { useProjectsStore } from '../stores/projects'
 import { useHostsStore } from '../stores/hosts'
@@ -64,6 +64,11 @@ function AddRemoteProjectDialogContent({
 }: AddRemoteProjectDialogContentProps) {
   const [selectedHostId, setSelectedHostId] = useState(() => hosts[0]?.hostId ?? '')
   const [remotePath, setRemotePath] = useState('')
+  const hostSelectRef = useRef<HTMLSelectElement>(null)
+
+  useEffect(() => {
+    hostSelectRef.current?.focus()
+  }, [])
 
   const selectedHostAvailable = hosts.some((h) => h.hostId === selectedHostId)
   const activeHostId = selectedHostAvailable ? selectedHostId : (hosts[0]?.hostId ?? '')
@@ -86,10 +91,11 @@ function AddRemoteProjectDialogContent({
   return (
     <div
       className="hosts-dialog-overlay"
+      role="presentation"
       onClick={closeDialog}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="hosts-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="hosts-dialog" role="presentation" onClick={(e) => e.stopPropagation()}>
         <div className="hosts-dialog-header">
           <div className="session-name-label">Add remote project</div>
           <button className="create-btn cancel" onClick={closeDialog}>
@@ -98,9 +104,9 @@ function AddRemoteProjectDialogContent({
         </div>
 
         {error && (
-          <div className="hosts-error" onClick={clearError}>
+          <button type="button" className="hosts-error" onClick={clearError}>
             {error}
-          </div>
+          </button>
         )}
 
         {hosts.length === 0 ? (
@@ -119,7 +125,7 @@ function AddRemoteProjectDialogContent({
         ) : (
           <div className="add-remote-form hosts-form">
             <select
-              autoFocus
+              ref={hostSelectRef}
               className="create-input"
               value={activeHostId}
               onChange={(e) => setSelectedHostId(e.target.value)}

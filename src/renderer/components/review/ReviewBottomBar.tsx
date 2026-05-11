@@ -1,5 +1,3 @@
-import type { JSX } from 'react'
-
 interface ReviewBottomBarProps {
   approved: number
   commented: number
@@ -17,28 +15,28 @@ export default function ReviewBottomBar({
   onSendToSession,
   onCopyToClipboard,
 }: ReviewBottomBarProps) {
-  const parts: JSX.Element[] = []
+  const parts: { key: string; className: string; label: string }[] = []
 
   if (approved > 0) {
-    parts.push(
-      <span key="approved" className="rv-bottom-bar-count--approved">
-        {approved} approved
-      </span>
-    )
+    parts.push({
+      key: 'approved',
+      className: 'rv-bottom-bar-count--approved',
+      label: `${approved} approved`,
+    })
   }
   if (commented > 0) {
-    parts.push(
-      <span key="commented" className="rv-bottom-bar-count--commented">
-        {commented} commented
-      </span>
-    )
+    parts.push({
+      key: 'commented',
+      className: 'rv-bottom-bar-count--commented',
+      label: `${commented} commented`,
+    })
   }
   if (rejected > 0) {
-    parts.push(
-      <span key="rejected" className="rv-bottom-bar-count--rejected">
-        {rejected} rejected
-      </span>
-    )
+    parts.push({
+      key: 'rejected',
+      className: 'rv-bottom-bar-count--rejected',
+      label: `${rejected} rejected`,
+    })
   }
 
   return (
@@ -46,11 +44,12 @@ export default function ReviewBottomBar({
       <div className="rv-bottom-bar-stats">
         {parts.length > 0 ? (
           <>
-            {parts.reduce<JSX.Element[]>((acc, el, i) => {
-              if (i > 0) acc.push(<span key={`sep-${i}`}> &middot; </span>)
-              acc.push(el)
-              return acc
-            }, [])}
+            {parts.flatMap((part, partIndex) => [
+              ...(partIndex > 0 ? [<span key={`sep-${part.key}`}> &middot; </span>] : []),
+              <span key={part.key} className={part.className}>
+                {part.label}
+              </span>,
+            ])}
             {' / '}
             {total} total
           </>

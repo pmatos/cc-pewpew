@@ -48,7 +48,7 @@ function AnnotationBadge({
         ? (annotation.comment ?? 'Comment')
         : (annotation.comment ?? 'Rejected')
 
-  const displayLabel = label.length > 60 ? label.slice(0, 60) + '...' : label
+  const displayLabel = label.length > 60 ? `${label.slice(0, 60)}…` : label
 
   return (
     <div
@@ -115,8 +115,11 @@ function DiffHunkView({
           />
         )}
       </div>
-      {hunk.lines.map((line, i) => (
-        <DiffLineRow key={i} line={line} />
+      {hunk.lines.map((line) => (
+        <DiffLineRow
+          key={`${line.lineType}:${line.oldLineNo ?? ''}:${line.newLineNo ?? ''}:${line.content}`}
+          line={line}
+        />
       ))}
       {annotations.map((ann) => (
         <AnnotationBadge

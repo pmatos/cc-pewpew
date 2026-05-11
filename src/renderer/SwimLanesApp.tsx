@@ -88,7 +88,21 @@ export default function SwimLanesApp() {
           const isReviewOpen = flipCount % 2 === 1
 
           return (
-            <div key={id} className="lane" data-lane-id={id} onClick={() => setFocusedLane(id)}>
+            <div
+              key={id}
+              className="lane"
+              data-lane-id={id}
+              role="group"
+              tabIndex={0}
+              onClick={() => setFocusedLane(id)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setFocusedLane(id)
+                }
+              }}
+            >
               <LaneHeader session={session} focused={focusedLane === id} />
               <div className="lane-terminal">
                 {isDead ? (
