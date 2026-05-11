@@ -63,9 +63,9 @@ describe('bootstrapHost', () => {
     })
     expect(calls.some((argv) => argv.some((a) => a.includes('resolve_one claude')))).toBe(true)
     expect(calls.some((argv) => argv.includes('/tmp/ipc'))).toBe(true)
-    expect(
-      calls.some((argv) => argv.includes('/home/dev/.config/pewpew/hooks/notify-v1.sh'))
-    ).toBe(true)
+    expect(calls.some((argv) => argv.includes('/home/dev/.config/pewpew/hooks/notify-v1.sh'))).toBe(
+      true
+    )
   })
 
   it('hard-fails on missing strict deps but tolerates missing agent CLIs', async () => {
