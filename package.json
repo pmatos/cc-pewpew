@@ -19,7 +19,7 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "doctor": "react-doctor",
+    "doctor": "npx --yes react-doctor@0.1.6",
     "postinstall": "electron-builder install-app-deps",
     "dist": "electron-vite build && electron-builder --publish never",
     "dist:linux": "electron-vite build && electron-builder --linux --publish never"
