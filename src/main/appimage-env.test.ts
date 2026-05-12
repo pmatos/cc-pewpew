@@ -98,6 +98,47 @@ describe('sanitizeChildEnv', () => {
     expect('LD_PRELOAD' in out).toBe(false)
   })
 
+  // ld.so(8): "The items of the list can be separated by spaces or colons,
+  // and there is no support for escaping either separator."
+  it('filters space-delimited AppImage entries from LD_PRELOAD', () => {
+    const appDir = '/tmp/.mount_pewpewXYZ'
+    const env = {
+      APPIMAGE: '/path/to/pewpew.AppImage',
+      APPDIR: appDir,
+      LD_PRELOAD: `/usr/lib/libasan.so ${appDir}/usr/lib/libfoo.so`,
+    }
+
+    const out = sanitizeChildEnv(env)
+
+    expect(out.LD_PRELOAD).toBe('/usr/lib/libasan.so')
+  })
+
+  it('handles LD_PRELOAD with mixed space and colon delimiters', () => {
+    const appDir = '/tmp/.mount_pewpewXYZ'
+    const env = {
+      APPIMAGE: '/path/to/pewpew.AppImage',
+      APPDIR: appDir,
+      LD_PRELOAD: `/usr/lib/libasan.so ${appDir}/usr/lib/libfoo.so:/opt/local/lib/libbar.so`,
+    }
+
+    const out = sanitizeChildEnv(env)
+
+    expect(out.LD_PRELOAD).toBe('/usr/lib/libasan.so /opt/local/lib/libbar.so')
+  })
+
+  it('removes LD_PRELOAD entirely when only AppImage entries remain after space split', () => {
+    const appDir = '/tmp/.mount_pewpewXYZ'
+    const env = {
+      APPIMAGE: '/path/to/pewpew.AppImage',
+      APPDIR: appDir,
+      LD_PRELOAD: `${appDir}/usr/lib/libfoo.so ${appDir}/usr/lib/libbar.so`,
+    }
+
+    const out = sanitizeChildEnv(env)
+
+    expect('LD_PRELOAD' in out).toBe(false)
+  })
+
   it('is a no-op when APPIMAGE is not set (dev runs, .deb installs)', () => {
     const env = {
       HOME: '/home/u',

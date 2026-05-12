@@ -1,8 +1,11 @@
 const SCALAR_VARS = ['APPIMAGE', 'APPDIR', 'ARGV0', 'OWD'] as const
 
-const PATH_LIST_VARS = [
+// ld.so(8) accepts both spaces and colons as LD_PRELOAD separators with no
+// escaping, so this variable needs a wider split than the colon-only PATH-style
+// list — otherwise `"/usr/lib/libasan.so /tmp/.mount_*/libfoo.so"` survives as
+// a single non-matching entry and the AppImage preload leaks into children.
+const PATH_LIST_VARS_COLON = [
   'LD_LIBRARY_PATH',
-  'LD_PRELOAD',
   'PATH',
   'XDG_DATA_DIRS',
   'XDG_CONFIG_DIRS',
@@ -16,6 +19,8 @@ const PATH_LIST_VARS = [
   'GDK_PIXBUF_MODULE_FILE',
   'QT_PLUGIN_PATH',
 ] as const
+
+const PATH_LIST_VARS_SPACE_OR_COLON = ['LD_PRELOAD'] as const
 
 const MOUNT_PREFIX_RE = /^\/tmp\/\.mount_[^/]+(\/|$)/
 
@@ -32,7 +37,7 @@ export function sanitizeChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.P
   const out: NodeJS.ProcessEnv = { ...env }
   const appDir = env.APPDIR
 
-  for (const key of PATH_LIST_VARS) {
+  for (const key of PATH_LIST_VARS_COLON) {
     const value = out[key]
     if (typeof value !== 'string') continue
     const kept = value.split(':').filter((entry) => !isAppImageEntry(entry, appDir))
@@ -40,6 +45,19 @@ export function sanitizeChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.P
       delete out[key]
     } else {
       out[key] = kept.join(':')
+    }
+  }
+
+  for (const key of PATH_LIST_VARS_SPACE_OR_COLON) {
+    const value = out[key]
+    if (typeof value !== 'string') continue
+    // Both separators are semantically equivalent to ld.so, so normalize to
+    // single spaces on output.
+    const kept = value.split(/[ :]+/).filter((entry) => !isAppImageEntry(entry, appDir))
+    if (kept.length === 0) {
+      delete out[key]
+    } else {
+      out[key] = kept.join(' ')
     }
   }
 
