@@ -25,6 +25,9 @@ const state = vi.hoisted(() => ({
   detachPtyCalls: [] as string[],
   hasRemoteTmuxResult: new Map<string, boolean>(),
   probeRemoteTmuxResult: new Map<string, 'present' | 'absent' | 'unreachable'>(),
+  // Captures the listener registered via setUnexpectedExitListener so tests
+  // can invoke it synchronously without spinning up a real node-pty.
+  unexpectedExitListener: null as null | ((sessionId: string) => void),
   // Per-session side effect fired before the probe resolves. Lets tests
   // simulate a concurrent reconnect advancing another session's state while
   // the batch is in flight.
@@ -168,6 +171,9 @@ vi.mock('./pty-manager', () => ({
     state.createRemotePtyCalls.push({ sessionId, cwd, hostId: host.hostId })
     state.runtimeRefs.set(host.hostId, (state.runtimeRefs.get(host.hostId) ?? 0) + 1)
   },
+  setUnexpectedExitListener: (fn: null | ((sessionId: string) => void)) => {
+    state.unexpectedExitListener = fn
+  },
 }))
 
 vi.mock('./host-connection', () => ({
@@ -295,6 +301,7 @@ beforeEach(() => {
   state.execRemoteResults = new Map()
   state.ensureHostConnectionThrows = null
   state.ensureHostConnectionGate = null
+  state.unexpectedExitListener = null
 })
 
 afterEach(() => {
@@ -1156,6 +1163,48 @@ describe('restoreSessions — local path unchanged (AC #10 regression)', () => {
     expect(got.connectionState).toBeUndefined()
     expect(state.reattachPtyCalls).toEqual(['l1'])
     expect(state.ensureHostConnectionCalls).toEqual([])
+  })
+})
+
+describe('unexpected pty exit listener', () => {
+  it('flips a local session to dead when its pty dies on its own', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    state.liveTmuxIds = ['l1']
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    sm.initSessionManager()
+    expect(state.unexpectedExitListener).not.toBeNull()
+
+    state.unexpectedExitListener?.('l1')
+
+    expect(sm.getSessions()[0].status).toBe('dead')
+  })
+
+  it('does not touch remote sessions (their connection state machinery owns recovery)', async () => {
+    const remote = baseRemoteSession({ id: 'r1', status: 'idle' })
+    writeSessionsJson([remote])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    sm.initSessionManager()
+
+    state.unexpectedExitListener?.('r1')
+
+    expect(sm.getSessions()[0].status).toBe('idle')
+  })
+
+  it('is a no-op for unknown ids and already-dead sessions', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'dead' })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    sm.initSessionManager()
+    const broadcastsBefore = state.sessionsUpdatedBroadcasts
+
+    state.unexpectedExitListener?.('l1')
+    state.unexpectedExitListener?.('unknown-id')
+
+    expect(state.sessionsUpdatedBroadcasts).toBe(broadcastsBefore)
   })
 })
 
