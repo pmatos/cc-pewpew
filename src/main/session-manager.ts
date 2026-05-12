@@ -2046,8 +2046,14 @@ export async function relocateProject(
 // which collapses the tmux pane immediately and leaves the session unusable.
 // In that case we spawn fresh instead, matching the existing codex fallback
 // (no agentSessionId → spawn fresh) in `restoreSessions`.
+//
+// Claude keys the per-worktree directory off the *canonical* path, so we
+// canonicalize here too. `restoreSessions` migrates legacy symlink-form
+// `worktreePath`s only after the auto-recovery branch runs, so without this
+// `realpathSync` a migrated session would probe an encoded symlink path,
+// find nothing, and silently lose its conversation history on reboot.
 function hasClaudeConversationHistory(worktreePath: string): boolean {
-  const encoded = worktreePath.replace(/[^a-zA-Z0-9-]/g, '-')
+  const encoded = canonicalPath(worktreePath).replace(/[^a-zA-Z0-9-]/g, '-')
   return existsSync(join(homedir(), '.claude', 'projects', encoded))
 }
 
