@@ -51,6 +51,27 @@ interface PtyEntry {
 const ptys = new Map<string, PtyEntry>()
 let flushInterval: ReturnType<typeof setInterval> | null = null
 
+// Fires when the underlying node-pty exits without going through
+// destroyPty/detachPty/destroyRemotePty (those all delete the entry from
+// `ptys` *before* killing the pty, so an entry that's still present at
+// onExit time means the agent or tmux died on its own — e.g. `claude
+// --continue` exiting because no prior conversation exists for the worktree).
+// Lets session-manager flip the session back to 'dead' instead of leaving it
+// at 'idle' with no backing pty, which the Terminal component renders as a
+// permanently empty xterm.
+type UnexpectedExitListener = (sessionId: string) => void
+let unexpectedExitListener: UnexpectedExitListener | null = null
+
+export function setUnexpectedExitListener(fn: UnexpectedExitListener | null): void {
+  unexpectedExitListener = fn
+}
+
+function notifyUnexpectedExitIfPresent(sessionId: string): void {
+  if (!ptys.has(sessionId)) return
+  ptys.delete(sessionId)
+  unexpectedExitListener?.(sessionId)
+}
+
 function flushBuffers(): void {
   for (const [sessionId, entry] of ptys) {
     if (entry.buffer.length > 0) {
@@ -62,7 +83,7 @@ function flushBuffers(): void {
 
 export function isTmuxAvailable(): boolean {
   try {
-    execFileSync('which', ['tmux'])
+    execFileSync('which', ['tmux'], { stdio: 'pipe' })
     return true
   } catch {
     return false
@@ -98,19 +119,11 @@ export function createPty(sessionId: string, cwd: string, options?: SpawnOptions
 
   // Create a detached tmux session that directly runs the agent CLI.
   // Using tmux's shell command avoids issues with interactive shell init (omz, etc.)
-  execFileSync('tmux', [
-    'new-session',
-    '-d',
-    '-s',
-    tmuxSession,
-    '-c',
-    cwd,
-    '-x',
-    '120',
-    '-y',
-    '30',
-    ...agentArgs,
-  ])
+  execFileSync(
+    'tmux',
+    ['new-session', '-d', '-s', tmuxSession, '-c', cwd, '-x', '120', '-y', '30', ...agentArgs],
+    { stdio: 'pipe' }
+  )
 
   // Attach to it via node-pty
   const ptyProcess = pty.spawn('tmux', ['attach-session', '-t', tmuxSession], {
@@ -132,7 +145,7 @@ export function createPty(sessionId: string, cwd: string, options?: SpawnOptions
   })
 
   ptyProcess.onExit(() => {
-    ptys.delete(sessionId)
+    notifyUnexpectedExitIfPresent(sessionId)
   })
 
   ptys.set(sessionId, entry)
@@ -193,8 +206,8 @@ export async function createRemotePty(
   })
 
   ptyProcess.onExit(() => {
-    ptys.delete(sessionId)
     releaseRemoteEntry(entry)
+    notifyUnexpectedExitIfPresent(sessionId)
   })
 
   ptys.set(sessionId, entry)
@@ -248,7 +261,7 @@ export function destroyPty(sessionId: string): void {
   // Always attempt to kill the tmux session — the pty onExit handler may have
   // already removed the map entry, but the tmux session can still be alive.
   try {
-    execFileSync('tmux', ['kill-session', '-t', tmuxSession])
+    execFileSync('tmux', ['kill-session', '-t', tmuxSession], { stdio: 'pipe' })
   } catch {
     // Session may already be dead
   }
@@ -303,7 +316,10 @@ export function hasPty(sessionId: string): boolean {
 
 export function hasTmuxSession(sessionId: string): boolean {
   try {
-    execFileSync('tmux', ['has-session', '-t', `pewpew-${sessionId}`], { timeout: 3000 })
+    execFileSync('tmux', ['has-session', '-t', `pewpew-${sessionId}`], {
+      timeout: 3000,
+      stdio: 'pipe',
+    })
     return true
   } catch {
     return false
@@ -328,6 +344,7 @@ export async function captureThumbnails(opts?: {
       const text = execFileSync('tmux', ['capture-pane', '-t', entry.tmuxSession, '-p'], {
         encoding: 'utf-8',
         timeout: 3000,
+        stdio: 'pipe',
       })
       result[sessionId] = text
       opts?.onCapture?.(sessionId, text)
@@ -405,6 +422,7 @@ export async function getScrollback(sessionId: string): Promise<string> {
     return execFileSync('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-e', '-S', '-5000'], {
       encoding: 'utf-8',
       timeout: 5000,
+      stdio: 'pipe',
     })
   } catch {
     return ''
@@ -416,6 +434,7 @@ export function discoverTmuxSessions(): string[] {
     const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
       encoding: 'utf-8',
       timeout: 5000,
+      stdio: 'pipe',
     })
     const sessions: string[] = []
     for (const name of output.split('\n')) {
@@ -451,7 +470,7 @@ export function reattachPty(sessionId: string): void {
   })
 
   ptyProcess.onExit(() => {
-    ptys.delete(sessionId)
+    notifyUnexpectedExitIfPresent(sessionId)
   })
 
   ptys.set(sessionId, entry)
@@ -461,7 +480,7 @@ export function reattachPty(sessionId: string): void {
     const scrollback = execFileSync(
       'tmux',
       ['capture-pane', '-t', tmuxSession, '-p', '-e', '-S', '-5000'],
-      { encoding: 'utf-8', timeout: 5000 }
+      { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' }
     )
     if (scrollback) {
       entry.buffer += scrollback
@@ -495,8 +514,8 @@ export async function reattachRemotePty(sessionId: string, host: Host): Promise<
   })
 
   ptyProcess.onExit(() => {
-    ptys.delete(sessionId)
     releaseRemoteEntry(entry)
+    notifyUnexpectedExitIfPresent(sessionId)
   })
 
   ptys.set(sessionId, entry)

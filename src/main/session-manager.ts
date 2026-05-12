@@ -3,6 +3,7 @@ import { promisify } from 'util'
 import { readFileSync, writeFileSync, existsSync, realpathSync } from 'fs'
 import { join, basename, sep } from 'path'
 import { posix } from 'path'
+import { homedir } from 'os'
 import { randomUUID } from 'crypto'
 import { dialog, shell } from 'electron'
 import { broadcastToAll, getMainWindow } from './window-registry'
@@ -23,6 +24,7 @@ import {
   reattachPty,
   reattachRemotePty,
   createRemotePty,
+  setUnexpectedExitListener,
 } from './pty-manager'
 import { getRepoFingerprint, gitWorktrees } from './project-scanner'
 import {
@@ -404,6 +406,19 @@ export function initSessionManager(): void {
       if (entry.session.prNumber === undefined) resolvePrNumberAsync(entry.session.id)
     }
   }, PR_REFRESH_INTERVAL_MS).unref()
+
+  // When a local pty dies on its own (e.g. `claude --continue` exits with
+  // "No conversation found to continue" and the tmux session collapses), flip
+  // the session back to 'dead' so the renderer shows the "Restart terminal"
+  // overlay instead of a permanently empty xterm. Remote sessions are skipped:
+  // an SSH drop kills the local pty but the remote tmux session can still be
+  // alive, and reconnectRemoteSession already drives that flow.
+  setUnexpectedExitListener((sessionId) => {
+    const entry = sessions.get(sessionId)
+    if (!entry || entry.session.hostId) return
+    if (entry.session.status === 'dead') return
+    updateSession(sessionId, 'dead')
+  })
 }
 
 async function deriveLabel(worktreePath: string): Promise<string> {
@@ -1259,13 +1274,28 @@ export async function reviveSession(id: string): Promise<void> {
   if (hasTmuxSession(id)) {
     reattachPty(id)
   } else {
+    const canResume = canResumeAgent(session)
+    if (!canResume) {
+      console.warn(
+        `Session ${id} (${session.tool}) has no prior conversation; spawning fresh instead of resuming`
+      )
+    }
     createPty(id, session.worktreePath, {
-      continueSession: true,
+      continueSession: canResume,
       tool: session.tool,
       agentSessionId: session.agentSessionId,
     })
   }
   updateSession(id, 'idle')
+}
+
+// Decides whether resuming an agent will work. For claude, --continue exits
+// non-zero when there's no per-worktree project directory in ~/.claude/projects,
+// killing the tmux pane on spawn. For codex, `codex resume <id>` requires the
+// captured agentSessionId from the SessionStart hook.
+function canResumeAgent(session: Session): boolean {
+  if (session.tool === 'codex') return !!session.agentSessionId
+  return hasClaudeConversationHistory(session.worktreePath)
 }
 
 export async function removeWorktree(id: string): Promise<void> {
@@ -2008,6 +2038,25 @@ export async function relocateProject(
   return { migratedCount: toMigrate.length }
 }
 
+// claude stores per-worktree conversations under
+// `~/.claude/projects/<encoded-path>/`, where the encoding replaces any
+// character outside [a-zA-Z0-9-] with '-'. We use this to decide whether
+// `claude --continue` would succeed on revival: if the directory is missing,
+// claude prints "No conversation found to continue" and exits with code 1,
+// which collapses the tmux pane immediately and leaves the session unusable.
+// In that case we spawn fresh instead, matching the existing codex fallback
+// (no agentSessionId → spawn fresh) in `restoreSessions`.
+//
+// Claude keys the per-worktree directory off the *canonical* path, so we
+// canonicalize here too. `restoreSessions` migrates legacy symlink-form
+// `worktreePath`s only after the auto-recovery branch runs, so without this
+// `realpathSync` a migrated session would probe an encoded symlink path,
+// find nothing, and silently lose its conversation history on reboot.
+function hasClaudeConversationHistory(worktreePath: string): boolean {
+  const encoded = canonicalPath(worktreePath).replace(/[^a-zA-Z0-9-]/g, '-')
+  return existsSync(join(homedir(), '.claude', 'projects', encoded))
+}
+
 // Backfill / reconcile fields added in later versions. For local sessions
 // (worktreePath exists on this machine) the live git branch trumps whatever
 // was persisted — an earlier version stored a wrong default that we self-heal
@@ -2084,12 +2133,12 @@ export function restoreSessions(): void {
           skippedForNoTmux++
         } else {
           // tmux server lost the session (e.g., PC reboot) but the worktree
-          // survives — auto-recreate and resume the claude conversation.
+          // survives — auto-recreate and resume the agent conversation.
           try {
-            const canResume = session.tool !== 'codex' || !!session.agentSessionId
-            if (session.tool === 'codex' && !session.agentSessionId) {
+            const canResume = canResumeAgent(session)
+            if (!canResume) {
               console.warn(
-                `codex session ${session.id} has no agentSessionId; spawning fresh instead of resuming`
+                `Session ${session.id} (${session.tool}) has no prior conversation; spawning fresh instead of resuming`
               )
             }
             createPty(session.id, session.worktreePath, {
