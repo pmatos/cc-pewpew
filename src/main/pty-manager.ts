@@ -84,7 +84,10 @@ function flushBuffers(): void {
 
 export function isTmuxAvailable(): boolean {
   try {
-    execFileSync('which', ['tmux'], { stdio: 'pipe' })
+    execFileSync('which', ['tmux'], {
+      stdio: 'pipe',
+      env: sanitizeChildEnv() as NodeJS.ProcessEnv,
+    })
     return true
   } catch {
     return false
