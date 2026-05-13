@@ -12,6 +12,7 @@ import {
 } from './host-connection'
 import { classifySshExit } from './ssh-exit-parser'
 import { captureRemotePaneTexts, type RemoteSessionEntry } from './remote-thumbnail'
+import { sanitizeChildEnv } from './appimage-env'
 import type { AgentTool, Host } from '../shared/types'
 
 interface SpawnOptions {
@@ -83,7 +84,10 @@ function flushBuffers(): void {
 
 export function isTmuxAvailable(): boolean {
   try {
-    execFileSync('which', ['tmux'], { stdio: 'pipe' })
+    execFileSync('which', ['tmux'], {
+      stdio: 'pipe',
+      env: sanitizeChildEnv() as NodeJS.ProcessEnv,
+    })
     return true
   } catch {
     return false
@@ -122,7 +126,7 @@ export function createPty(sessionId: string, cwd: string, options?: SpawnOptions
   execFileSync(
     'tmux',
     ['new-session', '-d', '-s', tmuxSession, '-c', cwd, '-x', '120', '-y', '30', ...agentArgs],
-    { stdio: 'pipe' }
+    { stdio: 'pipe', env: sanitizeChildEnv() as NodeJS.ProcessEnv }
   )
 
   // Attach to it via node-pty
@@ -131,7 +135,7 @@ export function createPty(sessionId: string, cwd: string, options?: SpawnOptions
     cols: 120,
     rows: 30,
     cwd,
-    env: process.env as Record<string, string>,
+    env: sanitizeChildEnv() as Record<string, string>,
   })
 
   const entry: PtyEntry = {
@@ -189,7 +193,7 @@ export async function createRemotePty(
     name: 'xterm-256color',
     cols: 120,
     rows: 30,
-    env: process.env as Record<string, string>,
+    env: sanitizeChildEnv() as Record<string, string>,
   })
 
   retainHostConnection(host.hostId)
@@ -456,7 +460,7 @@ export function reattachPty(sessionId: string): void {
     name: 'xterm-256color',
     cols: 120,
     rows: 30,
-    env: process.env as Record<string, string>,
+    env: sanitizeChildEnv() as Record<string, string>,
   })
 
   const entry: PtyEntry = {
@@ -497,7 +501,7 @@ export async function reattachRemotePty(sessionId: string, host: Host): Promise<
     name: 'xterm-256color',
     cols: 120,
     rows: 30,
-    env: process.env as Record<string, string>,
+    env: sanitizeChildEnv() as Record<string, string>,
   })
 
   retainHostConnection(host.hostId)
