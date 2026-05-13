@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:
@@ -39,6 +41,15 @@ jobs:
 
       - name: ESLint
         run: npx eslint .
+
+      - name: react-doctor (diff vs base, PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          npx --yes react-doctor@0.1.6 \
+            --diff "origin/${{ github.base_ref }}" \
+            --annotations \
+            --fail-on error \
+            --offline
 
       - name: TypeScript (noEmit)
         run: npx tsc --noEmit
