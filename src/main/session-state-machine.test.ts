@@ -125,12 +125,16 @@ describe('applyHookEvent — session.activity', () => {
 })
 
 describe('applyHookEvent — session.end', () => {
-  it('emits promptCleanup intent and returns state unchanged', () => {
+  it('emits promptCleanup intent and returns state unchanged when reason is prompt_input_exit', () => {
     const session = makeSession({ id: 's1', status: 'running', lastActivity: 0 })
     const original = stateOf(session)
     const result = applyHookEvent(
       original,
-      { method: 'session.end', params: { cwd: '/p/w' }, originHostId: null },
+      {
+        method: 'session.end',
+        params: { cwd: '/p/w', reason: 'prompt_input_exit' },
+        originHostId: null,
+      },
       99
     )
     expect(result.matched).toBe(true)
@@ -138,6 +142,50 @@ describe('applyHookEvent — session.end', () => {
     // State must be unchanged — promptCleanup runs async and removeSession will
     // reduce state separately. The reducer must not pre-emptively mutate.
     expect(result.state.get('s1')).toEqual(session)
+  })
+
+  it.each(['clear', 'resume', 'bypass_permissions_disabled', 'other', 'unrecognised'])(
+    'does not emit promptCleanup when reason is %p (session still alive)',
+    (reason) => {
+      const session = makeSession({ id: 's1', status: 'running' })
+      const result = applyHookEvent(
+        stateOf(session),
+        {
+          method: 'session.end',
+          params: { cwd: '/p/w', reason },
+          originHostId: null,
+        },
+        1
+      )
+      expect(result.matched).toBe(true)
+      expect(result.intents).toEqual([])
+    }
+  )
+
+  it('emits promptCleanup when reason is "logout"', () => {
+    const session = makeSession({ id: 's1', status: 'running' })
+    const result = applyHookEvent(
+      stateOf(session),
+      {
+        method: 'session.end',
+        params: { cwd: '/p/w', reason: 'logout' },
+        originHostId: null,
+      },
+      1
+    )
+    expect(result.matched).toBe(true)
+    expect(result.intents).toContainEqual({ kind: 'promptCleanup', sessionId: 's1' })
+  })
+
+  it('does not emit promptCleanup when reason is absent (treat as ambiguous)', () => {
+    const session = makeSession({ id: 's1', status: 'running' })
+    const result = applyHookEvent(
+      stateOf(session),
+      { method: 'session.end', params: { cwd: '/p/w' }, originHostId: null },
+      1
+    )
+    expect(result.matched).toBe(true)
+    expect(result.intents).toEqual([])
   })
 })
 
