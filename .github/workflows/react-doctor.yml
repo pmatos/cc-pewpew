@@ -1,0 +1,25 @@
+name: React Doctor
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write # required to post PR comments
+
+jobs:
+  react-doctor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # required for `diff`
+
+      - uses: millionco/react-doctor@main
+        with:
+          diff: main
+          offline: true # do not POST diagnostics to the react.doctor score API
+          github-token: ${{ secrets.GITHUB_TOKEN }}
