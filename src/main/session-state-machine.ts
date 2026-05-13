@@ -62,12 +62,32 @@ export function applyHookEvent(
       next.lastActivity = now
       if (event.originHostId) next.connectionState = 'live'
       break
-    case 'session.end':
+    case 'session.end': {
+      // Claude Code fires SessionEnd for several reasons, not all of which mean
+      // the user is done with the worktree. /clear, --continue/--resume, and
+      // bypass_permissions_disabled all fire SessionEnd while the session
+      // remains alive — treating them as "user wants cleanup" produces a
+      // disruptive false-positive dialog. Only fire on reasons that genuinely
+      // mean the agent process is gone.
+      // https://code.claude.com/docs/en/hooks (SessionEnd matcher values).
+      const reason = typeof event.params.reason === 'string' ? event.params.reason : undefined
+      // JSON.stringify escapes control characters and the slice caps length so a
+      // misbehaving (or hostile) hook payload cannot forge log lines or flood
+      // the console with megabytes of attacker-chosen text. CodeQL flagged the
+      // raw interpolation as log-injection — this is the minimal sanitisation
+      // that keeps the diagnostic value of seeing the actual reason string.
+      const safeReason = reason === undefined ? '<absent>' : JSON.stringify(reason).slice(0, 64)
+      console.info(`[session.end] sessionId=${target.id} reason=${safeReason}`)
+      const triggersCleanup = reason === 'prompt_input_exit' || reason === 'logout'
+      if (!triggersCleanup) {
+        return { state, intents: [], matched: true }
+      }
       return {
         state,
         intents: [{ kind: 'promptCleanup', sessionId: target.id }],
         matched: true,
       }
+    }
     case 'session.notification': {
       const incoming = (event.params.session_id ?? event.params.sessionId) as string | undefined
       next.hookEvents = [
