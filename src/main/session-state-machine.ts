@@ -71,7 +71,13 @@ export function applyHookEvent(
       // mean the agent process is gone.
       // https://code.claude.com/docs/en/hooks (SessionEnd matcher values).
       const reason = typeof event.params.reason === 'string' ? event.params.reason : undefined
-      console.info(`[session.end] sessionId=${target.id} reason=${reason ?? '<absent>'}`)
+      // JSON.stringify escapes control characters and the slice caps length so a
+      // misbehaving (or hostile) hook payload cannot forge log lines or flood
+      // the console with megabytes of attacker-chosen text. CodeQL flagged the
+      // raw interpolation as log-injection — this is the minimal sanitisation
+      // that keeps the diagnostic value of seeing the actual reason string.
+      const safeReason = reason === undefined ? '<absent>' : JSON.stringify(reason).slice(0, 64)
+      console.info(`[session.end] sessionId=${target.id} reason=${safeReason}`)
       const triggersCleanup = reason === 'prompt_input_exit' || reason === 'logout'
       if (!triggersCleanup) {
         return { state, intents: [], matched: true }
