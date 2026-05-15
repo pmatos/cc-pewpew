@@ -43,6 +43,7 @@ import {
   reviveSession,
   reconnectRemoteSession,
   attachLocalSession,
+  attachPendingLocalSessions,
   removeWorktree,
   removeSession,
   removeSessionsForHost,
@@ -491,7 +492,8 @@ app.whenReady().then(async () => {
     writePty(sessionId, data)
   })
 
-  ipcMain.handle('pty:write-batch', (_event, ids: string[], data: string) => {
+  ipcMain.handle('pty:write-batch', async (_event, ids: string[], data: string) => {
+    await attachPendingLocalSessions(ids)
     for (const id of ids) writePty(id, data)
   })
 

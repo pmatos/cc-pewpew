@@ -1340,6 +1340,16 @@ export async function attachLocalSession(id: string): Promise<void> {
   }
 }
 
+export async function attachPendingLocalSessions(ids: string[]): Promise<void> {
+  for (const id of ids) {
+    try {
+      await attachLocalSession(id)
+    } catch (err) {
+      console.error(`Failed to attach session ${id}:`, err)
+    }
+  }
+}
+
 export async function removeWorktree(id: string): Promise<void> {
   const entry = sessions.get(id)
   if (!entry) return

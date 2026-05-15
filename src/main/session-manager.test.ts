@@ -1294,6 +1294,34 @@ describe('attachLocalSession', () => {
   })
 })
 
+describe('attachPendingLocalSessions', () => {
+  it('materializes pending local sessions and leaves remote pending sessions alone', async () => {
+    const l1 = baseLocalSession({
+      id: 'l1',
+      status: 'idle',
+      worktreePath: join(state.configDir, 'local-wt-1'),
+    })
+    const l2 = baseLocalSession({
+      id: 'l2',
+      status: 'needs_input',
+      worktreePath: join(state.configDir, 'local-wt-2'),
+    })
+    const remote = baseRemoteSession({ id: 'r1', status: 'idle' })
+    mkdirSync(l1.worktreePath, { recursive: true })
+    mkdirSync(l2.worktreePath, { recursive: true })
+    writeSessionsJson([l1, remote, l2])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    await sm.attachPendingLocalSessions(['l1', 'r1', 'l2'])
+
+    expect(state.createPtyCalls.map((c) => c.sessionId)).toEqual(['l1', 'l2'])
+    expect(sm.getSessions().find((s) => s.id === 'l1')?.connectionState).toBeUndefined()
+    expect(sm.getSessions().find((s) => s.id === 'l2')?.connectionState).toBeUndefined()
+    expect(sm.getSessions().find((s) => s.id === 'r1')?.connectionState).toBe('pending')
+  })
+})
+
 describe('unexpected pty exit listener', () => {
   it('flips a local session to dead when its pty dies on its own', async () => {
     const local = baseLocalSession({ id: 'l1', status: 'idle' })
