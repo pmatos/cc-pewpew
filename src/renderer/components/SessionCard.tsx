@@ -57,6 +57,12 @@ export default function SessionCard({ session, thumbnail, style, onOpenSession, 
     if (session.hostId && connectionState === 'pending') {
       void window.api.reconnectSession(session.id).catch(() => undefined)
     }
+    // Local sessions deferred during restoreSessions() also boot lazily so
+    // startup doesn't spawn N concurrent agent processes (which OOM'd on
+    // hosts with many sessions).
+    if (!session.hostId && connectionState === 'pending') {
+      void window.api.attachSession(session.id).catch(() => undefined)
+    }
     if (onOpenSession && session.status !== 'dead' && session.status !== 'error') {
       onOpenSession(session.id, sessionName)
     }

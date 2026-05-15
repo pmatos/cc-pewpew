@@ -42,6 +42,7 @@ import {
   killSession,
   reviveSession,
   reconnectRemoteSession,
+  attachLocalSession,
   removeWorktree,
   removeSession,
   removeSessionsForHost,
@@ -424,6 +425,15 @@ app.whenReady().then(async () => {
       await reconnectRemoteSession(id)
     } catch (err) {
       console.error(`Failed to reconnect session ${id}:`, err)
+      throw err
+    }
+  })
+
+  ipcMain.handle('sessions:attach', async (_event, id: string) => {
+    try {
+      await attachLocalSession(id)
+    } catch (err) {
+      console.error(`Failed to attach session ${id}:`, err)
       throw err
     }
   })
