@@ -1359,6 +1359,45 @@ describe('attachPendingLocalSessions', () => {
   })
 })
 
+describe('kill/revive clears stale connectionState=pending', () => {
+  // Regression: a lazy-restored local session sits in connectionState='pending'.
+  // If the user kills it (or kill→revive in one app run), the prior `pending`
+  // flag must not leak — otherwise a subsequent card/detail mount-effect
+  // attachSession would replace the live node-pty (reviveSession case) or
+  // attempt to attach a dead entry (killSession case).
+  it('killSession clears connectionState on a pending local session', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    mkdirSync(local.worktreePath, { recursive: true })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    expect(sm.getSessions()[0].connectionState).toBe('pending')
+
+    await sm.killSession('l1')
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('dead')
+    expect(got.connectionState).toBeUndefined()
+  })
+
+  it('reviveSession clears connectionState before creating the pty', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    mkdirSync(local.worktreePath, { recursive: true })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    await sm.killSession('l1')
+    state.createPtyCalls = []
+
+    await sm.reviveSession('l1')
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('idle')
+    expect(got.connectionState).toBeUndefined()
+    expect(state.createPtyCalls.map((c) => c.sessionId)).toEqual(['l1'])
+  })
+})
+
 describe('unexpected pty exit listener', () => {
   it('flips a local session to dead when its pty dies on its own', async () => {
     const local = baseLocalSession({ id: 'l1', status: 'idle' })

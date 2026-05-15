@@ -989,6 +989,9 @@ export async function killSession(id: string): Promise<void> {
     return
   }
   detachPty(id)
+  // Clear any lazy-restore `pending` flag so the renderer mount effects
+  // don't fire attachSession against a dead entry once kill broadcasts.
+  entry.session.connectionState = undefined
   updateSession(id, 'dead')
 }
 
@@ -1271,6 +1274,11 @@ export async function reviveSession(id: string): Promise<void> {
     return
   }
 
+  // Clear any lazy-restore `pending` flag BEFORE we (re)create the pty —
+  // otherwise a concurrent renderer mount effect could see pending+live pty
+  // and fire attachLocalSession, whose reattachPty would replace the
+  // just-created node-pty and leak the original exit handler.
+  session.connectionState = undefined
   if (hasTmuxSession(id)) {
     reattachPty(id)
   } else {
