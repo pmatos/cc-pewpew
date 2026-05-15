@@ -1214,6 +1214,43 @@ describe('restoreSessions — local lazy materialization', () => {
     expect(state.createPtyCalls).toEqual([])
   })
 
+  // Regression: a prior run can persist connectionState='pending'. If the
+  // next restore marks the session 'dead' (worktree gone, tmux unavailable,
+  // or terminal-state without live tmux), the stale pending flag must not
+  // survive — otherwise the renderer mount effects + attachLocalSession
+  // would try to materialize a session that's supposed to stay dead.
+  it('clears stale connectionState=pending when restoring to dead', async () => {
+    const local = baseLocalSession({
+      id: 'l1',
+      status: 'idle',
+      connectionState: 'pending',
+    })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+
+    sm.restoreSessions()
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('dead')
+    expect(got.connectionState).toBeUndefined()
+  })
+
+  it('clears stale connectionState=pending for terminal-state sessions with no live tmux', async () => {
+    const local = baseLocalSession({
+      id: 'l1',
+      status: 'completed',
+      connectionState: 'pending',
+    })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+
+    sm.restoreSessions()
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('dead')
+    expect(got.connectionState).toBeUndefined()
+  })
+
   it('marks dead when tmux is unavailable', async () => {
     const local = baseLocalSession({ id: 'l1', status: 'idle' })
     mkdirSync(local.worktreePath, { recursive: true })

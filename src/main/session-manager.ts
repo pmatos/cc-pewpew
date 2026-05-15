@@ -2166,6 +2166,14 @@ export function restoreSessions(): void {
         continue
       }
 
+      // Drop any persisted `connectionState`; the lazy-restore branch below
+      // will set it back to 'pending'. Without this, a session that ended up
+      // 'dead' on a later run (worktree gone, tmux unavailable, or completed/
+      // error with no live tmux) would still carry the previous run's
+      // 'pending', causing the renderer mount effects + attachLocalSession to
+      // try to materialize an entry that's supposed to stay terminated.
+      session.connectionState = undefined
+
       if (
         session.status === 'running' ||
         session.status === 'idle' ||
