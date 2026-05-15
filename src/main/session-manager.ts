@@ -989,6 +989,9 @@ export async function killSession(id: string): Promise<void> {
     return
   }
   detachPty(id)
+  // Clear any lazy-restore `pending` flag so the renderer mount effects
+  // don't fire attachSession against a dead entry once kill broadcasts.
+  entry.session.connectionState = undefined
   updateSession(id, 'dead')
 }
 
@@ -1271,6 +1274,11 @@ export async function reviveSession(id: string): Promise<void> {
     return
   }
 
+  // Clear any lazy-restore `pending` flag BEFORE we (re)create the pty —
+  // otherwise a concurrent renderer mount effect could see pending+live pty
+  // and fire attachLocalSession, whose reattachPty would replace the
+  // just-created node-pty and leak the original exit handler.
+  session.connectionState = undefined
   if (hasTmuxSession(id)) {
     reattachPty(id)
   } else {
@@ -1296,6 +1304,58 @@ export async function reviveSession(id: string): Promise<void> {
 function canResumeAgent(session: Session): boolean {
   if (session.tool === 'codex') return !!session.agentSessionId
   return hasClaudeConversationHistory(session.worktreePath)
+}
+
+// On-demand local attach for sessions deferred during restoreSessions().
+// Idempotent: if the pty is already live (or the session is remote/dead),
+// it's a no-op. Renderer calls this when the user opens a pending card so
+// startup doesn't fan out N concurrent agent processes.
+export async function attachLocalSession(id: string): Promise<void> {
+  const entry = sessions.get(id)
+  if (!entry) return
+  const session = entry.session
+  if (session.hostId) return
+  if (session.connectionState !== 'pending') return
+
+  if (!existsSync(session.worktreePath)) {
+    session.connectionState = undefined
+    updateSession(id, 'dead')
+    return
+  }
+
+  try {
+    if (hasTmuxSession(id)) {
+      reattachPty(id)
+    } else {
+      const canResume = canResumeAgent(session)
+      if (!canResume) {
+        console.warn(
+          `Session ${id} (${session.tool}) has no prior conversation; spawning fresh instead of resuming`
+        )
+      }
+      createPty(id, session.worktreePath, {
+        continueSession: canResume,
+        tool: session.tool,
+        agentSessionId: session.agentSessionId,
+      })
+    }
+    session.connectionState = undefined
+    onSessionsChanged()
+  } catch (err) {
+    session.connectionState = undefined
+    updateSession(id, 'dead')
+    throw err
+  }
+}
+
+export async function attachPendingLocalSessions(ids: string[]): Promise<void> {
+  for (const id of ids) {
+    try {
+      await attachLocalSession(id)
+    } catch (err) {
+      console.error(`Failed to attach session ${id}:`, err)
+    }
+  }
 }
 
 export async function removeWorktree(id: string): Promise<void> {
@@ -2091,7 +2151,7 @@ export function restoreSessions(): void {
     // One-time tmux precheck so we don't fire a blocking error modal per
     // session on startup when tmux is missing from PATH.
     const tmuxAvailable = isTmuxAvailable()
-    let recoveredCount = 0
+    let deferredCount = 0
     let skippedForNoTmux = 0
 
     for (const session of data) {
@@ -2114,6 +2174,14 @@ export function restoreSessions(): void {
         continue
       }
 
+      // Drop any persisted `connectionState`; the lazy-restore branch below
+      // will set it back to 'pending'. Without this, a session that ended up
+      // 'dead' on a later run (worktree gone, tmux unavailable, or completed/
+      // error with no live tmux) would still carry the previous run's
+      // 'pending', causing the renderer mount effects + attachLocalSession to
+      // try to materialize an entry that's supposed to stay terminated.
+      session.connectionState = undefined
+
       if (
         session.status === 'running' ||
         session.status === 'idle' ||
@@ -2132,26 +2200,14 @@ export function restoreSessions(): void {
           session.status = 'dead'
           skippedForNoTmux++
         } else {
-          // tmux server lost the session (e.g., PC reboot) but the worktree
-          // survives — auto-recreate and resume the agent conversation.
-          try {
-            const canResume = canResumeAgent(session)
-            if (!canResume) {
-              console.warn(
-                `Session ${session.id} (${session.tool}) has no prior conversation; spawning fresh instead of resuming`
-              )
-            }
-            createPty(session.id, session.worktreePath, {
-              continueSession: canResume,
-              tool: session.tool,
-              agentSessionId: session.agentSessionId,
-            })
-            session.status = resumedStatus
-            recoveredCount++
-          } catch (err) {
-            console.error(`Failed to auto-recover session ${session.id}:`, err)
-            session.status = 'dead'
-          }
+          // Lazy restore (mirrors the remote arm above): mark the session
+          // 'pending' and defer the tmux + agent spawn until the user opens
+          // the card. Spawning all persisted sessions up-front cost ~1 GB
+          // each (claude RSS) and OOM'd the box when many sessions existed.
+          // attachLocalSession() drives the on-demand spawn.
+          session.status = resumedStatus
+          session.connectionState = 'pending'
+          deferredCount++
         }
       } else if (session.status === 'completed' || session.status === 'error') {
         // Terminal states: if the tmux session is gone, the card shouldn't
@@ -2176,8 +2232,8 @@ export function restoreSessions(): void {
       )
     }
 
-    // Reattach ptys after all sessions are in the map. Sessions we just
-    // recovered already have a node-pty spawned by createPty, so the
+    // Reattach ptys after all sessions are in the map. Local sessions
+    // without a live tmux were deferred (connectionState='pending'); the
     // liveTmuxIds filter here correctly skips them.
     for (const session of data) {
       if (
@@ -2192,8 +2248,8 @@ export function restoreSessions(): void {
       }
     }
 
-    if (recoveredCount > 0) {
-      console.log(`Auto-recovered ${recoveredCount} session(s) after reboot`)
+    if (deferredCount > 0) {
+      console.log(`Deferred ${deferredCount} session(s) — will attach on demand`)
     }
 
     // Lazily resolve PR numbers for any restored session that doesn't have one

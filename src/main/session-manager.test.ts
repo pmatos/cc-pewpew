@@ -1166,6 +1166,238 @@ describe('restoreSessions — local path unchanged (AC #10 regression)', () => {
   })
 })
 
+describe('restoreSessions — local lazy materialization', () => {
+  // Spawning every persisted local session up-front cost ~1 GB per claude
+  // process and OOM'd the box when many sessions existed. The fix mirrors
+  // the remote path: mark pending and let attachLocalSession do the work
+  // on first open.
+  it('defers spawn when tmux is gone but worktree survives', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    mkdirSync(local.worktreePath, { recursive: true })
+    state.liveTmuxIds = []
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+
+    sm.restoreSessions()
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('idle')
+    expect(got.connectionState).toBe('pending')
+    expect(state.createPtyCalls).toEqual([])
+    expect(state.reattachPtyCalls).toEqual([])
+  })
+
+  it('preserves needs_input on lazy-restored sessions', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'needs_input' })
+    mkdirSync(local.worktreePath, { recursive: true })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+
+    sm.restoreSessions()
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('needs_input')
+    expect(got.connectionState).toBe('pending')
+    expect(state.createPtyCalls).toEqual([])
+  })
+
+  it('marks dead when worktree is missing', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+
+    sm.restoreSessions()
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('dead')
+    expect(got.connectionState).toBeUndefined()
+    expect(state.createPtyCalls).toEqual([])
+  })
+
+  // Regression: a prior run can persist connectionState='pending'. If the
+  // next restore marks the session 'dead' (worktree gone, tmux unavailable,
+  // or terminal-state without live tmux), the stale pending flag must not
+  // survive — otherwise the renderer mount effects + attachLocalSession
+  // would try to materialize a session that's supposed to stay dead.
+  it('clears stale connectionState=pending when restoring to dead', async () => {
+    const local = baseLocalSession({
+      id: 'l1',
+      status: 'idle',
+      connectionState: 'pending',
+    })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+
+    sm.restoreSessions()
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('dead')
+    expect(got.connectionState).toBeUndefined()
+  })
+
+  it('clears stale connectionState=pending for terminal-state sessions with no live tmux', async () => {
+    const local = baseLocalSession({
+      id: 'l1',
+      status: 'completed',
+      connectionState: 'pending',
+    })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+
+    sm.restoreSessions()
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('dead')
+    expect(got.connectionState).toBeUndefined()
+  })
+
+  it('marks dead when tmux is unavailable', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    mkdirSync(local.worktreePath, { recursive: true })
+    state.tmuxAvailable = false
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+
+    sm.restoreSessions()
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('dead')
+    expect(got.connectionState).toBeUndefined()
+    expect(state.createPtyCalls).toEqual([])
+  })
+})
+
+describe('attachLocalSession', () => {
+  it('spawns the pty when tmux is gone', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    mkdirSync(local.worktreePath, { recursive: true })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    expect(sm.getSessions()[0].connectionState).toBe('pending')
+
+    await sm.attachLocalSession('l1')
+
+    const got = sm.getSessions()[0]
+    expect(got.connectionState).toBeUndefined()
+    expect(got.status).toBe('idle')
+    expect(state.createPtyCalls.map((c) => c.sessionId)).toEqual(['l1'])
+  })
+
+  it('is a no-op when the session is not pending', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    state.liveTmuxIds = ['l1']
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    state.createPtyCalls = []
+    state.reattachPtyCalls = []
+
+    await sm.attachLocalSession('l1')
+
+    expect(state.createPtyCalls).toEqual([])
+    expect(state.reattachPtyCalls).toEqual([])
+  })
+
+  it('is a no-op on remote sessions even if pending', async () => {
+    const remote = baseRemoteSession({ id: 'r1', status: 'idle' })
+    writeSessionsJson([remote])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    expect(sm.getSessions()[0].connectionState).toBe('pending')
+
+    await sm.attachLocalSession('r1')
+
+    expect(state.createPtyCalls).toEqual([])
+    expect(state.reattachPtyCalls).toEqual([])
+    // connectionState must remain pending so reconnectRemoteSession can drive it.
+    expect(sm.getSessions()[0].connectionState).toBe('pending')
+  })
+
+  it('marks dead and clears pending when worktree disappears', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    mkdirSync(local.worktreePath, { recursive: true })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    rmSync(local.worktreePath, { recursive: true, force: true })
+
+    await sm.attachLocalSession('l1')
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('dead')
+    expect(got.connectionState).toBeUndefined()
+    expect(state.createPtyCalls).toEqual([])
+  })
+})
+
+describe('attachPendingLocalSessions', () => {
+  it('materializes pending local sessions and leaves remote pending sessions alone', async () => {
+    const l1 = baseLocalSession({
+      id: 'l1',
+      status: 'idle',
+      worktreePath: join(state.configDir, 'local-wt-1'),
+    })
+    const l2 = baseLocalSession({
+      id: 'l2',
+      status: 'needs_input',
+      worktreePath: join(state.configDir, 'local-wt-2'),
+    })
+    const remote = baseRemoteSession({ id: 'r1', status: 'idle' })
+    mkdirSync(l1.worktreePath, { recursive: true })
+    mkdirSync(l2.worktreePath, { recursive: true })
+    writeSessionsJson([l1, remote, l2])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+
+    await sm.attachPendingLocalSessions(['l1', 'r1', 'l2'])
+
+    expect(state.createPtyCalls.map((c) => c.sessionId)).toEqual(['l1', 'l2'])
+    expect(sm.getSessions().find((s) => s.id === 'l1')?.connectionState).toBeUndefined()
+    expect(sm.getSessions().find((s) => s.id === 'l2')?.connectionState).toBeUndefined()
+    expect(sm.getSessions().find((s) => s.id === 'r1')?.connectionState).toBe('pending')
+  })
+})
+
+describe('kill/revive clears stale connectionState=pending', () => {
+  // Regression: a lazy-restored local session sits in connectionState='pending'.
+  // If the user kills it (or kill→revive in one app run), the prior `pending`
+  // flag must not leak — otherwise a subsequent card/detail mount-effect
+  // attachSession would replace the live node-pty (reviveSession case) or
+  // attempt to attach a dead entry (killSession case).
+  it('killSession clears connectionState on a pending local session', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    mkdirSync(local.worktreePath, { recursive: true })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    expect(sm.getSessions()[0].connectionState).toBe('pending')
+
+    await sm.killSession('l1')
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('dead')
+    expect(got.connectionState).toBeUndefined()
+  })
+
+  it('reviveSession clears connectionState before creating the pty', async () => {
+    const local = baseLocalSession({ id: 'l1', status: 'idle' })
+    mkdirSync(local.worktreePath, { recursive: true })
+    writeSessionsJson([local])
+    const sm = await loadSessionManager()
+    sm.restoreSessions()
+    await sm.killSession('l1')
+    state.createPtyCalls = []
+
+    await sm.reviveSession('l1')
+
+    const got = sm.getSessions()[0]
+    expect(got.status).toBe('idle')
+    expect(got.connectionState).toBeUndefined()
+    expect(state.createPtyCalls.map((c) => c.sessionId)).toEqual(['l1'])
+  })
+})
+
 describe('unexpected pty exit listener', () => {
   it('flips a local session to dead when its pty dies on its own', async () => {
     const local = baseLocalSession({ id: 'l1', status: 'idle' })

@@ -42,6 +42,8 @@ import {
   killSession,
   reviveSession,
   reconnectRemoteSession,
+  attachLocalSession,
+  attachPendingLocalSessions,
   removeWorktree,
   removeSession,
   removeSessionsForHost,
@@ -428,6 +430,15 @@ app.whenReady().then(async () => {
     }
   })
 
+  ipcMain.handle('sessions:attach', async (_event, id: string) => {
+    try {
+      await attachLocalSession(id)
+    } catch (err) {
+      console.error(`Failed to attach session ${id}:`, err)
+      throw err
+    }
+  })
+
   ipcMain.handle('sessions:remove-worktree', async (_event, id: string) => {
     await removeWorktree(id)
   })
@@ -481,7 +492,8 @@ app.whenReady().then(async () => {
     writePty(sessionId, data)
   })
 
-  ipcMain.handle('pty:write-batch', (_event, ids: string[], data: string) => {
+  ipcMain.handle('pty:write-batch', async (_event, ids: string[], data: string) => {
+    await attachPendingLocalSessions(ids)
     for (const id of ids) writePty(id, data)
   })
 

@@ -36,6 +36,19 @@ export default function SwimLanesApp() {
     return unsub
   }, [sessionIds])
 
+  // Local sessions deferred by restoreSessions() materialize their pty on
+  // first open (mirrors DetailPane). Without this, swim lanes opened from
+  // multi-selected restored sessions render inert empty terminals because
+  // there's no tmux/pty yet. attachLocalSession is idempotent on the main
+  // side, so re-firing across sessions updates is safe.
+  useEffect(() => {
+    for (const s of sessions) {
+      if (!s.hostId && s.connectionState === 'pending') {
+        void window.api.attachSession(s.id).catch(() => undefined)
+      }
+    }
+  }, [sessions])
+
   const toggleReview = useCallback((laneId: string) => {
     setLaneFlipCounts((prev) => {
       const next = new Map(prev)

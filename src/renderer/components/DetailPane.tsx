@@ -92,6 +92,16 @@ export default function DetailPane({ sessionId, sessionName, onClose }: Props) {
     return () => document.removeEventListener('keydown', handler, true)
   }, [])
 
+  // Local sessions deferred by restoreSessions() materialize their pty on
+  // first open. SessionCard.openOrSelectSession also fires this, but the
+  // pane can be opened via the `sessions:open-detail` IPC or keyboard, so
+  // we cover that path here too. attachLocalSession is idempotent.
+  useEffect(() => {
+    if (!isRemote && connectionState === 'pending') {
+      void window.api.attachSession(sessionId).catch(() => undefined)
+    }
+  }, [sessionId, isRemote, connectionState])
+
   const handleRevive = async () => {
     setReviving(true)
     try {
